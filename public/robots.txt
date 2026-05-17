@@ -1,0 +1,3 @@
+# Internal CRM — do not index.
+User-agent: *
+Disallow: /

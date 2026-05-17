@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# …but always commit the example so new contributors know which vars exist
+!.env.example
+
+# Claude Code project metadata (local IDE prefs, not for the repo)
+.claude/
 
 # vercel
 .vercel
