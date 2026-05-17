@@ -6,6 +6,9 @@ import { runRenewalCheck } from "@/lib/services/agreement-renewal";
 import { finishDay } from "@/lib/data/daily-stats";
 import { createFeatureRequest, type RequestType } from "@/lib/data/feature-requests";
 import { sendEmail } from "@/lib/services/email";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ChangePasswordSchema, InviteUserSchema } from "@/lib/validation/account";
 import { ROUTES } from "@/lib/constants/routes";
 import { BUSINESS } from "@/lib/constants/branding";
 import { requireUser } from "@/lib/auth/require-user";
@@ -137,4 +140,163 @@ export async function submitFeatureRequestAction(
         err instanceof Error ? err.message : "Failed to submit request",
     };
   }
+}
+
+// ─── Change password ─────────────────────────────────────────────────────
+
+/**
+ * Update the signed-in user's password.
+ *
+ * Flow: verify the current password by attempting a fresh sign-in (Supabase
+ * has no dedicated "verify current password" endpoint), then update via
+ * `auth.updateUser`. The verification step protects against an attacker
+ * with a stolen session cookie silently changing the account password.
+ *
+ * Returns generic error messages on failure — never echo back the password
+ * itself or whether the email is registered (the user is logged in, so
+ * email enumeration isn't a concern here, but stay consistent).
+ */
+export async function changePasswordAction(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const user = await requireUser();
+  if (!user.email) {
+    return {
+      success: false,
+      errors: {},
+      message: "Your account has no email on file — contact the developer.",
+    };
+  }
+
+  const raw = {
+    currentPassword: (formData.get("current_password") as string) ?? "",
+    newPassword: (formData.get("new_password") as string) ?? "",
+    confirmPassword: (formData.get("confirm_password") as string) ?? "",
+  };
+
+  const parsed = ChangePasswordSchema.safeParse(raw);
+  if (!parsed.success) {
+    const errors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0];
+      if (typeof key === "string") {
+        // Map the camelCase schema keys to snake_case form field names so
+        // errors render against the right inputs.
+        const map: Record<string, string> = {
+          currentPassword: "current_password",
+          newPassword: "new_password",
+          confirmPassword: "confirm_password",
+        };
+        errors[map[key] ?? key] = issue.message;
+      }
+    }
+    return { success: false, errors, message: null };
+  }
+
+  const supabase = await createClient();
+
+  // Verify the current password by attempting a sign-in. This re-issues
+  // the session cookie which is fine — same user, same email.
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password: parsed.data.currentPassword,
+  });
+  if (signInError) {
+    return {
+      success: false,
+      errors: { current_password: "Current password is incorrect" },
+      message: null,
+    };
+  }
+
+  // Now update the password.
+  const { error: updateError } = await supabase.auth.updateUser({
+    password: parsed.data.newPassword,
+  });
+  if (updateError) {
+    return {
+      success: false,
+      errors: {},
+      message: updateError.message,
+    };
+  }
+
+  return { success: true, errors: {}, message: "Password updated." };
+}
+
+// ─── Invite a new user ───────────────────────────────────────────────────
+
+/**
+ * Invite a new teammate by email.
+ *
+ * Supabase sends them a magic-link email; clicking it confirms the
+ * account, signs them in, and lands them on the dashboard. They can
+ * set their own password from this Settings page once signed in.
+ *
+ * Requires `SUPABASE_SERVICE_ROLE_KEY` — the admin client throws a clear
+ * error if it's missing so the operator knows what to configure.
+ *
+ * Note: this is a single-tenant CRM with no role distinction — every
+ * invited user gets full access. UI surfaces this clearly.
+ */
+export async function inviteUserAction(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  await requireUser();
+
+  const raw = {
+    email: ((formData.get("email") as string) ?? "").trim().toLowerCase(),
+    fullName: ((formData.get("full_name") as string) ?? "").trim(),
+  };
+
+  const parsed = InviteUserSchema.safeParse(raw);
+  if (!parsed.success) {
+    const errors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0];
+      if (typeof key === "string") {
+        const map: Record<string, string> = { fullName: "full_name" };
+        errors[map[key] ?? key] = issue.message;
+      }
+    }
+    return { success: false, errors, message: null };
+  }
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch (err) {
+    return {
+      success: false,
+      errors: {},
+      message:
+        err instanceof Error
+          ? err.message
+          : "Admin client not configured — set SUPABASE_SERVICE_ROLE_KEY",
+    };
+  }
+
+  const { error } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, {
+    data: parsed.data.fullName ? { full_name: parsed.data.fullName } : undefined,
+  });
+
+  if (error) {
+    // Common Supabase errors here: user already exists, or email
+    // service not configured. Surface the underlying message — useful
+    // for the operator to know whether they need to retry vs reconfigure.
+    return {
+      success: false,
+      errors: {},
+      message: error.message,
+    };
+  }
+
+  revalidatePath(ROUTES.SETTINGS);
+  return {
+    success: true,
+    errors: {},
+    message: `Invitation sent to ${parsed.data.email}.`,
+  };
 }

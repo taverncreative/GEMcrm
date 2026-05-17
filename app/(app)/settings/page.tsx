@@ -4,6 +4,8 @@ import {
   SignOutButton,
 } from "@/components/settings/settings-actions";
 import { FeatureRequestForm } from "@/components/settings/feature-request-form";
+import { ChangePasswordForm } from "@/components/settings/change-password-form";
+import { InviteUserForm } from "@/components/settings/invite-user-form";
 import { getRecentFeatureRequests } from "@/lib/data/feature-requests";
 import { BUSINESS } from "@/lib/constants/branding";
 
@@ -102,6 +104,22 @@ export default async function SettingsPage() {
           <div className="mt-5 border-t border-gray-100 pt-4">
             <SignOutButton />
           </div>
+        </SectionCard>
+
+        {/* Change password — self-service for the signed-in user */}
+        <SectionCard
+          title="Change password"
+          description="Update the password you use to sign in to the CRM."
+        >
+          <ChangePasswordForm />
+        </SectionCard>
+
+        {/* Invite a new teammate */}
+        <SectionCard
+          title="Invite teammate"
+          description="Add someone to your team. They'll get an email link to sign in and set their own password."
+        >
+          <InviteUserForm />
         </SectionCard>
 
         {/* Feature / bug requests — replaces the old "Today" tile */}

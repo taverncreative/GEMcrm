@@ -50,6 +50,7 @@ See `.env.example` for the full list and inline notes. Required in production:
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Settings → API | Safe to expose to browser. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Settings → API | Safe to expose; RLS enforces auth. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → `service_role` | **Server-only — never expose.** Required for Settings → Invite teammate. |
 | `RESEND_API_KEY` | [resend.com](https://resend.com) → API Keys | Used by `lib/services/email.ts`. Missing → emails log to console. |
 | `RESEND_FROM_EMAIL` | Must be a verified Resend sender | Format: `"GEM Services <nate@gemservices.uk>"`. |
 | `CRON_SECRET` | Generated: `openssl rand -hex 32` | Protects `/api/cron/*` endpoints. Vercel cron sends this automatically as `Authorization: Bearer`. |
@@ -133,7 +134,23 @@ Server runs UTC on Vercel; the operator is in the UK. Anywhere you need "today" 
 
 `proxy.ts` redirects unauthenticated visitors to `/login` for everything except auth callbacks + brand assets. Every server action additionally calls `await requireUser()` as defence in depth — if proxy is ever misconfigured, actions still refuse to run.
 
+`requireUser()` reads the session from the request cookie (no network call). Validation of the JWT happens once per request inside `proxy.ts` via `supabase.auth.getUser()` — the second check would be a wasted ~150-300ms round-trip to Supabase.
+
 RLS policies on every table are "Authenticated users full access" — correct for a single-tenant CRM. If multi-tenant ever becomes a need, scope by `auth.uid()` / team id.
+
+### Adding users
+
+Two paths:
+
+- **Settings → Invite teammate** in the CRM UI. Requires `SUPABASE_SERVICE_ROLE_KEY` to be set in env (server-only). Sends an email link via Supabase's `auth.admin.inviteUserByEmail`. The invitee clicks → lands on `/auth/callback` → signed in → dashboard. They can set their own password from Settings → Change password.
+- **Supabase dashboard** → Authentication → Users → "Add user". Manual; useful for the very first user (chicken-and-egg with the invite flow).
+
+For invite links to work in production, Supabase must know the site URL. In your Supabase project: **Authentication → URL Configuration**:
+
+- **Site URL**: `https://your-vercel-domain.vercel.app` (or your custom domain)
+- **Redirect URLs** (allow-list): add `https://your-vercel-domain.vercel.app/auth/callback`
+
+Without this, Supabase will send the invite link to localhost or to the previous project URL, and the recipient won't be able to sign in.
 
 ### Migrations
 
