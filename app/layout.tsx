@@ -32,11 +32,27 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Pull the Supabase host so we can preconnect — the browser kicks off
+  // TCP + TLS in parallel with HTML parsing, so the first data fetch on
+  // every page lands quicker (saves ~100-200ms on cold sessions).
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseHost = supabaseUrl
+    ? new URL(supabaseUrl).origin
+    : null;
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
+      <head>
+        {supabaseHost && (
+          <>
+            <link rel="preconnect" href={supabaseHost} crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href={supabaseHost} />
+          </>
+        )}
+      </head>
       <body className="h-full bg-gray-50 text-gray-900 antialiased">
         {children}
       </body>

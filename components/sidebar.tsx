@@ -138,7 +138,10 @@ export function Sidebar({
               width={220}
               height={64}
               priority
-              unoptimized
+              // Next/Image serves a properly-sized WebP — much smaller than
+              // the source PNG. Was previously `unoptimized` to debug a
+              // prod path issue; no longer needed.
+              sizes="(max-width: 768px) 44px, 200px"
               className={`h-14 w-auto object-contain ${isCollapsed ? "max-w-[44px]" : "max-w-[200px]"}`}
             />
           </Link>
