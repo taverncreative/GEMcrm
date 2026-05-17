@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { getAllJobs } from "@/lib/data/jobs";
 import { formatAddress } from "@/lib/utils/format-address";
+import { formatJobTime } from "@/lib/utils/format-time";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
 import { ROUTES } from "@/lib/constants/routes";
 import { JobsFilter } from "@/components/jobs/jobs-filter";
@@ -89,13 +90,22 @@ async function JobsTable({
                 <td className="px-4 py-3 whitespace-nowrap">
                   <Link
                     href={ROUTES.jobDetail(job.id)}
-                    className="font-medium text-gray-900 hover:text-gray-600"
+                    className="block"
                   >
-                    {new Date(job.job_date).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
+                    <span className="font-medium text-gray-900 hover:text-gray-600">
+                      {new Date(job.job_date).toLocaleDateString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </span>
+                    <span
+                      className={`mt-0.5 block font-mono text-[11px] tabular-nums ${
+                        job.job_time ? "text-gray-600" : "text-gray-400"
+                      }`}
+                    >
+                      {formatJobTime(job.job_time)}
+                    </span>
                   </Link>
                 </td>
                 <td className="px-4 py-3">

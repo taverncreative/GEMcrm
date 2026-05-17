@@ -21,3 +21,28 @@
   --color-ink-soft: #4D4D4C;
   --color-ink-strong: #2A2A29;
 }
+
+/* ─── Mobile-specific guards ──────────────────────────────────────
+ * 1. iOS Safari auto-zooms when the user focuses an input with a
+ *    font-size below 16px (a "feature" to make text legible). The fix
+ *    is to set form controls to 16px on mobile. We override down to
+ *    Tailwind's text-sm (14px) on md+ where there's no zoom risk.
+ *
+ * 2. Belt-and-braces: anything that *would* overflow the viewport
+ *    horizontally gets clipped at the body. This prevents wide tables
+ *    from causing the whole page to scroll sideways while keeping
+ *    `overflow-x-auto` containers (intentional scroll regions) working.
+ * ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+html,
+body {
+  overflow-x: hidden;
+}

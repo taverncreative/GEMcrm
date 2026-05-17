@@ -697,14 +697,17 @@ export function BookingModal({
                     / Time
                   </span>
                 </label>
-                <div className="mt-1 flex gap-2">
+                {/* flex-wrap + min-w-0 so the time input drops below the
+                    date on phones whose intrinsic native date-picker width
+                    would otherwise push it off-screen. */}
+                <div className="mt-1 flex flex-wrap gap-2">
                   <input
                     id="bn-job_date"
                     type="date"
                     value={jobDate}
                     onChange={(e) => setJobDate(e.target.value)}
                     required
-                    className="block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    className="block min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   />
                   <input
                     id="bn-job_time"
@@ -712,7 +715,7 @@ export function BookingModal({
                     value={jobTime}
                     onChange={(e) => setJobTime(e.target.value)}
                     placeholder="All day"
-                    className="block w-32 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    className="block w-28 shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   />
                 </div>
                 {state.errors.job_date && (

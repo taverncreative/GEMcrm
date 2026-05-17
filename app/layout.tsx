@@ -1,7 +1,19 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { BUSINESS } from "@/lib/constants/branding";
+
+export const viewport: Viewport = {
+  // Fit the layout to the device width so phones don't render at a default
+  // 980px desktop width and scale down (which both shrinks text and creates
+  // phantom horizontal scroll on small viewports).
+  width: "device-width",
+  initialScale: 1,
+  // Allow the user to pinch-zoom for accessibility — we just don't want
+  // iOS to AUTO-zoom on input focus. That's solved separately by ensuring
+  // input font-size is ≥16px on mobile (see globals.css).
+  maximumScale: 5,
+};
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
