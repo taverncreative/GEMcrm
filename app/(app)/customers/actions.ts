@@ -60,10 +60,21 @@ export async function createCustomerAction(
         errors[key] = issue.message;
       }
     }
-    // Always set a top-level message too — otherwise a validation error
-    // on a hidden / not-yet-rendered field (e.g. the user is on the
-    // domestic tab but a commercial-only field rejected) would leave
-    // the user with no visible indication that anything went wrong.
+    // Diagnostic log — surfaces in Vercel runtime logs. Helps us see
+    // exactly which field rejected when a form submit silently fails
+    // (e.g. a hidden field on the inactive customer-type tab).
+    console.error(
+      "[createCustomerAction] validation failed",
+      JSON.stringify({
+        customer_type: raw.customer_type,
+        errors,
+        issues: result.error.issues.map((i) => ({
+          path: i.path,
+          code: i.code,
+          message: i.message,
+        })),
+      })
+    );
     return {
       success: false,
       errors,
@@ -74,6 +85,7 @@ export async function createCustomerAction(
   try {
     await createCustomer(result.data);
   } catch (err) {
+    console.error("[createCustomerAction] createCustomer threw:", err);
     return {
       success: false,
       errors: {},
@@ -81,6 +93,9 @@ export async function createCustomerAction(
     };
   }
 
+  // Invalidate the customers list cache so the new row appears
+  // immediately after the redirect lands on /customers.
+  revalidatePath(ROUTES.CUSTOMERS);
   redirect(ROUTES.CUSTOMERS);
 }
 
