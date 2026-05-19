@@ -54,7 +54,6 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
       <div className="space-y-2 md:hidden">
         {rows.map((c) => {
           const isCommercial = c.customer_type === "commercial";
-          const pmaRequired = isCommercial && !c.hasActiveAgreement;
           const upcoming = c.upcomingJob
             ? `Next ${formatDate(c.upcomingJob.job_date)}`
             : null;
@@ -110,7 +109,7 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
                   <span className="truncate">{formatAddress(c.primarySite)}</span>
                 </p>
               )}
-              {(upcoming || pmaRequired || c.google_review_received) && (
+              {(upcoming || c.hasActiveAgreement || c.google_review_received) && (
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   {upcoming && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
@@ -126,10 +125,10 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
                       {upcoming}
                     </span>
                   )}
-                  {pmaRequired && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
-                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                      PMA required
+                  {c.hasActiveAgreement && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-medium text-brand-darker">
+                      <span className="h-1.5 w-1.5 rounded-full bg-brand" />
+                      On PMA
                     </span>
                   )}
                   {c.google_review_received && (
@@ -184,22 +183,9 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
             <tbody className="divide-y divide-gray-50">
               {rows.map((c) => {
                 const isCommercial = c.customer_type === "commercial";
-                // Commercial customers without an active PMA get a "Required"
-                // pill instead of an em-dash so it pops in the table.
-                const pmaCommercialMissing =
-                  isCommercial && !c.hasActiveAgreement;
-                const pmaCellContent = !isCommercial && !c.hasActiveAgreement
-                  ? "N/A"
-                  : c.hasActiveAgreement
-                  ? "Active"
-                  : "Required";
-                const pmaCellClass = !isCommercial && !c.hasActiveAgreement
-                  ? "text-gray-300"
-                  : c.hasActiveAgreement
-                  ? "text-brand-darker font-medium"
-                  : pmaCommercialMissing
-                  ? ""
-                  : "text-gray-400";
+                // PMA column: positive pill if active, em-dash otherwise.
+                // PMAs are optional for any customer type — only a chase
+                // item once contracted work begins, so no "required" framing.
                 const companyCell =
                   c.company_name ?? (isCommercial ? "—" : "N/A");
                 return (
@@ -263,16 +249,14 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
                           c.latestJobCallType
                         : "—"}
                     </td>
-                    <td
-                      className={`whitespace-nowrap px-4 py-3 ${pmaCellClass}`}
-                    >
-                      {pmaCommercialMissing ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                          Required
+                    <td className="whitespace-nowrap px-4 py-3">
+                      {c.hasActiveAgreement ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 text-xs font-medium text-brand-darker">
+                          <span className="h-1.5 w-1.5 rounded-full bg-brand" />
+                          On PMA
                         </span>
                       ) : (
-                        pmaCellContent
+                        <span className="text-gray-300">—</span>
                       )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-gray-700">

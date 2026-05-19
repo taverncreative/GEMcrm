@@ -200,33 +200,20 @@ export function CustomerSidePanel({
 
           {detail && (
             <div className="space-y-6">
-              {/* PMA banner — two flavours based on customer type:
-                  - Commercial without a PMA: amber "required" framing.
-                    Commercial customers should always be on an agreement,
-                    so we chase this prominently.
-                  - Domestic without a PMA: brand-soft "set one up?"
-                    framing. Domestic customers CAN have a PMA (regular
-                    callouts, holiday-home contracts etc) — we just don't
-                    treat its absence as a problem.
-                  Both flavours link to the same site-page agreement form,
-                  which doesn't gate by customer type. */}
+              {/* PMA prompt — same soft framing for both customer types.
+                  PMAs are a contract framework for recurring work; they're
+                  optional for one-off jobs regardless of whether the
+                  customer is commercial or domestic. Surfaces only when
+                  no active agreement exists. */}
               {!detail.agreements.some((a) => a.status === "active") &&
                 detail.sites[0] && (
                   <Link
                     href={`${ROUTES.siteDetail(detail.sites[0].id)}#agreements`}
-                    className={
-                      detail.customer.customer_type === "commercial"
-                        ? "block rounded-xl border border-amber-200 bg-amber-50 p-3 hover:bg-amber-100"
-                        : "block rounded-xl border border-brand-soft bg-brand-soft/40 p-3 hover:bg-brand-soft"
-                    }
+                    className="block rounded-xl border border-brand-soft bg-brand-soft/40 p-3 hover:bg-brand-soft"
                   >
                     <div className="flex items-start gap-2">
                       <svg
-                        className={`mt-0.5 h-4 w-4 shrink-0 ${
-                          detail.customer.customer_type === "commercial"
-                            ? "text-amber-600"
-                            : "text-brand-darker"
-                        }`}
+                        className="mt-0.5 h-4 w-4 shrink-0 text-brand-darker"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -235,28 +222,13 @@ export function CustomerSidePanel({
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
                       </svg>
                       <div className="min-w-0 flex-1">
-                        {detail.customer.customer_type === "commercial" ? (
-                          <>
-                            <p className="text-sm font-medium text-amber-900">
-                              Pest Management Agreement missing
-                            </p>
-                            <p className="mt-0.5 text-xs text-amber-700">
-                              Commercial customers should have an active PMA.
-                              Set one up from the site page →
-                            </p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-sm font-medium text-brand-darker">
-                              Set up a Pest Management Agreement?
-                            </p>
-                            <p className="mt-0.5 text-xs text-brand-darker/80">
-                              Recurring visits, fixed annual fee. Worth it
-                              for regular callouts or properties with ongoing
-                              risk →
-                            </p>
-                          </>
-                        )}
+                        <p className="text-sm font-medium text-brand-darker">
+                          Set up a Pest Management Agreement?
+                        </p>
+                        <p className="mt-0.5 text-xs text-brand-darker/80">
+                          Right for recurring contracted work — fixed visit
+                          schedule, annual fee. Skip it for one-off jobs.
+                        </p>
                       </div>
                     </div>
                   </Link>

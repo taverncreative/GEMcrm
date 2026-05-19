@@ -17,7 +17,6 @@ import { getExpiringAgreements } from "@/lib/data/agreements";
 import { getRevenueStats } from "@/lib/data/invoices";
 import { getDailyStats } from "@/lib/data/daily-stats";
 import { getReviewRequestCandidates } from "@/lib/data/reviews";
-import { getCommercialCustomersWithoutPma } from "@/lib/data/commercial-without-pma";
 import { DailySummary } from "@/components/dashboard/daily-summary";
 import { OverdueTasks } from "@/components/dashboard/overdue-tasks";
 import { ServiceSheetsToFill } from "@/components/dashboard/service-sheets-to-fill";
@@ -28,7 +27,6 @@ import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { CustomersToContact } from "@/components/dashboard/customers-to-contact";
 import { RevenueStatsWidget } from "@/components/dashboard/revenue-stats";
 import { ReviewRequests } from "@/components/dashboard/review-requests";
-import { CommercialWithoutPma } from "@/components/dashboard/commercial-without-pma";
 import { WidgetFrame } from "@/components/dashboard/widget-frame";
 import { DashboardCustomisationBar } from "@/components/dashboard/dashboard-customisation-bar";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
@@ -75,7 +73,6 @@ async function DashboardWidgets() {
     revenueStats,
     dailyStats,
     reviewCandidates,
-    commercialWithoutPma,
     calendarJobs,
     calendarTasks,
   ] = await Promise.all([
@@ -91,7 +88,6 @@ async function DashboardWidgets() {
     getRevenueStats(),
     getDailyStats(),
     getReviewRequestCandidates(10),
-    getCommercialCustomersWithoutPma(10),
     getJobsInRange(dateUk(calendarStart), dateUk(calendarEnd)),
     getTasksInRange(dateUk(calendarStart), dateUk(calendarEnd)),
   ]);
@@ -198,14 +194,6 @@ async function DashboardWidgets() {
                 title="Customers to contact"
               >
                 <CustomersToContact tasks={contactTasks} />
-              </WidgetFrame>
-            ),
-          },
-          {
-            id: "commercial-without-pma",
-            node: (
-              <WidgetFrame id="commercial-without-pma" title="PMA required">
-                <CommercialWithoutPma customers={commercialWithoutPma} />
               </WidgetFrame>
             ),
           },

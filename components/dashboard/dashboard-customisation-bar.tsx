@@ -23,7 +23,6 @@ export const WIDGET_REGISTRY = [
   { id: "upcoming-visits", title: "Upcoming visits", desktopOnly: false },
   { id: "review-requests", title: "Request review", desktopOnly: true },
   { id: "customers-to-contact", title: "Customers to contact", desktopOnly: false },
-  { id: "commercial-without-pma", title: "PMA required", desktopOnly: true },
   { id: "pma-renewals", title: "PMA renewals", desktopOnly: true },
   { id: "overdue-tasks", title: "Overdue tasks", desktopOnly: false },
   { id: "recent-activity", title: "Recent activity", desktopOnly: true },
