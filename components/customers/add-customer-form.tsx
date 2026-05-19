@@ -178,11 +178,18 @@ export function AddCustomerForm() {
               <label htmlFor="website" className={labelClass}>
                 Website
               </label>
+              {/* type="text" not "url" — browser URL validation rejects
+                  "example.com" without a protocol; our schema accepts
+                  bare domains and auto-prepends https:// server-side. */}
               <input
                 id="website"
                 name="website"
-                type="url"
-                placeholder="https://example.com"
+                type="text"
+                inputMode="url"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="example.com"
                 className={inputClass}
               />
               {state.errors.website && (

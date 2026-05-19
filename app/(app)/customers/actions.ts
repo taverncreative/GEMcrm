@@ -22,23 +22,32 @@ export async function createCustomerAction(
   formData: FormData
 ): Promise<ActionState> {
   await requireUser();
+
+  // Normalise missing fields to "" rather than null. When the operator
+  // picks "Domestic", the form hides company_name / position / website,
+  // so formData.get() returns null for those. The Zod schema's optional
+  // string fields accept undefined but not null, so passing null caused
+  // a silent validation failure on fields that weren't even visible —
+  // i.e. the form appeared to do nothing on submit.
+  const str = (key: string): string =>
+    (formData.get(key) as string | null) ?? "";
+
   const raw = {
-    name: formData.get("name") as string,
-    company_name: formData.get("company_name") as string,
-    position: formData.get("position") as string,
-    email: formData.get("email") as string,
-    phone: formData.get("phone") as string,
-    mobile: formData.get("mobile") as string,
-    address_line_1: formData.get("address_line_1") as string,
-    address_line_2: formData.get("address_line_2") as string,
-    town: formData.get("town") as string,
-    county: formData.get("county") as string,
-    postcode: formData.get("postcode") as string,
-    website: formData.get("website") as string,
-    notes: formData.get("notes") as string,
-    annual_contract_value:
-      (formData.get("annual_contract_value") as string) || "",
-    customer_type: (formData.get("customer_type") as string) || "commercial",
+    name: str("name"),
+    company_name: str("company_name"),
+    position: str("position"),
+    email: str("email"),
+    phone: str("phone"),
+    mobile: str("mobile"),
+    address_line_1: str("address_line_1"),
+    address_line_2: str("address_line_2"),
+    town: str("town"),
+    county: str("county"),
+    postcode: str("postcode"),
+    website: str("website"),
+    notes: str("notes"),
+    annual_contract_value: str("annual_contract_value"),
+    customer_type: str("customer_type") || "commercial",
   };
 
   const result = CustomerSchema.safeParse(raw);
@@ -51,7 +60,15 @@ export async function createCustomerAction(
         errors[key] = issue.message;
       }
     }
-    return { success: false, errors, message: null };
+    // Always set a top-level message too — otherwise a validation error
+    // on a hidden / not-yet-rendered field (e.g. the user is on the
+    // domestic tab but a commercial-only field rejected) would leave
+    // the user with no visible indication that anything went wrong.
+    return {
+      success: false,
+      errors,
+      message: "Please check the form for errors.",
+    };
   }
 
   try {
