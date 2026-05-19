@@ -147,10 +147,36 @@ export function BookingModal({
         if (!presetSite && s.length > 0) {
           // Sites are ordered newest-first; default to the most recent.
           setSelectedSite(s[0]);
+        } else if (s.length === 0) {
+          // No sites yet — fall back to the customer's registered address
+          // if they have one. Pre-fills the new-site form so the operator
+          // just has to hit "Add Booking" instead of re-typing the address.
+          prefillSiteFromCustomer(presetCustomer);
         }
       });
     }
   }, [open, presetCustomer, presetSite]);
+
+  /** When a customer has no sites but the customer record itself has an
+   *  address, swing the form into "new site" mode and pre-fill it from
+   *  the customer record. Saves the operator from re-typing what they
+   *  already entered when adding the customer. */
+  function prefillSiteFromCustomer(c: Customer) {
+    if (
+      !c.address_line_1?.trim() &&
+      !c.town?.trim() &&
+      !c.postcode?.trim()
+    ) {
+      // No address on the customer record either — leave in existing mode.
+      return;
+    }
+    setSiteMode("new");
+    setNewSiteLine1(c.address_line_1 ?? "");
+    setNewSiteLine2(c.address_line_2 ?? "");
+    setNewSiteTown(c.town ?? "");
+    setNewSiteCounty(c.county ?? "");
+    setNewSitePostcode(c.postcode ?? "");
+  }
 
   // Close + refresh on successful submission.
   useEffect(() => {
@@ -177,12 +203,20 @@ export function BookingModal({
   const pickCustomer = useCallback(async (c: Customer) => {
     setSelectedCustomer(c);
     setSelectedSite(null);
+    setSiteMode("existing");
     setLoadingSites(true);
     const list = await getSitesForCustomerAction(c.id);
     setSites(list);
     setLoadingSites(false);
-    // Always auto-pick the most recently created site.
-    if (list.length > 0) setSelectedSite(list[0]);
+    if (list.length > 0) {
+      // Auto-pick the most recently created site.
+      setSelectedSite(list[0]);
+    } else {
+      // Customer has no sites — try to pre-fill from their registered
+      // address so a fresh "+ Add site" form isn't blank.
+      prefillSiteFromCustomer(c);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const togglePest = useCallback((pest: string) => {

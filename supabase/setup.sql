@@ -492,6 +492,33 @@ alter table jobs add column if not exists job_time time;
 
 
 -- ============================================================
+-- 028: Backfill sites from existing customers' registered addresses
+-- ============================================================
+insert into sites (
+  customer_id,
+  address_line_1,
+  address_line_2,
+  town,
+  county,
+  postcode
+)
+select
+  c.id,
+  c.address_line_1,
+  c.address_line_2,
+  c.town,
+  c.county,
+  c.postcode
+from customers c
+where c.address_line_1 is not null and c.address_line_1 <> ''
+  and c.town           is not null and c.town           <> ''
+  and c.postcode       is not null and c.postcode       <> ''
+  and not exists (
+    select 1 from sites s where s.customer_id = c.id
+  );
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)
