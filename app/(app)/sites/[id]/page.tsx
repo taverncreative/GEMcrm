@@ -175,6 +175,7 @@ export default async function SiteDetailPage({ params }: SiteDetailPageProps) {
             )}
           </SectionCard>
 
+          <div id="agreements" />
           <SectionCard title={`Agreements (${agreements.length})`}>
             {agreements.length === 0 ? (
               <p className="mb-4 text-sm text-gray-400">No agreements for this site.</p>

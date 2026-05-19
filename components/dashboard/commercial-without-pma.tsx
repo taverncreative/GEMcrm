@@ -7,8 +7,13 @@ interface CommercialWithoutPmaProps {
 }
 
 /**
- * Lists commercial customers missing a Pest Management Agreement so the
- * operator can chase them up. Hidden entirely when empty.
+ * Lists **commercial** customers missing a Pest Management Agreement so
+ * the operator can chase them up. Domestic customers are not shown here
+ * — a PMA is optional for them, not required, so their absence isn't a
+ * chase item. Domestic customers who *do* have a PMA still show up in
+ * the PMA Renewals widget alongside commercial ones.
+ *
+ * Hidden entirely when empty.
  */
 export function CommercialWithoutPma({ customers }: CommercialWithoutPmaProps) {
   if (customers.length === 0) {

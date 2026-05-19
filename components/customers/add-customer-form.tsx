@@ -11,8 +11,10 @@ import { ROUTES } from "@/lib/constants/routes";
  *
  * For commercial customers we collect a fuller contact set (company,
  * position, mobile, billing/registered address, website, notes) because
- * those records need to support an invoice + a Pest Management Agreement.
- * For domestic, we keep it light — name + the basics, plus optional notes.
+ * those records typically need to support an invoice + a Pest Management
+ * Agreement. For domestic we keep the form lighter — name + basics, plus
+ * optional notes. Both customer types can still have a PMA set up later
+ * from the side panel; commercial just makes it a stronger expectation.
  */
 export function AddCustomerForm() {
   const [state, formAction, isPending] = useActionState(
@@ -51,11 +53,17 @@ export function AddCustomerForm() {
             </button>
           ))}
         </div>
-        {isCommercial && (
+        {isCommercial ? (
           <p className="mt-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Commercial customers should have a Pest Management Agreement.
-            You can set this up later from the customer&apos;s side panel —
-            we&apos;ll prompt you if it&apos;s missing.
+            Commercial customers should have a Pest Management Agreement. You
+            can set one up after creating the customer — we&apos;ll prompt
+            you from their side panel until you do.
+          </p>
+        ) : (
+          <p className="mt-2 rounded-lg border border-brand-soft bg-brand-soft/50 px-3 py-2 text-xs text-brand-darker">
+            Pest Management Agreements aren&apos;t required for domestic
+            customers, but you can still set one up — useful for properties
+            with ongoing risk or customers who want regular scheduled visits.
           </p>
         )}
       </div>

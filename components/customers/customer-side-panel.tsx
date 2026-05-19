@@ -200,29 +200,63 @@ export function CustomerSidePanel({
 
           {detail && (
             <div className="space-y-6">
-              {/* PMA-missing banner — only for commercial customers without
-                  an active agreement. The agreement is operationally important
-                  so we surface it prominently rather than burying it in the
-                  suggestions list. */}
-              {detail.customer.customer_type === "commercial" &&
-                !detail.agreements.some((a) => a.status === "active") &&
+              {/* PMA banner — two flavours based on customer type:
+                  - Commercial without a PMA: amber "required" framing.
+                    Commercial customers should always be on an agreement,
+                    so we chase this prominently.
+                  - Domestic without a PMA: brand-soft "set one up?"
+                    framing. Domestic customers CAN have a PMA (regular
+                    callouts, holiday-home contracts etc) — we just don't
+                    treat its absence as a problem.
+                  Both flavours link to the same site-page agreement form,
+                  which doesn't gate by customer type. */}
+              {!detail.agreements.some((a) => a.status === "active") &&
                 detail.sites[0] && (
                   <Link
-                    href={`${ROUTES.siteDetail(detail.sites[0].id)}#booking`}
-                    className="block rounded-xl border border-amber-200 bg-amber-50 p-3 hover:bg-amber-100"
+                    href={`${ROUTES.siteDetail(detail.sites[0].id)}#agreements`}
+                    className={
+                      detail.customer.customer_type === "commercial"
+                        ? "block rounded-xl border border-amber-200 bg-amber-50 p-3 hover:bg-amber-100"
+                        : "block rounded-xl border border-brand-soft bg-brand-soft/40 p-3 hover:bg-brand-soft"
+                    }
                   >
                     <div className="flex items-start gap-2">
-                      <svg className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                      <svg
+                        className={`mt-0.5 h-4 w-4 shrink-0 ${
+                          detail.customer.customer_type === "commercial"
+                            ? "text-amber-600"
+                            : "text-brand-darker"
+                        }`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
                       </svg>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-amber-900">
-                          Pest Management Agreement missing
-                        </p>
-                        <p className="mt-0.5 text-xs text-amber-700">
-                          Commercial customers should have an active PMA. Set
-                          one up from the site page →
-                        </p>
+                        {detail.customer.customer_type === "commercial" ? (
+                          <>
+                            <p className="text-sm font-medium text-amber-900">
+                              Pest Management Agreement missing
+                            </p>
+                            <p className="mt-0.5 text-xs text-amber-700">
+                              Commercial customers should have an active PMA.
+                              Set one up from the site page →
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-sm font-medium text-brand-darker">
+                              Set up a Pest Management Agreement?
+                            </p>
+                            <p className="mt-0.5 text-xs text-brand-darker/80">
+                              Recurring visits, fixed annual fee. Worth it
+                              for regular callouts or properties with ongoing
+                              risk →
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
                   </Link>
@@ -471,20 +505,15 @@ export function CustomerSidePanel({
                 const agreementsMissingPdf = detail.agreements.filter(
                   (a) => a.status === "active" && !a.contract_pdf_url
                 );
-                // Domestic with no agreement at all (only "relevant" when there's history)
-                const noActiveAgreement =
-                  detail.agreements.filter((a) => a.status === "active")
-                    .length === 0;
-                const suggestAgreement =
-                  noActiveAgreement &&
-                  detail.pastJobs.filter((j) => j.job_status === "completed")
-                    .length >= 2;
+                // Note: the previous "Consider a PMA (after 2+ completed
+                // jobs)" suggestion is gone — the new top-of-panel banner
+                // surfaces this for any customer without an active PMA,
+                // commercial or domestic. Don't duplicate.
 
                 const suggestionCount =
                   sheetsToFill.length +
                   reportsToGenerate.length +
-                  agreementsMissingPdf.length +
-                  (suggestAgreement ? 1 : 0);
+                  agreementsMissingPdf.length;
 
                 if (suggestionCount === 0) return null;
 
@@ -551,26 +580,6 @@ export function CustomerSidePanel({
                           </Link>
                         </li>
                       ))}
-                      {suggestAgreement && detail.sites[0] && (
-                        <li>
-                          <Link
-                            href={`${ROUTES.siteDetail(detail.sites[0].id)}#booking`}
-                            className="flex items-center justify-between gap-2 rounded-lg border border-brand-soft bg-brand-soft px-3 py-2 hover:bg-brand-soft"
-                          >
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-brand-darker">
-                                Consider a Pest Management Agreement
-                              </p>
-                              <p className="text-xs text-brand-darker">
-                                Regular customer — could move to a contract
-                              </p>
-                            </div>
-                            <span className="text-xs font-medium text-brand-darker">
-                              Open →
-                            </span>
-                          </Link>
-                        </li>
-                      )}
                     </ul>
                   </Section>
                 );
