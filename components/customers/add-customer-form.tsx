@@ -18,12 +18,33 @@ import { ROUTES } from "@/lib/constants/routes";
  * recurring work and are optional for both customer types — they can
  * be set up from the side panel any time after the customer exists.
  */
+interface ExtraSite {
+  address_line_1: string;
+  address_line_2: string;
+  town: string;
+  county: string;
+  postcode: string;
+}
+
+function emptyExtraSite(): ExtraSite {
+  return {
+    address_line_1: "",
+    address_line_2: "",
+    town: "",
+    county: "",
+    postcode: "",
+  };
+}
+
 export function AddCustomerForm() {
   const [state, formAction, isPending] = useActionState(
     createCustomerAction,
     INITIAL_ACTION_STATE
   );
   const [type, setType] = useState<"commercial" | "domestic">("commercial");
+  // Additional sites only relevant for commercial customers (multiple
+  // locations). For domestic the primary address is the single site.
+  const [extraSites, setExtraSites] = useState<ExtraSite[]>([]);
 
   const isCommercial = type === "commercial";
   const inputClass =
@@ -296,10 +317,169 @@ export function AddCustomerForm() {
         </div>
         <p className="text-xs text-gray-400">
           {isCommercial
-            ? "Used on invoices when an invoice address isn't set on a specific agreement. Site addresses for the actual visits are added separately."
-            : "Optional — handy to have on file for invoices and follow-up letters."}
+            ? "Used on invoices, and also saved as the primary service location. Add more locations below if the business has several sites."
+            : "Saved as the address where visits will happen. You can edit it later from the customer page."}
         </p>
       </section>
+
+      {/* ── Additional service locations (commercial only) ──
+          For businesses with multiple sites. Each row becomes a separate
+          `sites` record, so bookings can be assigned to whichever
+          location applies. */}
+      {isCommercial && (
+        <section className="space-y-4">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+            Additional service locations
+          </h3>
+          {extraSites.length === 0 ? (
+            <p className="text-xs text-gray-400">
+              Just the one location? Skip this. Add more if the business
+              has multiple sites that need treatment.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {extraSites.map((site, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg border border-gray-200 bg-gray-50 p-3"
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-medium text-gray-600">
+                      Location {i + 2}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExtraSites((prev) =>
+                          prev.filter((_, idx) => idx !== i)
+                        )
+                      }
+                      className="text-xs text-red-600 hover:text-red-800"
+                    >
+                      × Remove
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
+                    <div className="sm:col-span-6">
+                      <label className={labelClass}>Address line 1</label>
+                      <input
+                        type="text"
+                        value={site.address_line_1}
+                        onChange={(e) =>
+                          setExtraSites((prev) =>
+                            prev.map((s, idx) =>
+                              idx === i
+                                ? { ...s, address_line_1: e.target.value }
+                                : s
+                            )
+                          )
+                        }
+                        placeholder="Street / building"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div className="sm:col-span-6">
+                      <label className={labelClass}>Address line 2</label>
+                      <input
+                        type="text"
+                        value={site.address_line_2}
+                        onChange={(e) =>
+                          setExtraSites((prev) =>
+                            prev.map((s, idx) =>
+                              idx === i
+                                ? { ...s, address_line_2: e.target.value }
+                                : s
+                            )
+                          )
+                        }
+                        placeholder="Apartment, unit, etc. (optional)"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div className="sm:col-span-3">
+                      <label className={labelClass}>Town / city</label>
+                      <input
+                        type="text"
+                        value={site.town}
+                        onChange={(e) =>
+                          setExtraSites((prev) =>
+                            prev.map((s, idx) =>
+                              idx === i ? { ...s, town: e.target.value } : s
+                            )
+                          )
+                        }
+                        placeholder="e.g. Maidstone"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div className="sm:col-span-3">
+                      <label className={labelClass}>County</label>
+                      <input
+                        type="text"
+                        value={site.county}
+                        onChange={(e) =>
+                          setExtraSites((prev) =>
+                            prev.map((s, idx) =>
+                              idx === i
+                                ? { ...s, county: e.target.value }
+                                : s
+                            )
+                          )
+                        }
+                        placeholder="e.g. Kent"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className={labelClass}>Postcode</label>
+                      <input
+                        type="text"
+                        value={site.postcode}
+                        onChange={(e) =>
+                          setExtraSites((prev) =>
+                            prev.map((s, idx) =>
+                              idx === i
+                                ? { ...s, postcode: e.target.value }
+                                : s
+                            )
+                          )
+                        }
+                        placeholder="ME14 1XX"
+                        className={`${inputClass} uppercase`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() =>
+              setExtraSites((prev) => [...prev, emptyExtraSite()])
+            }
+            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-xs font-medium text-gray-600 hover:border-brand hover:text-brand-darker"
+          >
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add another location
+          </button>
+          {/* JSON-encoded extras travel through FormData as a single
+              field; the action parses + validates each. */}
+          <input
+            type="hidden"
+            name="additional_sites"
+            value={JSON.stringify(extraSites)}
+          />
+        </section>
+      )}
 
       {/* ── Notes ── */}
       <section className="space-y-2">

@@ -82,8 +82,49 @@ export async function createCustomerAction(
     };
   }
 
+  // Parse + sanity-check any additional service locations submitted by
+  // the form (commercial customers can add multiple). Each entry uses
+  // the same five address fields; we keep only the ones with enough
+  // address to be a useful site (line 1 + town + postcode at minimum).
+  const additionalSites: Array<{
+    address_line_1: string;
+    address_line_2: string;
+    town: string;
+    county: string;
+    postcode: string;
+  }> = [];
+
+  const additionalSitesRaw = str("additional_sites");
+  if (additionalSitesRaw) {
+    try {
+      const parsed: unknown = JSON.parse(additionalSitesRaw);
+      if (Array.isArray(parsed)) {
+        for (const entry of parsed) {
+          if (entry && typeof entry === "object") {
+            const e = entry as Record<string, unknown>;
+            const site = {
+              address_line_1: typeof e.address_line_1 === "string" ? e.address_line_1 : "",
+              address_line_2: typeof e.address_line_2 === "string" ? e.address_line_2 : "",
+              town: typeof e.town === "string" ? e.town : "",
+              county: typeof e.county === "string" ? e.county : "",
+              postcode: typeof e.postcode === "string" ? e.postcode : "",
+            };
+            // Skip silently if address is too sparse to be useful — the
+            // operator may have clicked "Add location" but not filled it in.
+            if (site.address_line_1.trim() && site.town.trim() && site.postcode.trim()) {
+              additionalSites.push(site);
+            }
+          }
+        }
+      }
+    } catch {
+      // Malformed JSON — ignore, save customer without extras.
+      console.error("[createCustomerAction] additional_sites JSON parse failed");
+    }
+  }
+
   try {
-    await createCustomer(result.data);
+    await createCustomer(result.data, additionalSites);
   } catch (err) {
     console.error("[createCustomerAction] createCustomer threw:", err);
     return {

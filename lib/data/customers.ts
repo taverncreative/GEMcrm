@@ -57,7 +57,46 @@ export async function getCustomerById(id: string): Promise<Customer | null> {
   return data;
 }
 
-export async function createCustomer(input: CustomerInput): Promise<Customer> {
+/**
+ * Optional sites to create alongside a customer. Mirrors the columns we
+ * store on the `sites` table (and matches `SiteInput` from validation),
+ * but each field is independently optional here — the action upstream
+ * is responsible for deciding which rows are "filled enough" to insert.
+ */
+export interface SiteInputLoose {
+  address_line_1?: string;
+  address_line_2?: string;
+  town?: string;
+  county?: string;
+  postcode?: string;
+}
+
+/** True when the address has enough to be a useful site (line 1 + town +
+ *  postcode at minimum — county is often omitted in UK addresses). */
+function hasUsableSiteAddress(input: SiteInputLoose): boolean {
+  return Boolean(
+    emptyToNull(input.address_line_1) &&
+      emptyToNull(input.town) &&
+      emptyToNull(input.postcode)
+  );
+}
+
+/** Row shape for inserting a site — used after we've decided to insert. */
+function siteRow(customerId: string, input: SiteInputLoose) {
+  return {
+    customer_id: customerId,
+    address_line_1: emptyToNull(input.address_line_1),
+    address_line_2: emptyToNull(input.address_line_2),
+    town: emptyToNull(input.town),
+    county: emptyToNull(input.county),
+    postcode: emptyToNull(input.postcode)?.toUpperCase() ?? null,
+  };
+}
+
+export async function createCustomer(
+  input: CustomerInput,
+  additionalSites: SiteInputLoose[] = []
+): Promise<Customer> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("customers")
@@ -88,6 +127,41 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
   if (error) {
     console.error("[createCustomer]", error.code, error.message);
     throw new Error(`Failed to create customer: ${error.message}`);
+  }
+
+  // Auto-create sites from the address fields we collected. For domestic
+  // customers this is "the home where service happens"; for commercial it
+  // doubles as the registered address and the primary service location.
+  // Subsequent rows in `additionalSites` come from commercial customers
+  // with multiple locations (added inline on the create form).
+  //
+  // Each row is independent — we insert any that have enough address to
+  // be useful and silently skip the rest. We don't fail the whole create
+  // if a site insert fails (the customer already exists at this point —
+  // the operator can add sites later from the customer page).
+  const candidates: SiteInputLoose[] = [
+    {
+      address_line_1: input.address_line_1,
+      address_line_2: input.address_line_2,
+      town: input.town,
+      county: input.county,
+      postcode: input.postcode,
+    },
+    ...additionalSites,
+  ].filter(hasUsableSiteAddress);
+
+  if (candidates.length > 0) {
+    const { error: sitesError } = await supabase
+      .from("sites")
+      .insert(candidates.map((s) => siteRow(data.id, s)));
+    if (sitesError) {
+      console.error(
+        "[createCustomer] auto-site insert failed (customer was created):",
+        sitesError.code,
+        sitesError.message
+      );
+      // Don't throw — customer is saved; operator can add the site later.
+    }
   }
 
   return data;
