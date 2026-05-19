@@ -260,7 +260,9 @@ export function CustomerSidePanel({
                 </button>
               </div>
 
-              {/* Quick info */}
+              {/* Quick info — every field is always rendered, even when
+                  blank, so the operator can see at a glance what's on file
+                  vs what's missing. Empty values show as em-dashes. */}
               <Section title="Details">
                 <dl className="space-y-2.5 text-sm">
                   <Row label="Customer">
@@ -281,42 +283,96 @@ export function CustomerSidePanel({
                       ))}
                     </div>
                   </Row>
-                  {detail.customer.email && (
-                    <Row label="Email">
+                  {detail.customer.customer_type === "commercial" && (
+                    <>
+                      <Row label="Company">
+                        {detail.customer.company_name ? (
+                          <span>{detail.customer.company_name}</span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </Row>
+                      <Row label="Position">
+                        {detail.customer.position ? (
+                          <span>{detail.customer.position}</span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </Row>
+                    </>
+                  )}
+                  <Row label="Email">
+                    {detail.customer.email ? (
                       <a
                         href={`mailto:${detail.customer.email}`}
                         className="text-brand-darker hover:underline"
                       >
                         {detail.customer.email}
                       </a>
-                    </Row>
-                  )}
-                  {detail.customer.phone && (
-                    <Row label="Phone">
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </Row>
+                  <Row label="Phone">
+                    {detail.customer.phone ? (
                       <a
                         href={`tel:${detail.customer.phone}`}
                         className="text-brand-darker hover:underline"
                       >
                         {detail.customer.phone}
                       </a>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </Row>
+                  <Row label="Mobile">
+                    {detail.customer.mobile ? (
+                      <a
+                        href={`tel:${detail.customer.mobile}`}
+                        className="text-brand-darker hover:underline"
+                      >
+                        {detail.customer.mobile}
+                      </a>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </Row>
+                  {detail.customer.customer_type === "commercial" && (
+                    <Row label="Website">
+                      {detail.customer.website ? (
+                        <a
+                          href={detail.customer.website}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-brand-darker hover:underline"
+                        >
+                          {detail.customer.website.replace(/^https?:\/\//, "")}
+                        </a>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </Row>
                   )}
-                  {detail.customer.annual_contract_value != null && (
+                  {detail.customer.customer_type === "commercial" && (
                     <Row label="Annual value">
-                      <span className="font-semibold text-brand-darker">
-                        £
-                        {Number(detail.customer.annual_contract_value).toLocaleString(
-                          "en-GB",
-                          { maximumFractionDigits: 0 }
-                        )}
-                      </span>
+                      {detail.customer.annual_contract_value != null ? (
+                        <span className="font-semibold text-brand-darker">
+                          £
+                          {Number(
+                            detail.customer.annual_contract_value
+                          ).toLocaleString("en-GB", {
+                            maximumFractionDigits: 0,
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </Row>
                   )}
                   {(() => {
                     const c = detail.customer;
-                    // Build display from the structured fields, falling back
-                    // to the legacy single `address` for customers created
-                    // before migration 026.
+                    // Structured fields first, fall back to legacy single
+                    // `address` for customers created before migration 026.
                     const structured = [
                       c.address_line_1,
                       c.address_line_2,
@@ -327,15 +383,27 @@ export function CustomerSidePanel({
                       .filter((v) => v && v.trim() !== "")
                       .join(", ");
                     const display = structured || c.address || "";
-                    if (!display) return null;
                     return (
                       <Row label="Address">
-                        <span className="whitespace-pre-wrap text-right">
-                          {display}
-                        </span>
+                        {display ? (
+                          <span className="whitespace-pre-wrap text-right">
+                            {display}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
                       </Row>
                     );
                   })()}
+                  <Row label="Notes">
+                    {detail.customer.notes ? (
+                      <span className="whitespace-pre-wrap text-right text-gray-600">
+                        {detail.customer.notes}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </Row>
                   <Row label="Added">{formatDate(detail.customer.created_at)}</Row>
                   <Row label="Google review">
                     <label className="flex cursor-pointer items-center gap-2">
