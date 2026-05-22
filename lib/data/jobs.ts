@@ -5,6 +5,11 @@ import type { Job, Site, Customer, JobStatus } from "@/types/database";
 import type { BookingInput } from "@/lib/validation/booking";
 import type { ServiceSheetInput } from "@/lib/validation/service-sheet";
 import { uploadBase64Image } from "@/lib/storage/upload";
+import {
+  isPhotoClientId,
+  photoStoragePath,
+  PHOTO_BUCKET,
+} from "@/lib/photos/path";
 import { generateJobReference } from "@/lib/data/job-references";
 
 function emptyToNull(value: string | undefined): string | null {
@@ -413,20 +418,48 @@ async function writeServiceSheet(
     );
   }
 
+  // Photos arrive here in one of two shapes:
+  //
+  //   1. **Client photo id (UUID)** — the offline-sync path. The
+  //      photos loop already uploaded the blob to
+  //      `photos/<id>.jpg` via /api/photos/upload. We just compute
+  //      the public URL — no re-upload, no work to do here.
+  //
+  //   2. **`data:image/...` base64 data URL** — the online
+  //      direct-submit path (form action invoked while online, no
+  //      photos loop involved). Upload via the existing helper.
+  //
+  // Anything else is an error — silent fallthrough on unknown formats
+  // would be a future-regression magnet (a malformed pull, a future
+  // schema change). Reject loudly.
+  const supabase = await createClient();
   const photoUrls: string[] = [];
   if (input.photo_data_urls.length > 0) {
-    const uploaded = await Promise.all(
-      input.photo_data_urls
-        .filter((p) => p.startsWith("data:image"))
-        .map((dataUrl, idx) => {
-          const ext = dataUrl.match(/data:image\/(\w+);/)?.[1] ?? "png";
-          return uploadBase64Image(dataUrl, `photos/${jobId}/${idx}.${ext}`);
-        })
-    );
-    photoUrls.push(...uploaded);
+    for (let idx = 0; idx < input.photo_data_urls.length; idx++) {
+      const ref = input.photo_data_urls[idx];
+      if (isPhotoClientId(ref)) {
+        // Path 1: photos loop already uploaded. URL-build deterministically.
+        const { data: urlData } = supabase.storage
+          .from(PHOTO_BUCKET)
+          .getPublicUrl(photoStoragePath(ref));
+        photoUrls.push(urlData.publicUrl);
+      } else if (ref.startsWith("data:image")) {
+        // Path 2: online direct submit. Upload the legacy way.
+        const ext = ref.match(/data:image\/(\w+);/)?.[1] ?? "png";
+        const url = await uploadBase64Image(
+          ref,
+          `photos/${jobId}/${idx}.${ext}`
+        );
+        photoUrls.push(url);
+      } else {
+        throw new Error(
+          `writeServiceSheet: unknown photo reference format at index ${idx}` +
+            ` (expected UUID or data:image/* prefix, got: "${ref.slice(0, 40)}")`
+        );
+      }
+    }
   }
 
-  const supabase = await createClient();
   const { data, error } = await supabase
     .from("jobs")
     .update({
