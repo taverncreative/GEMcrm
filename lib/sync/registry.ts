@@ -32,6 +32,7 @@ import { completeTaskAction } from "@/app/(app)/dashboard/actions";
 import { updateJobStatusAction } from "@/app/(app)/jobs/[id]/actions";
 import { updateAgreementStatusAction } from "@/app/(app)/agreements/[id]/actions";
 import { setReviewReceivedAction } from "@/app/(app)/customers/actions";
+import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
 import type { ActionState } from "@/types/actions";
 
 /** Fresh initial state to satisfy the React `useActionState` calling
@@ -70,6 +71,18 @@ export const REGISTRY: Record<string, RegistryEntry> = {
   updateJobStatusAction: {
     kind: "form",
     invoke: (fd) => updateJobStatusAction(INITIAL_FORM_STATE, fd),
+  },
+  completeServiceSheetAction: {
+    kind: "form",
+    // The action returns a richer shape (SaveServiceSheetResult with
+    // pdfUrl/jobId), but the dispatcher only cares about success/fail
+    // — pdfUrl regenerates server-side on next viewing, jobId is
+    // already known to the wrapper. ActionState is the shared base.
+    invoke: (fd) =>
+      completeServiceSheetAction(
+        { success: false, errors: {}, message: null },
+        fd
+      ),
   },
 
   // ─── customer (direct-call) ──────────────────────────────────

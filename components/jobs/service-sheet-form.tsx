@@ -4,7 +4,6 @@ import {
   useState,
   useEffect,
   useRef,
-  useActionState,
   useCallback,
   useTransition,
 } from "react";
@@ -18,6 +17,8 @@ import {
   RISK_LEVELS,
   TREATMENT_METHODS,
   CALL_TYPES,
+  ServiceSheetSchema,
+  type ServiceSheetInput,
 } from "@/lib/validation/service-sheet";
 import {
   RISK_LEVEL_LABELS,
@@ -27,6 +28,89 @@ import {
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { PhotoUpload } from "@/components/ui/photo-upload";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
+import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
+import { db } from "@/lib/db";
+
+// Re-parse the form fields the action expects, mirroring the server-side
+// completeServiceSheetAction shape. Returning null skips the local write
+// (the wrapper still dispatches server-side when online); we use this
+// when required fields are missing — the server-side Zod will produce
+// the proper error response.
+function parseServiceSheetFormData(
+  formData: FormData
+): ServiceSheetInput | null {
+  function parseJsonArray(raw: string | null): string[] {
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (i): i is string => typeof i === "string" && i.length > 0
+      );
+    } catch {
+      return [];
+    }
+  }
+  const raw = {
+    job_id: (formData.get("job_id") as string) ?? "",
+    call_type: (formData.get("call_type") as string) ?? "",
+    pest_species: parseJsonArray(formData.get("pest_species") as string | null),
+    findings: (formData.get("findings") as string) ?? "",
+    recommendations: (formData.get("recommendations") as string) ?? "",
+    report_notes: (formData.get("report_notes") as string) ?? "",
+    method_used: parseJsonArray(formData.get("method_used") as string | null),
+    pesticides_used: (formData.get("pesticides_used") as string) ?? "",
+    risk_level: (formData.get("risk_level") as string) ?? "",
+    risk_comments: (formData.get("risk_comments") as string) ?? "",
+    photo_data_urls: parseJsonArray(
+      formData.get("photo_data_urls") as string | null
+    ),
+    technician_signature: (formData.get("technician_signature") as string) ?? "",
+    client_present: (formData.get("client_present") as string) ?? "",
+    client_signature: (formData.get("client_signature") as string) ?? "",
+    client_name: (formData.get("client_name") as string) ?? "",
+  };
+  const result = ServiceSheetSchema.safeParse(raw);
+  return result.success ? result.data : null;
+}
+
+// WrapMeta for completeServiceSheetAction — wraps the field operator's
+// most important offline action. applyLocal mirrors the server-side
+// writeServiceSheet's UPDATE so the UI sees the change immediately.
+// Signatures stay as base64 in the args (uploaded server-side on
+// replay via the legacy `data:image/...` path in writeServiceSheet);
+// photos go through `photos_pending` and arrive here as client-UUID
+// strings (the new path in writeServiceSheet computes URLs from those).
+const completeServiceSheetMeta: WrapMeta<ServiceSheetInput> = {
+  actionName: "completeServiceSheetAction",
+  entityType: "job",
+  entityId: (input) => input.job_id,
+  parseInput: parseServiceSheetFormData,
+  applyLocal: async (input) => {
+    const now = new Date().toISOString();
+    await db.jobs.update(input.job_id, {
+      call_type: input.call_type,
+      pest_species: input.pest_species,
+      findings: input.findings || null,
+      recommendations: input.recommendations || null,
+      treatment: input.method_used.join(", ") || null,
+      method_used: input.method_used,
+      pesticides_used: input.pesticides_used || null,
+      risk_level: input.risk_level,
+      risk_comments: input.risk_comments || null,
+      report_notes: input.report_notes || null,
+      // photo_data_urls holds either client-UUID strings (offline path,
+      // photos already in photos_pending) or `data:image/...` strings
+      // (online direct path). Both shapes get stored verbatim — the
+      // server-side writeServiceSheet handles each at replay.
+      photo_urls: input.photo_data_urls,
+      client_present: input.client_present,
+      client_name: input.client_name || null,
+      job_status: "in_progress",
+      updated_at: now,
+    });
+  },
+};
 
 const STEP_LABELS = ["Visit", "Service", "Risk", "Photos", "Sign off"] as const;
 
@@ -92,9 +176,13 @@ export function ServiceSheetForm({
   const prevErrorsRef = useRef<Record<string, string>>({});
   const router = useRouter();
 
-  const [state, formAction, isPending] = useActionState(
+  // Wrapped: local-first Dexie update + outbox enqueue + offline-tolerant.
+  // The field operator's most important offline action — service sheet
+  // submission while in the van without signal must work end-to-end.
+  const [state, formAction, isPending] = useLocalFirstAction(
     completeServiceSheetAction,
-    { success: false, errors: {}, message: null }
+    { success: false, errors: {}, message: null },
+    completeServiceSheetMeta
   );
 
   // Approval modal state (driven by a successful save).

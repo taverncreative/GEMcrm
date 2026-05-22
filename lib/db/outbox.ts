@@ -66,6 +66,11 @@ export interface EnqueueInput {
    *  latest update, never silently cancels work). Wrappers for
    *  create-shape and delete-shape actions should pass explicitly. */
   op?: "create" | "update" | "delete";
+  /** Secondary entity ids touched by a multi-entity action. See
+   *  `OutboxEntry.entity_ids` for the full rationale. Wrappers for
+   *  multi-entity actions like `createAgreementAction` should populate
+   *  this with the child-row ids the action writes. */
+  entity_ids?: string[];
 }
 
 export interface EnqueueResult {
@@ -132,6 +137,7 @@ export async function enqueueAction(input: EnqueueInput): Promise<EnqueueResult>
     next_attempt_at: now,
     stuck: false,
     op,
+    ...(input.entity_ids ? { entity_ids: input.entity_ids } : {}),
   });
 
   return { id: id as number, compacted_ids };

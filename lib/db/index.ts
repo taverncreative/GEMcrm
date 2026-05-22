@@ -102,6 +102,16 @@ export interface OutboxEntry {
    *  the most conservative default. Not indexed (compaction reads the
    *  entity-grouped slice anyway via the compound index). */
   op?: "create" | "update" | "delete";
+  /** For multi-entity actions (e.g. createAgreementAction which spawns
+   *  both an agreement and N jobs), the secondary entity ids the action
+   *  also writes. The push-side dispatcher doesn't care about this —
+   *  the action's own server-side body still does the multi-write
+   *  transactionally. It's kept for sync-engine bookkeeping: pull-merge
+   *  guards SHOULD check these in addition to `entity_id` to avoid
+   *  clobbering a row referenced by a multi-write outbox entry.
+   *  (Pull-merge guard currently only checks `entity_id` — gap
+   *  documented in STEP_6_NOTES.md.) */
+  entity_ids?: string[];
 }
 
 /**
