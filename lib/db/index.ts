@@ -95,6 +95,13 @@ export interface OutboxEntry {
    *  Stored as boolean — Dexie's indexedDB driver handles the boolean
    *  index correctly in modern browsers. */
   stuck: boolean;
+  /** What kind of mutation this entry represents on its entity. Used
+   *  by the enqueue-time compaction logic to fold sequences like
+   *  update+update into a single entry. Optional for compatibility —
+   *  pre-step-6 entries without `op` are treated as "update" on read,
+   *  the most conservative default. Not indexed (compaction reads the
+   *  entity-grouped slice anyway via the compound index). */
+  op?: "create" | "update" | "delete";
 }
 
 /**
