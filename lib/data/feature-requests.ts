@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { newId } from "@/lib/utils/id";
 
 export type RequestType = "feature" | "bug" | "change";
 export type RequestStatus = "pending" | "addressed" | "declined";
@@ -21,6 +22,7 @@ export async function createFeatureRequest(input: {
   const { data, error } = await supabase
     .from("feature_requests")
     .insert({
+      id: newId(),
       request_type: input.request_type,
       message: input.message.trim(),
       submitter_email: input.submitter_email ?? null,

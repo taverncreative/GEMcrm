@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { todayUk } from "@/lib/utils/today-uk";
+import { newId } from "@/lib/utils/id";
 import type {
   Customer,
   CustomerType,
@@ -84,6 +85,7 @@ function hasUsableSiteAddress(input: SiteInputLoose): boolean {
 /** Row shape for inserting a site — used after we've decided to insert. */
 function siteRow(customerId: string, input: SiteInputLoose) {
   return {
+    id: newId(),
     customer_id: customerId,
     address_line_1: emptyToNull(input.address_line_1),
     address_line_2: emptyToNull(input.address_line_2),
@@ -101,6 +103,7 @@ export async function createCustomer(
   const { data, error } = await supabase
     .from("customers")
     .insert({
+      id: newId(),
       name: input.name.trim(),
       company_name: emptyToNull(input.company_name),
       email: emptyToNull(input.email),

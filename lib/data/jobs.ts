@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { todayUk } from "@/lib/utils/today-uk";
+import { newId } from "@/lib/utils/id";
 import type { Job, Site, Customer, JobStatus } from "@/types/database";
 import type { BookingInput } from "@/lib/validation/booking";
 import type { ServiceSheetInput } from "@/lib/validation/service-sheet";
@@ -312,6 +313,7 @@ export async function createBooking(input: BookingInput): Promise<Job> {
   const { data, error } = await supabase
     .from("jobs")
     .insert({
+      id: newId(),
       site_id: input.site_id,
       job_date: input.job_date,
       job_time: emptyToNull(input.job_time),

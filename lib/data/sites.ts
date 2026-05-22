@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { newId } from "@/lib/utils/id";
 import type { Site } from "@/types/database";
 import type { SiteInput } from "@/lib/validation/site";
 
@@ -50,6 +51,7 @@ export async function createSite(
   const { data, error } = await supabase
     .from("sites")
     .insert({
+      id: newId(),
       customer_id: customerId,
       address_line_1: input.address_line_1.trim(),
       address_line_2: emptyToNull(input.address_line_2),

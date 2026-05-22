@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { newId } from "@/lib/utils/id";
 import type { Report } from "@/types/database";
 
 export async function getReportByJobId(jobId: string): Promise<Report | null> {
@@ -30,6 +31,7 @@ export async function createReport(
   const { data, error } = await supabase
     .from("reports")
     .insert({
+      id: newId(),
       job_id: jobId,
       report_type: "service",
       pdf_url: pdfUrl,

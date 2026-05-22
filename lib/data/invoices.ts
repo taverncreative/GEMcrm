@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
+import { newId } from "@/lib/utils/id";
 import type { Invoice, Customer } from "@/types/database";
 
 /**
@@ -40,6 +41,7 @@ export async function createInvoiceForJob(
   const { data, error } = await supabase
     .from("invoices")
     .insert({
+      id: newId(),
       job_id: jobId,
       customer_id: customerId,
       amount,
@@ -223,6 +225,7 @@ export async function createStandaloneInvoice(
   const { data, error } = await supabase
     .from("invoices")
     .insert({
+      id: newId(),
       customer_id: input.customer_id,
       job_id: input.job_id ?? null,
       amount: input.total,

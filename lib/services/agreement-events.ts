@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { dateUk } from "@/lib/utils/today-uk";
+import { newId } from "@/lib/utils/id";
 import type { Agreement } from "@/types/database";
 
 /**
@@ -50,6 +51,7 @@ export async function generateAgreementJobs(
     jobDate.setMonth(jobDate.getMonth() + intervalMonths * i);
 
     jobs.push({
+      id: newId(),
       site_id: agreement.site_id,
       job_date: dateUk(jobDate),
       call_type: "routine" as const,

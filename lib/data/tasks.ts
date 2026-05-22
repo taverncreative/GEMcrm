@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { todayUk } from "@/lib/utils/today-uk";
+import { newId } from "@/lib/utils/id";
 import type { Task, TaskType, TaskPriority } from "@/types/database";
 
 const PRIORITY_TO_ORDER: Record<TaskPriority, number> = {
@@ -214,6 +215,7 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
   const { data, error } = await supabase
     .from("tasks")
     .insert({
+      id: newId(),
       title: input.title,
       due_date: input.due_date ?? null,
       status: "pending",

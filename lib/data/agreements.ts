@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { todayUk, dateUk, dateUkOffset } from "@/lib/utils/today-uk";
+import { newId } from "@/lib/utils/id";
 import type { Agreement, Customer, Site } from "@/types/database";
 import type { AgreementInput } from "@/lib/validation/agreement";
 import { uploadBase64Image } from "@/lib/storage/upload";
@@ -66,7 +67,7 @@ export async function getAgreementById(
 export async function createAgreement(
   input: AgreementInput
 ): Promise<Agreement> {
-  const agreementId = crypto.randomUUID();
+  const agreementId = newId();
 
   let clientSigUrl: string | null = null;
   let gemSigUrl: string | null = null;
