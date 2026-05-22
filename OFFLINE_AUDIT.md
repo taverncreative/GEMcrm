@@ -526,6 +526,23 @@ The infrastructure for client-direct uploads to Supabase Storage already exists 
 
 ---
 
+# Approved sync scoping (step 4 reference)
+
+User confirmed in the step-1 review that volumes are small (50–150 customers per engineer plus linked records) and the initial Dexie sync can pull everything for now. The per-entity scoping below is the **fallback strategy** to introduce in step 4 *only if* initial-sync time becomes painful on a real device — better to know the rule up front than to retrofit later.
+
+If/when scoping is needed:
+
+| Entity | What syncs to device |
+|---|---|
+| `customers` | All non-archived |
+| `sites` | All non-archived |
+| `jobs` | Last **180 days** of `job_date` + all jobs with `job_status != 'completed'` regardless of date |
+| `agreements` | All active or due-to-renew-within-90-days |
+| `tasks` | All pending; completed only within last **90 days** *(tweaked from initial 30-day suggestion — engineers occasionally need 2–3 months of task history)* |
+| `reports` | Metadata only (no PDF blob). The `pdf_url` field syncs, the actual PDF is fetched on-demand and cached by the SW |
+| `invoices` | **Online-only** per decision — no Dexie store, no sync |
+| `photos` (Storage blobs) | Never mirror past photos. Sync only URLs. Offline-captured photos live in IndexedDB until uploaded, then garbage-collected |
+
 # Summary of changes the conversion implies
 
 Ordered roughly by "must-fix to make offline work" → "polish":
