@@ -39,12 +39,12 @@ import { db } from "@/lib/db";
 import type { Table } from "dexie";
 import type { Customer, Site, Job, Agreement, Task } from "@/types/database";
 import {
-  pullCustomersSince,
-  pullSitesSince,
-  pullJobsSince,
-  pullAgreementsSince,
-  pullTasksSince,
-} from "@/lib/data/sync-pulls";
+  pullCustomersAction,
+  pullSitesAction,
+  pullJobsAction,
+  pullAgreementsAction,
+  pullTasksAction,
+} from "@/app/(app)/sync/pull-actions";
 import { classifyError, type SyncResultClass } from "@/lib/sync/http-classify";
 
 /** Per-entity cursor keys in sync_meta. Centralised so the rename
@@ -219,35 +219,35 @@ export async function pullAll(onProgress?: PullProgress): Promise<PullResult> {
     {
       name: "customers",
       table: db.customers as unknown as Table<SyncableRow, string>,
-      fetch: pullCustomersSince as unknown as (
+      fetch: pullCustomersAction as unknown as (
         s: string | null
       ) => Promise<SyncableRow[]>,
     },
     {
       name: "sites",
       table: db.sites as unknown as Table<SyncableRow, string>,
-      fetch: pullSitesSince as unknown as (
+      fetch: pullSitesAction as unknown as (
         s: string | null
       ) => Promise<SyncableRow[]>,
     },
     {
       name: "jobs",
       table: db.jobs as unknown as Table<SyncableRow, string>,
-      fetch: pullJobsSince as unknown as (
+      fetch: pullJobsAction as unknown as (
         s: string | null
       ) => Promise<SyncableRow[]>,
     },
     {
       name: "agreements",
       table: db.agreements as unknown as Table<SyncableRow, string>,
-      fetch: pullAgreementsSince as unknown as (
+      fetch: pullAgreementsAction as unknown as (
         s: string | null
       ) => Promise<SyncableRow[]>,
     },
     {
       name: "tasks",
       table: db.tasks as unknown as Table<SyncableRow, string>,
-      fetch: pullTasksSince as unknown as (
+      fetch: pullTasksAction as unknown as (
         s: string | null
       ) => Promise<SyncableRow[]>,
     },
