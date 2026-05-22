@@ -566,6 +566,44 @@ end $$;
 
 
 -- ============================================================
+-- 030: Sync-pull RPC functions (SECURITY DEFINER)
+-- ============================================================
+-- One per syncable entity. Bypass RLS so the pull sync can see
+-- soft-deleted rows (the SELECT policy filters `deleted_at IS NULL`
+-- for every other read). Auth check inside each function body —
+-- belt-and-braces against accidental EXECUTE grants. See
+-- supabase/migrations/030_sync_pull_functions.sql for full rationale.
+do $$
+declare t text;
+begin
+  foreach t in array array['customers','sites','jobs','agreements','tasks']
+  loop
+    execute format($f$
+      create or replace function public.sync_pull_%1$s(since timestamptz)
+      returns setof public.%1$s
+      language plpgsql
+      security definer
+      set search_path = public
+      as $body$
+      begin
+        if auth.uid() is null then
+          raise exception 'sync_pull_%1$s: not authenticated';
+        end if;
+        return query
+          select *
+            from public.%1$s
+           where since is null or updated_at > since
+           order by updated_at asc;
+      end;
+      $body$;
+    $f$, t);
+    execute format('revoke execute on function public.sync_pull_%I(timestamptz) from public', t);
+    execute format('grant  execute on function public.sync_pull_%I(timestamptz) to authenticated', t);
+  end loop;
+end $$;
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)
