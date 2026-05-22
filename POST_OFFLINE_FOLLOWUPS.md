@@ -57,3 +57,64 @@ But for actions whose blast radius is large or irreversible, a fresh `getUser()`
 ## `Customer.address` legacy column
 
 Migration 026 introduced structured address (`address_line_1` etc) and the `Customer.address` column is marked `@deprecated`. Code reads still use the legacy column as a fallback for old rows; once any pre-migration-026 customer rows have been edited (or backfilled), the column can be dropped via a migration. Low priority — costs nothing to keep.
+
+---
+
+## Inner-join visibility cascade (soft delete side-effect)
+
+**Surfaced in step 3.** With migration 029, RLS on `customers`, `sites`, `jobs`, `agreements`, `tasks` filters `deleted_at IS NULL` on SELECT. Most list queries in `lib/data/calendar.ts`, `lib/data/jobs.ts`, and `lib/data/invoices.ts` use Postgres foreign-table inner-join syntax via Supabase (`*, site:sites!inner(*, customer:customers!inner(*))`). When the customer (or site) is soft-deleted, the inner join finds no parent row and the entire child row is filtered out of results.
+
+Concretely:
+- Soft-delete a customer → all of their jobs disappear from list views (`getAllJobs`, `getJobsToday`, `getUpcomingJobs`, `getRecentJobs`, `getJobsInRange`)
+- Soft-delete a site → jobs scoped to that site disappear
+- Same effect on calendar views
+
+This is **accepted behaviour for now** (per the step-3 decision call) because in GEM's workflow "deleted customer" usually means "we're not doing business with them any more" and hiding the footprint is the desired UX. The data is still in the DB, restorable via SQL by an admin.
+
+**Refactor when needed:** convert the 10 affected `!inner` joins to outer joins (`!left`) and have UI templates handle `job.site?.customer?.name` null-checks. Add a `?include_deleted=true` query param to admin / historical views if/when that need surfaces.
+
+**Affected files** (~10 query sites):
+- `lib/data/calendar.ts:16`
+- `lib/data/jobs.ts:74, 115, 137, 164, 187` (and other `!inner` queries throughout)
+- `lib/data/invoices.ts:193, 315, 407, 430`
+
+---
+
+## Financial reporting refactor — preserve historical revenue under soft delete
+
+**Surfaced in step 3.** `getRevenueStats` and related financial queries in `lib/data/invoices.ts` (lines 407, 430) inner-join through `customers` to bucket revenue by `customer_type` (commercial vs domestic). If a customer is soft-deleted, their historical invoices stop contributing to revenue figures — retroactively distorting year-to-date totals, committed PMA values, and the revenue widget.
+
+Pre-launch this is harmless (no live accounting data yet). Once live, this should be refactored to either:
+- (a) LEFT JOIN through `customers`, defaulting `customer_type` to `'commercial'` or similar when null
+- (b) Bake `customer_type` onto `invoices` at insert time so revenue queries don't need the join
+- (c) Read from `invoices` directly with no customer join, and group by a denormalised type field
+
+Option (b) is the cleanest — adds one column to `invoices`, fills at insert, removes the join dependency entirely. Non-blocking for the offline rollout.
+
+---
+
+## Customer delete-confirmation dialog wording
+
+**Surfaced in step 3.** The `DeleteCustomerConfirm` UI says things like "will be deleted" / "cannot be undone". With soft delete, the row stays in the DB and can be restored via SQL by an admin. Wording should be updated to reflect this — "will be hidden", "removable from view", "ask admin to restore if needed". Small UI copy update, low effort, low priority.
+
+---
+
+## Restore UI
+
+**De-scoped from offline-pwa rollout** per step-3 decision. Currently restoration is admin-SQL only:
+
+```sql
+UPDATE customers SET deleted_at = NULL WHERE id = '<uuid>';
+```
+
+A real "Restore" button (and a "Recently deleted" inbox view) would make sense once the operator has accidentally soft-deleted something they wanted back. Low priority — wait for the first request.
+
+---
+
+## Hard-delete admin path (GDPR right-to-erasure)
+
+**De-scoped from offline-pwa rollout** per step-3 decision. Soft delete keeps data forever. UK GDPR's right-to-erasure (where it applies — commercial customers are mostly outside scope; domestic customers might invoke it) requires a path to truly remove a person's data.
+
+The RLS `Authenticated users can delete (hard)` policy (migration 029) is intentionally kept so an admin can `DELETE FROM customers WHERE id = '<uuid>'` via SQL when needed. This cascades through FK relationships and removes the customer + all their child rows.
+
+A nicer UX would be a "Permanently delete" button visible only to admins, with a 2-step confirmation. Low priority — request is rare and SQL is fine for now.

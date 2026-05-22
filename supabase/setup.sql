@@ -519,6 +519,53 @@ where c.address_line_1 is not null and c.address_line_1 <> ''
 
 
 -- ============================================================
+-- 029: Soft deletes for the 5 syncable entities
+-- ============================================================
+-- Adds `deleted_at timestamptz null` to customers/sites/jobs/agreements/
+-- tasks. Splits the FOR ALL RLS policy on each into 4 per-operation
+-- policies: SELECT filters `deleted_at IS NULL` (soft-deleted rows
+-- disappear from every read), INSERT/UPDATE/DELETE keep USING(true) so
+-- soft-delete + future restore + emergency hard-delete still work.
+-- Extends the jobs partial unique index predicate to also exclude
+-- soft-deleted rows so a slot can be re-used after soft delete.
+alter table customers  add column if not exists deleted_at timestamptz;
+alter table sites      add column if not exists deleted_at timestamptz;
+alter table jobs       add column if not exists deleted_at timestamptz;
+alter table agreements add column if not exists deleted_at timestamptz;
+alter table tasks      add column if not exists deleted_at timestamptz;
+
+create index if not exists idx_customers_live  on customers  (id) where deleted_at is null;
+create index if not exists idx_sites_live      on sites      (id) where deleted_at is null;
+create index if not exists idx_jobs_live       on jobs       (id) where deleted_at is null;
+create index if not exists idx_agreements_live on agreements (id) where deleted_at is null;
+create index if not exists idx_tasks_live      on tasks      (id) where deleted_at is null;
+
+drop index if exists idx_jobs_site_date_unique;
+create unique index idx_jobs_site_date_unique
+  on jobs (site_id, job_date, call_type)
+  where (is_archived = false and agreement_id is null and deleted_at is null);
+
+-- Re-policy each of the 5 syncable tables. Same per-operation pattern
+-- repeated; see migration 029 for the rationale.
+do $$
+declare t text;
+begin
+  foreach t in array array['customers','sites','jobs','agreements','tasks']
+  loop
+    execute format('drop policy if exists "Authenticated users full access"          on %I', t);
+    execute format('drop policy if exists "Authenticated users can read non-deleted" on %I', t);
+    execute format('drop policy if exists "Authenticated users can insert"           on %I', t);
+    execute format('drop policy if exists "Authenticated users can update"           on %I', t);
+    execute format('drop policy if exists "Authenticated users can delete (hard)"    on %I', t);
+    execute format('create policy "Authenticated users can read non-deleted" on %I for select to authenticated using (deleted_at is null)', t);
+    execute format('create policy "Authenticated users can insert"           on %I for insert to authenticated with check (true)', t);
+    execute format('create policy "Authenticated users can update"           on %I for update to authenticated using (true) with check (true)', t);
+    execute format('create policy "Authenticated users can delete (hard)"    on %I for delete to authenticated using (true)', t);
+  end loop;
+end $$;
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)

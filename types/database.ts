@@ -7,6 +7,11 @@ export interface Customer {
   id: string;
   created_at: string;
   updated_at: string;
+  /** Set when the row is soft-deleted (migration 029). RLS filters
+   *  deleted rows out of every read, so callers normally won't see
+   *  this populated — present on the type for completeness + admin /
+   *  restore paths that bypass RLS. */
+  deleted_at: string | null;
   name: string;
   company_name: string | null;
   email: string | null;
@@ -35,6 +40,8 @@ export interface Site {
   customer_id: string;
   created_at: string;
   updated_at: string;
+  /** See `Customer.deleted_at`. */
+  deleted_at: string | null;
   address_line_1: string | null;
   address_line_2: string | null;
   town: string | null;
@@ -51,6 +58,8 @@ export interface Job {
   site_id: string;
   created_at: string;
   updated_at: string;
+  /** See `Customer.deleted_at`. */
+  deleted_at: string | null;
   job_date: string;
   /** Booked-in clock time ("HH:MM:SS" / "HH:MM"). Null means no specific
    *  time yet — UI shows "All day". */
@@ -111,6 +120,8 @@ export interface Agreement {
   site_id: string;
   created_at: string;
   updated_at: string;
+  /** See `Customer.deleted_at`. */
+  deleted_at: string | null;
   start_date: string | null;
   contract_value: number | null;
   visit_frequency: number | null;
@@ -140,6 +151,8 @@ export interface Task {
   id: string;
   created_at: string;
   updated_at: string;
+  /** See `Customer.deleted_at`. */
+  deleted_at: string | null;
   title: string;
   due_date: string | null;
   status: TaskStatus;

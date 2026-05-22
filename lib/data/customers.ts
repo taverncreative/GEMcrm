@@ -191,27 +191,55 @@ export async function setGoogleReviewReceived(
 }
 
 /**
- * Hard-delete a customer. Postgres FK ON DELETE CASCADE on sites, jobs,
- * agreements, invoices and tasks means a single row delete here removes
- * the entire branch — no manual cleanup needed.
+ * Soft-delete a customer.
  *
- * Storage objects (signatures, photos, contract/report PDFs in the
- * "reports" bucket) are NOT deleted here because Supabase has no FK
- * cascade for storage. That's acceptable — orphans cost pennies and
- * the public URLs simply 404 once the row is gone.
+ * Sets `deleted_at = now()`. The RLS SELECT policy on `customers`
+ * filters `deleted_at IS NULL`, so the row immediately disappears
+ * from every read across the app — list views, detail panels,
+ * dashboards, calendar joins, the lot.
+ *
+ * The customer's child rows (sites, jobs, agreements, invoices, tasks,
+ * reports) are NOT touched. Hard-delete cascades used to remove them
+ * automatically; with soft delete that's no longer the case. They'll
+ * still effectively disappear from list views because most read
+ * queries inner-join through customers/sites and RLS hides the parent
+ * — see the "Inner-join visibility cascade" item in
+ * POST_OFFLINE_FOLLOWUPS.md for the long-term refactor.
+ *
+ * Storage objects (signatures, photos, PDFs in the "reports" bucket)
+ * are untouched — they're keyed by uuid in the path and harmless once
+ * the parent row is hidden.
+ *
+ * Note: deliberately no `.select()` chain on the update. The same SELECT
+ * RLS policy would filter the just-updated row (which now has
+ * `deleted_at IS NOT NULL`) and return an empty payload. We don't need
+ * the row back here (return type is `Promise<void>`), so omitting
+ * `.select()` saves a round-trip and avoids a misleading empty result.
  */
 export async function deleteCustomer(customerId: string): Promise<void> {
   const supabase = await createClient();
-  const { error } = await supabase.from("customers").delete().eq("id", customerId);
+  const { error } = await supabase
+    .from("customers")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", customerId);
   if (error) {
     console.error("[deleteCustomer]", error.code, error.message);
-    throw new Error(`Failed to delete customer: ${error.message}`);
+    throw new Error(`Failed to soft-delete customer: ${error.message}`);
   }
 }
 
 /**
- * Count of related rows that will be cascaded on delete. Surfaced to the
- * user in the confirmation dialog so they understand the blast radius.
+ * Count of related rows that will effectively disappear when the
+ * customer is soft-deleted. The child rows themselves stay in the DB
+ * (no cascade with soft delete), but they're inner-joined through the
+ * customer in most list queries — and RLS now filters the soft-deleted
+ * customer out of those joins — so the child rows become hidden from
+ * normal app views.
+ *
+ * Surfaced to the user in the delete-confirmation dialog so they
+ * understand what's about to disappear. The UI wording should reflect
+ * "will become hidden" rather than "will be deleted"; tracking that as
+ * a UI follow-up in POST_OFFLINE_FOLLOWUPS.md.
  */
 export interface DeleteImpact {
   sites: number;
