@@ -58,6 +58,44 @@ function isOnline(): boolean {
 }
 
 /**
+ * One-shot clock-skew sanity check. Fires on the first successful
+ * sync of a session — logs a console warning if the client and server
+ * are >5 minutes apart. We don't auto-correct because Date.now() can't
+ * be safely shifted; and >5min skew is unusual enough that surfacing
+ * to logs is the right level of escalation.
+ *
+ * The skew matters because `updated_at` comparisons in pull merge use
+ * server-provided timestamps but the outbox uses client-side ones. A
+ * large skew can produce confusing LWW outcomes.
+ */
+let clockSkewChecked = false;
+async function checkClockSkewOnce(): Promise<void> {
+  if (clockSkewChecked) return;
+  clockSkewChecked = true;
+  try {
+    // Hit our own origin's root with HEAD — fast, no auth dependency,
+    // and the Date header is always present.
+    const res = await fetch("/", { method: "HEAD", cache: "no-store" });
+    const serverDate = res.headers.get("Date");
+    if (!serverDate) return;
+    const serverMs = new Date(serverDate).getTime();
+    if (!Number.isFinite(serverMs)) return;
+    const skewMs = Math.abs(Date.now() - serverMs);
+    if (skewMs > 5 * 60 * 1000) {
+      console.warn(
+        `[sync] clock skew ${(skewMs / 1000).toFixed(0)}s detected ` +
+          `between client (${new Date().toISOString()}) and server ` +
+          `(${new Date(serverMs).toISOString()}). Sync ordering may ` +
+          `produce confusing LWW outcomes. Check the device's clock.`
+      );
+    }
+  } catch {
+    // Network failure — not worth retrying or surfacing; clock skew
+    // check is best-effort diagnostics.
+  }
+}
+
+/**
  * Run one sync pass. Safe to call from any trigger — guards prevent
  * concurrent runs and offline no-ops.
  */
@@ -130,6 +168,9 @@ export async function runSync(reason: SyncReason): Promise<SyncRunResult> {
   });
 
   syncFinished();
+  // Fire-and-forget skew check once per session. Doesn't affect the
+  // sync outcome; just diagnostic logging.
+  void checkClockSkewOnce();
   return {
     ran: true,
     reason,

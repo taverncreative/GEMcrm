@@ -14,7 +14,10 @@ export default async function AppLayout({
   // duplicated the header "+" sheet menu in QuickActions. Removed to
   // keep a single primary-action entry point on mobile.
   return (
-    <AppShell userEmail={user.email ?? "Unknown user"}>
+    <AppShell
+      userEmail={user.email ?? "Unknown user"}
+      userId={user.id}
+    >
       {children}
     </AppShell>
   );

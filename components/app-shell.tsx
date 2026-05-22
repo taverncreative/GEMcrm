@@ -5,14 +5,17 @@ import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { SessionExpiredBanner } from "@/components/sync/session-expired-banner";
+import { SyncBoot } from "@/components/sync/sync-boot";
 
 const SIDEBAR_KEY = "gemcrm-sidebar-collapsed";
 
 export function AppShell({
   userEmail,
+  userId,
   children,
 }: {
   userEmail: string;
+  userId: string;
   children: React.ReactNode;
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -41,6 +44,11 @@ export function AppShell({
 
   return (
     <div className="flex h-full">
+      {/* SyncBoot is invisible when idle — only paints the initial
+          sync overlay when a full pull is in progress. Mounted here
+          (inside the auth-gated shell) so it has the authenticated
+          user_id available. */}
+      <SyncBoot userId={userId} />
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleCollapsed}

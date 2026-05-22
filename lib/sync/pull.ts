@@ -186,6 +186,15 @@ async function pullEntity<T extends SyncableRow>(
   return out;
 }
 
+/** Progress callback hook for callers that want per-entity feedback —
+ *  used by the initial-sync overlay. State transitions: 'syncing' →
+ *  'done' | 'error'. count reflects the rows merged from the server. */
+export type PullProgress = (
+  entity: keyof typeof CURSOR_KEYS,
+  state: "syncing" | "done" | "error",
+  count: number
+) => void;
+
 /**
  * Pull all 5 entities sequentially. Sequential (not Promise.all) because:
  *   - The cursor reads/writes against sync_meta are quick but a
@@ -194,8 +203,12 @@ async function pullEntity<T extends SyncableRow>(
  *     express as a sequential loop with early return.
  *   - Backpressure: pull-then-push on the next tick keeps things
  *     orderly.
+ *
+ * Optional onProgress callback fires before each entity starts and
+ * after it finishes — used by the initial-sync overlay to show
+ * per-entity status.
  */
-export async function pullAll(): Promise<PullResult> {
+export async function pullAll(onProgress?: PullProgress): Promise<PullResult> {
   const out: PullResult = { entities: [], halted: false };
 
   const entities: Array<{
@@ -241,13 +254,20 @@ export async function pullAll(): Promise<PullResult> {
   ];
 
   for (const e of entities) {
+    onProgress?.(e.name, "syncing", 0);
     const result = await pullEntity(e.name, e.table, e.fetch);
     out.entities.push(result);
-    if (result.error?.kind === "auth-expired") {
-      out.halted = true;
-      out.halt_reason = result.error.message;
-      return out;
+    if (result.error) {
+      onProgress?.(e.name, "error", result.merged);
+      if (result.error.kind === "auth-expired") {
+        out.halted = true;
+        out.halt_reason = result.error.message;
+        return out;
+      }
+      // Non-halting error — record but continue to the next entity.
+      continue;
     }
+    onProgress?.(e.name, "done", result.merged);
   }
 
   return out;
