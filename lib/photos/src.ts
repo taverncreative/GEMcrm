@@ -60,5 +60,12 @@ export async function getPhotoSrcAsync(
   if (!photo) {
     return null;
   }
+  // If the local blob has been garbage-collected post-upload
+  // (photos loop clears blobs >7d after capture once `uploaded=true`),
+  // fall back to the cached server URL. Either side existing is enough
+  // to render the image.
+  if (photo.uploaded && photo.server_url && photo.blob.size === 0) {
+    return photo.server_url;
+  }
   return URL.createObjectURL(photo.blob);
 }

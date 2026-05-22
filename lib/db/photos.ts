@@ -67,6 +67,10 @@ export async function capturePhoto(
     upload_attempts: 0,
     last_upload_error: null,
     created_at: now,
+    // v3 fields — fresh capture is ready to upload immediately and
+    // doesn't yet have a server URL.
+    next_attempt_at: null,
+    server_url: null,
   });
 
   return id;

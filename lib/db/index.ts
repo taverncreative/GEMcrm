@@ -100,7 +100,9 @@ export interface OutboxEntry {
 /**
  * A photo or signature captured offline, awaiting upload to Supabase
  * Storage. The blob lives in IndexedDB; once uploaded the row's
- * `uploaded` flips true and the blob can be cleaned up.
+ * `uploaded` flips true. The blob is retained for ~7 days post-capture
+ * for offline-view (`getPhotoSrcAsync` reads it), then cleared on the
+ * next successful drain to reclaim IndexedDB space.
  */
 export interface PendingPhoto {
   /** Client-generated UUID — used directly as the storage path. */
@@ -108,7 +110,8 @@ export interface PendingPhoto {
   parent_type: "job" | "service_sheet" | "agreement_signature";
   /** UUID of the parent row (jobs.id / agreements.id). */
   parent_id: string;
-  /** The actual image bytes. */
+  /** The actual image bytes. Replaced with a 0-byte Blob on cleanup
+   *  once `uploaded === true` AND `captured_at` is >7d old. */
   blob: Blob;
   /** Mime type, e.g. "image/jpeg". */
   mime: string;
@@ -123,6 +126,14 @@ export interface PendingPhoto {
   last_upload_error: string | null;
   /** ISO timestamp when queued. */
   created_at: string;
+  /** Earliest moment the photos loop should retry. Null = ready
+   *  immediately. Set by the loop after an upload failure via the
+   *  same backoff helper push uses. v3 field. */
+  next_attempt_at: string | null;
+  /** Storage public URL captured after successful upload. v3 field.
+   *  `getPhotoSrcAsync` prefers this over the blob once both exist,
+   *  so post-cleanup (when blob is zeroed) photos still display. */
+  server_url: string | null;
 }
 
 /**
@@ -218,6 +229,24 @@ class GemCrmDb extends Dexie {
     }).upgrade(async (tx) => {
       await tx.table("outbox").toCollection().modify((row) => {
         if (typeof row.stuck !== "boolean") row.stuck = false;
+      });
+    });
+
+    // ─── v3: photos_pending retry scheduling + cached server URL ──
+    //
+    // Step 6's photos loop needs an explicit next_attempt_at so failed
+    // uploads can exponentially back off (same shape as the outbox).
+    // server_url caches the resolved public URL post-upload so the UI
+    // can keep displaying the photo even after the local Blob is
+    // garbage-collected (>7d after capture). Both nullable so the
+    // upgrade is a defaults-fill pass.
+    this.version(3).stores({
+      photos_pending:
+        "id, uploaded, next_attempt_at, [parent_type+parent_id]",
+    }).upgrade(async (tx) => {
+      await tx.table("photos_pending").toCollection().modify((row) => {
+        if (!("next_attempt_at" in row)) row.next_attempt_at = null;
+        if (!("server_url" in row)) row.server_url = null;
       });
     });
   }

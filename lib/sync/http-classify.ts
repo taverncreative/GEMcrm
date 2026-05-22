@@ -41,7 +41,9 @@ export type SyncResultClass =
  * the queue rather than getting marked client-error and counted towards
  * the stuck threshold.
  */
-export function classifyError(err: unknown): SyncResultClass {
+export function classifyError(
+  err: unknown
+): Exclude<SyncResultClass, { kind: "ok" }> {
   const message =
     err instanceof Error
       ? err.message
