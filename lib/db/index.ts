@@ -87,6 +87,14 @@ export interface OutboxEntry {
   last_error: string | null;
   /** ISO timestamp — earliest moment we should retry. */
   next_attempt_at: string;
+  /** True once the entry has been classified as unrecoverable by the
+   *  push loop (typically after 5 client-error attempts, or immediately
+   *  on UnknownActionError). Stuck entries are excluded from normal
+   *  drain queries and surface in the conflict inbox for manual retry
+   *  or discard. Indexed in v2 schema for efficient inbox queries.
+   *  Stored as boolean — Dexie's indexedDB driver handles the boolean
+   *  index correctly in modern browsers. */
+  stuck: boolean;
 }
 
 /**
@@ -188,6 +196,29 @@ class GemCrmDb extends Dexie {
         "id, uploaded, [parent_type+parent_id]",
       sync_meta:
         "&key",
+    });
+
+    // ─── v2: outbox `stuck` flag ──────────────────────────────────
+    //
+    // Step 6 adds the conflict-inbox concept. Outbox entries that fail
+    // 5 times with client-errors (or hit an unknown action_name) are
+    // marked `stuck: true` and excluded from normal drain queries —
+    // they surface in /sync/conflicts for manual retry or discard.
+    //
+    // Indexed on the stuck flag itself for the inbox query path. The
+    // entity_type/entity_id compound index from v1 is preserved.
+    //
+    // Upgrade: any pre-v2 outbox entry gets `stuck: false`. Dexie
+    // doesn't auto-fill defaults so we walk the table once on first
+    // open under v2 — cheap (most users will have zero or a handful
+    // of outbox rows at upgrade time).
+    this.version(2).stores({
+      outbox:
+        "++id, created_at, next_attempt_at, stuck, [entity_type+entity_id]",
+    }).upgrade(async (tx) => {
+      await tx.table("outbox").toCollection().modify((row) => {
+        if (typeof row.stuck !== "boolean") row.stuck = false;
+      });
     });
   }
 }

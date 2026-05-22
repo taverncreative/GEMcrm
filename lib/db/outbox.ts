@@ -51,6 +51,10 @@ export async function enqueueAction(input: EnqueueInput): Promise<number> {
     // Sync engine reads this — set to "now" so the first drain attempt
     // is immediate. Step 6's retry logic bumps it forward on failure.
     next_attempt_at: now,
+    // v2 schema field — fresh entries are never stuck. Push loop sets
+    // this true after the retry policy gives up (5 client-errors or
+    // an UnknownActionError).
+    stuck: false,
   });
   return id as number;
 }
