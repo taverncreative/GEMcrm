@@ -12,8 +12,6 @@
  * component just receives state + callbacks.
  */
 
-import type { PullResult } from "@/lib/sync/pull";
-
 export type EntityName =
   | "customers"
   | "sites"

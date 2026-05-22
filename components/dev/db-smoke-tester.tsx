@@ -6,6 +6,62 @@ import { db } from "@/lib/db";
 import { wipeLocalDb, dumpLocalDb } from "@/lib/db/dev";
 import { enqueueAction } from "@/lib/db/outbox";
 import { newId } from "@/lib/utils/id";
+import { objectToFormData } from "@/lib/sync/registry";
+import { runSync } from "@/lib/sync/engine";
+
+/**
+ * Round-trip check for the FormData ↔ object serialiser pair that the
+ * outbox depends on. Runs FormData → object (via inline reimpl of
+ * formDataToObject's behaviour, mirroring lib/actions/wrap.ts) → back
+ * to FormData via objectToFormData, then verifies every key's
+ * getAll() value is identical.
+ *
+ * This catches regressions where one side learns to handle a new shape
+ * (e.g. nested objects) without the other being updated. Diagnostic
+ * surface only — no behaviour change.
+ */
+function runFormDataRoundtripCheck(): string {
+  const before = new FormData();
+  before.set("simple", "hello");
+  before.set("empty", "");
+  before.set("with space", "value with spaces");
+  before.append("multi", "a");
+  before.append("multi", "b");
+  before.append("multi", "c");
+  before.set("unicode", "✓ ñ 中");
+
+  // Replicate formDataToObject (it's not exported from wrap.ts —
+  // keep this self-contained).
+  const obj: Record<string, string | string[]> = {};
+  before.forEach((value, key) => {
+    if (typeof value !== "string") {
+      throw new Error(`Roundtrip: expected string, got File for ${key}`);
+    }
+    const existing = obj[key];
+    if (existing === undefined) obj[key] = value;
+    else if (Array.isArray(existing)) existing.push(value);
+    else obj[key] = [existing, value];
+  });
+
+  const after = objectToFormData(obj);
+
+  const failures: string[] = [];
+  const keys = new Set<string>([...before.keys(), ...after.keys()]);
+  for (const k of keys) {
+    const a = before.getAll(k).map(String);
+    const b = after.getAll(k).map(String);
+    if (a.length !== b.length || a.some((v, i) => v !== b[i])) {
+      failures.push(
+        `${k}: before=${JSON.stringify(a)} after=${JSON.stringify(b)}`
+      );
+    }
+  }
+
+  if (failures.length === 0) {
+    return `✓ FormData round-trip clean (${keys.size} keys)`;
+  }
+  return `✕ FormData round-trip FAILED:\n${failures.join("\n")}`;
+}
 
 /**
  * Smoke-test surface for the local Dexie store. Direct reads + writes
@@ -24,6 +80,7 @@ export function DbSmokeTester() {
   );
   const photosCount = useLiveQuery(() => db.photos_pending.count(), []);
   const [busy, setBusy] = useState(false);
+  const [diagnosticOutput, setDiagnosticOutput] = useState<string | null>(null);
 
   /**
    * Insert a hardcoded test customer directly into Dexie. Every
@@ -114,6 +171,21 @@ export function DbSmokeTester() {
     }
   }
 
+  /** Manual "Sync now" — same as the header chip's button. Useful to
+   *  trigger a drain after a wrapped action without waiting 30s. */
+  async function handleSyncNow() {
+    setBusy(true);
+    try {
+      await runSync("manual");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleRoundtripCheck() {
+    setDiagnosticOutput(runFormDataRoundtripCheck());
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-xl border border-gray-200 bg-white p-5">
@@ -153,6 +225,21 @@ export function DbSmokeTester() {
           </button>
           <button
             type="button"
+            onClick={handleSyncNow}
+            disabled={busy}
+            className="rounded-lg border border-brand-soft bg-brand-soft px-4 py-2 text-sm font-medium text-brand-darker hover:bg-brand-soft disabled:opacity-50"
+          >
+            Sync now
+          </button>
+          <button
+            type="button"
+            onClick={handleRoundtripCheck}
+            className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            FormData round-trip check
+          </button>
+          <button
+            type="button"
             onClick={handleWipe}
             disabled={busy}
             className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
@@ -160,6 +247,17 @@ export function DbSmokeTester() {
             Wipe local DB
           </button>
         </div>
+        {diagnosticOutput && (
+          <pre
+            className={`mt-3 whitespace-pre-wrap rounded-md px-3 py-2 text-xs ${
+              diagnosticOutput.startsWith("✓")
+                ? "bg-green-50 text-green-700"
+                : "bg-red-50 text-red-700"
+            }`}
+          >
+            {diagnosticOutput}
+          </pre>
+        )}
         <dl className="mt-4 grid grid-cols-3 gap-3 text-xs text-gray-500">
           <div>
             <dt className="uppercase tracking-wider">customers</dt>

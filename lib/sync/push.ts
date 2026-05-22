@@ -36,7 +36,6 @@
  */
 
 import { db } from "@/lib/db";
-import type { OutboxEntry } from "@/lib/db";
 import { invokeFromRegistry, UnknownActionError } from "@/lib/sync/registry";
 import {
   classifyError,

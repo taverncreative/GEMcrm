@@ -39,19 +39,11 @@ import { runSync } from "@/lib/sync/engine";
 import { clearAuthExpired, getSyncStatus } from "@/lib/sync/status";
 import {
   InitialSyncScreen,
-  type EntityName,
   type InitialProgressState,
+  type EntityName,
 } from "@/components/sync/initial-sync-screen";
 
 const USER_ID_KEY = "current_user_id";
-
-const ENTITY_KEYS: EntityName[] = [
-  "customers",
-  "sites",
-  "jobs",
-  "agreements",
-  "tasks",
-];
 
 function initialProgress(): InitialProgressState {
   return {

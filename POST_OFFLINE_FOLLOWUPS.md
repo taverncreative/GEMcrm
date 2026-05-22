@@ -158,3 +158,30 @@ The fix is two-piece:
 Then drop the server-side `redirect()` from the action body (or make it a no-op for the wrapped path).
 
 Step 7 picks this up because (a) the redirect pattern is invasive and worth doing alongside the broader detail-page conversion, (b) operators add sites infrequently — not a van use case — so it's safe to leave online-only for step 5 + step 6.
+
+---
+
+## Step 7+ — initial-sync scoping for first-load over 4G
+
+**Surfaced in step 6 recon.** Pull loop downloads all historical records on first install. For a long-running engineer hitting a new phone, the initial sync after re-install could pull thousands of rows over 4G. Acceptable at GEM's current projected scale (50-150 customers + their related rows per engineer); per-entity progress UI mitigates the wait perceptually.
+
+If real-world data volumes make first-load painful (operator anecdote: "stuck on the loading screen for 4 minutes on a bad connection"), consider scoping:
+- Last-N-months filter on the pull RPCs (e.g. only jobs whose `job_date` is within 180 days)
+- An archive boundary — rows older than X stay on the server, pulled on-demand when the operator navigates to historical views
+- Chunked initial sync (pull 100 rows, write to Dexie, repeat) so partial progress is preserved across disconnects
+
+Currently unscoped; revisit when real volume data exists.
+
+---
+
+## Step 6 follow-ups (pending future commits)
+
+Several scope-deferred items from step 6:
+
+1. **Pull-merge guard doesn't check `entity_ids[]`.** Multi-entity outbox entries (e.g. createAgreement which writes both an agreement and N jobs) only protect the primary entity_id from pull clobber. A pull bringing back updates to one of the secondary job_ids during the offline window between push attempts could overwrite. Mitigation: extend the outbox compound index to multi-entry over entity_ids, then pull-merge checks both. Until then: gap accepted — the multi-write actions aren't wrapped yet (step 7).
+
+2. **Compaction "create+update → merged payload"** is partial. Currently `create+update` keeps both entries and replays in order (correct). The spec's "single create with merged payload" would require a wrapper-supplied merge function. Defer until createXxx actions are wrapped (step 7).
+
+3. **Conflict inbox "Discard" doesn't revert local Dexie state.** Removing the outbox entry only — the local change stays. Safe revert needs per-entity undo logic that doesn't generalise (un-soft-delete is one shape; reverse-of-update needs the prior row state which we don't track). Defer until a real use case surfaces.
+
+4. **PhotoUpload component still produces `data:image/...` strings**, not capturePhoto'd client UUIDs. Offline submits of service sheets work (the base64 strings end up in outbox args, server-side handles via legacy upload path), but the offline-photos transport benefits (concurrent uploads, smaller outbox, blob cleanup) only kick in once PhotoUpload switches to `capturePhoto()`. Small refactor; step 7.
