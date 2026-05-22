@@ -118,3 +118,43 @@ A real "Restore" button (and a "Recently deleted" inbox view) would make sense o
 The RLS `Authenticated users can delete (hard)` policy (migration 029) is intentionally kept so an admin can `DELETE FROM customers WHERE id = '<uuid>'` via SQL when needed. This cascades through FK relationships and removes the customer + all their child rows.
 
 A nicer UX would be a "Permanently delete" button visible only to admins, with a 2-step confirmation. Low priority — request is rare and SQL is fine for now.
+
+---
+
+## Step 7: "Online required" UI guards on skip-classified actions
+
+**Surfaced in step 5.** The action audit classified 9 server actions as **skip** (will never go through the local-first outbox path) because they depend on network-only services — email send, PDF storage upload, Supabase Auth admin SDK, or are computed/admin batch jobs that don't model field-operator data.
+
+These actions need a UI-level "needs internet" guard at every call site, otherwise tapping them offline produces a confusing silent failure or a long spinner that eventually times out. Step 7 (detail-page conversion to client components reading from Dexie via `useLiveQuery`) is the natural place to add this — that's when call sites change shape anyway.
+
+**Affected actions:**
+
+| Action | File |
+|---|---|
+| `createInvoiceDraftAction` | `app/(app)/invoices/actions.ts` |
+| `markInvoicePaidAction` | `app/(app)/invoices/actions.ts` |
+| `sendInvoiceFollowUpAction` | `app/(app)/invoices/actions.ts` |
+| `sendInvoiceAction` | `app/(app)/invoices/actions.ts` |
+| `submitFeatureRequestAction` | `app/(app)/settings/actions.ts` |
+| `changePasswordAction` | `app/(app)/settings/actions.ts` |
+| `inviteUserAction` | `app/(app)/settings/actions.ts` |
+| `runRenewalCheckAction` | `app/(app)/settings/actions.ts` |
+| `finishDayAction` | `app/(app)/dashboard/actions.ts` + `app/(app)/settings/actions.ts` (same name, two files, same behaviour) |
+
+**Suggested pattern:** a small `useIsOnline()` hook (mirror of `useIsMobile()`) returning `navigator.onLine` and subscribing to `online`/`offline` window events. Use it to disable the button + tooltip "Needs internet — try again when back online" at each affected call site.
+
+`generateReportAction` is not on this list — it'll be handled by the broader "PDF will generate when synced" placeholder UX that the offline rollout already commits to for PDFs.
+
+---
+
+## Step 7: wrap `createSiteAction` with explicit `router.push()` on local-success
+
+**Deferred from step 5 (edge case F).** `createSiteAction` is a form-action that ends with a server-side `redirect(ROUTES.customerDetail(customerId))`. Wrapping it through `useLocalFirstAction` means the local Dexie write lands but the redirect never fires offline (the server action wasn't called).
+
+The fix is two-piece:
+1. Extend `useLocalFirstAction` with an optional `onLocalSuccess?: (input: TInput) => void` callback that fires after `applyLocal` + `enqueueAction` succeed but before the server dispatch.
+2. At the call site, pass `(input) => router.push(ROUTES.customerDetail(input.customer_id))`.
+
+Then drop the server-side `redirect()` from the action body (or make it a no-op for the wrapped path).
+
+Step 7 picks this up because (a) the redirect pattern is invasive and worth doing alongside the broader detail-page conversion, (b) operators add sites infrequently — not a van use case — so it's safe to leave online-only for step 5 + step 6.

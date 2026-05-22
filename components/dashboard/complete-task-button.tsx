@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
 import { completeTaskAction } from "@/app/(app)/dashboard/actions";
+import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
+import { db } from "@/lib/db";
 import type { ActionState } from "@/types/actions";
 
 const initialState: ActionState = {
@@ -10,10 +11,36 @@ const initialState: ActionState = {
   message: null,
 };
 
+// Wrapper metadata — defined at module level so the reference is stable
+// across renders (the hook's useCallback deps include `meta`).
+interface CompleteTaskInput {
+  task_id: string;
+}
+const meta: WrapMeta<CompleteTaskInput> = {
+  actionName: "completeTaskAction",
+  entityType: "task",
+  entityId: (input) => input.task_id,
+  parseInput: (formData) => {
+    const taskId = formData.get("task_id");
+    return typeof taskId === "string" && taskId
+      ? { task_id: taskId }
+      : null;
+  },
+  applyLocal: async (input) => {
+    const now = new Date().toISOString();
+    await db.tasks.update(input.task_id, {
+      status: "complete",
+      completed_at: now,
+      updated_at: now,
+    });
+  },
+};
+
 export function CompleteTaskButton({ taskId }: { taskId: string }) {
-  const [state, action, isPending] = useActionState(
+  const [state, action, isPending] = useLocalFirstAction(
     completeTaskAction,
-    initialState
+    initialState,
+    meta
   );
 
   if (state.success) {

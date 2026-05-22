@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { wipeLocalDb, dumpLocalDb } from "@/lib/db/dev";
+import { enqueueAction } from "@/lib/db/outbox";
 import { newId } from "@/lib/utils/id";
 
 /**
@@ -17,6 +18,10 @@ import { newId } from "@/lib/utils/id";
 export function DbSmokeTester() {
   const customers = useLiveQuery(() => db.customers.toArray(), []);
   const outboxCount = useLiveQuery(() => db.outbox.count(), []);
+  const outboxEntries = useLiveQuery(
+    () => db.outbox.orderBy("created_at").reverse().limit(20).toArray(),
+    []
+  );
   const photosCount = useLiveQuery(() => db.photos_pending.count(), []);
   const [busy, setBusy] = useState(false);
 
@@ -60,6 +65,36 @@ export function DbSmokeTester() {
     }
   }
 
+  /**
+   * Enqueue a synthetic outbox entry so the section below shows
+   * something without needing to click a real wrapped action.
+   * Exercises the `enqueueAction` helper end-to-end (which is what
+   * the wrapper layer calls internally).
+   */
+  async function addTestOutboxEntry() {
+    setBusy(true);
+    try {
+      await enqueueAction({
+        action_name: "smokeTestAction",
+        args: { hello: "world", ts: Date.now() },
+        entity_type: "customer",
+        entity_id: newId(),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Clear the outbox without touching entity tables. */
+  async function clearOutbox() {
+    setBusy(true);
+    try {
+      await db.outbox.clear();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleWipe() {
     setBusy(true);
     try {
@@ -94,11 +129,27 @@ export function DbSmokeTester() {
           </button>
           <button
             type="button"
+            onClick={addTestOutboxEntry}
+            disabled={busy}
+            className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            + Enqueue outbox entry
+          </button>
+          <button
+            type="button"
             onClick={handleDump}
             disabled={busy}
             className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             Dump to console
+          </button>
+          <button
+            type="button"
+            onClick={clearOutbox}
+            disabled={busy}
+            className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+          >
+            Clear outbox
           </button>
           <button
             type="button"
@@ -129,6 +180,57 @@ export function DbSmokeTester() {
             </dd>
           </div>
         </dl>
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-5">
+        <h2 className="text-sm font-medium text-gray-700">
+          outbox entries (live, newest 20)
+        </h2>
+        {outboxEntries === undefined ? (
+          <p className="mt-2 text-xs text-gray-400">Loading…</p>
+        ) : outboxEntries.length === 0 ? (
+          <p className="mt-2 text-xs text-gray-400">
+            No entries. Click &ldquo;+ Enqueue outbox entry&rdquo; or
+            trigger a wrapped action (e.g. tick a customer&apos;s review
+            checkbox).
+          </p>
+        ) : (
+          <ul className="mt-3 divide-y divide-gray-100 text-xs">
+            {outboxEntries.map((e) => (
+              <li key={e.id} className="py-2 font-mono">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-semibold text-gray-900">
+                    {e.action_name}
+                  </span>
+                  <span className="text-gray-400">
+                    {new Date(e.created_at).toLocaleTimeString()}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-gray-500">
+                  {e.entity_type} · {e.entity_id.slice(0, 8)}
+                  {e.attempts > 0 && (
+                    <span className="ml-2 text-amber-600">
+                      ({e.attempts} attempts)
+                    </span>
+                  )}
+                  {e.last_error && (
+                    <span className="ml-2 text-red-600">
+                      err: {e.last_error}
+                    </span>
+                  )}
+                </div>
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-gray-400 hover:text-gray-600">
+                    args
+                  </summary>
+                  <pre className="mt-1 overflow-x-auto rounded bg-gray-50 p-2 text-[11px] text-gray-700">
+                    {JSON.stringify(e.args, null, 2)}
+                  </pre>
+                </details>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-5">

@@ -1,9 +1,46 @@
 "use client";
 
-import { useActionState } from "react";
 import { updateAgreementStatusAction } from "@/app/(app)/agreements/[id]/actions";
+import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
+import { db } from "@/lib/db";
 import type { ActionState } from "@/types/actions";
 import type { AgreementStatus } from "@/types/database";
+
+// Module-level meta so the hook's useCallback deps stay stable across
+// renders. The form has two fields — agreement_id and status — and we
+// validate the status against the same union the server action checks.
+const VALID_STATUSES: readonly AgreementStatus[] = [
+  "active",
+  "paused",
+  "cancelled",
+];
+interface UpdateAgreementStatusInput {
+  agreement_id: string;
+  status: AgreementStatus;
+}
+const updateAgreementStatusMeta: WrapMeta<UpdateAgreementStatusInput> = {
+  actionName: "updateAgreementStatusAction",
+  entityType: "agreement",
+  entityId: (input) => input.agreement_id,
+  parseInput: (formData) => {
+    const agreementId = formData.get("agreement_id");
+    const status = formData.get("status");
+    if (typeof agreementId !== "string" || typeof status !== "string") {
+      return null;
+    }
+    if (!VALID_STATUSES.includes(status as AgreementStatus)) return null;
+    return {
+      agreement_id: agreementId,
+      status: status as AgreementStatus,
+    };
+  },
+  applyLocal: async (input) => {
+    await db.agreements.update(input.agreement_id, {
+      status: input.status,
+      updated_at: new Date().toISOString(),
+    });
+  },
+};
 
 const initialState: ActionState = {
   success: false,
@@ -22,9 +59,11 @@ function StatusButton({
   label: string;
   className: string;
 }) {
-  const [state, action, isPending] = useActionState(
+  // Wrapped: local-first Dexie update + outbox enqueue + offline-tolerant.
+  const [state, action, isPending] = useLocalFirstAction(
     updateAgreementStatusAction,
-    initialState
+    initialState,
+    updateAgreementStatusMeta
   );
 
   return (

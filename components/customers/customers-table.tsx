@@ -6,8 +6,28 @@ import { CustomerSidePanel } from "@/components/customers/customer-side-panel";
 import { formatAddress } from "@/lib/utils/format-address";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
 import { ROUTES } from "@/lib/constants/routes";
+import { setReviewReceivedAction } from "@/app/(app)/customers/actions";
+import { wrapAction } from "@/lib/actions/wrap";
+import { db } from "@/lib/db";
 import type { CustomerListItem } from "@/lib/data/customers";
 import type { CallType } from "@/types/database";
+
+// Local-first wrapper for the inline review-received toggle. Wrapping
+// the action at module level (not inside the component) keeps the
+// reference stable across renders. The wrapped function preserves the
+// {success, error} shape the existing `ReviewCheckbox.flip()` already
+// checks, so the optimistic-UI revert path keeps working.
+const setReviewReceivedLocalFirst = wrapAction(setReviewReceivedAction, {
+  actionName: "setReviewReceivedAction",
+  entityType: "customer",
+  entityId: ([customerId]) => customerId,
+  applyLocal: async ([customerId, received]) => {
+    await db.customers.update(customerId, {
+      google_review_received: received,
+      updated_at: new Date().toISOString(),
+    });
+  },
+});
 
 interface CustomersTableProps {
   rows: CustomerListItem[];
@@ -305,9 +325,10 @@ function ReviewCheckbox({
     setChecked(next);
     setBusy(true);
     try {
-      // Lazy import keeps the bundle a bit smaller — only loaded when used.
-      const mod = await import("@/app/(app)/customers/actions");
-      const res = await mod.setReviewReceivedAction(customerId, next);
+      // Local-first: Dexie row updated immediately, action queued in the
+      // outbox, server call fires in the background when online. The
+      // {success, error} shape matches the original raw-action return.
+      const res = await setReviewReceivedLocalFirst(customerId, next);
       if (!res.success) setChecked(!next);
     } catch {
       setChecked(!next);

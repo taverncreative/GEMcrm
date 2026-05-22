@@ -3,8 +3,39 @@
 import { useActionState } from "react";
 import { updateJobStatusAction } from "@/app/(app)/jobs/[id]/actions";
 import { JOB_STATUS_COLORS } from "@/lib/constants/job-labels";
+import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
+import { db } from "@/lib/db";
 import type { ActionState } from "@/types/actions";
 import type { JobStatus } from "@/types/database";
+
+// Meta for the JobQuickAction wrapper — module-level for ref stability.
+const VALID_STATUSES: readonly JobStatus[] = [
+  "scheduled",
+  "in_progress",
+  "completed",
+];
+interface UpdateJobStatusInput {
+  job_id: string;
+  status: JobStatus;
+}
+const updateJobStatusMeta: WrapMeta<UpdateJobStatusInput> = {
+  actionName: "updateJobStatusAction",
+  entityType: "job",
+  entityId: (input) => input.job_id,
+  parseInput: (formData) => {
+    const jobId = formData.get("job_id");
+    const status = formData.get("status");
+    if (typeof jobId !== "string" || typeof status !== "string") return null;
+    if (!VALID_STATUSES.includes(status as JobStatus)) return null;
+    return { job_id: jobId, status: status as JobStatus };
+  },
+  applyLocal: async (input) => {
+    await db.jobs.update(input.job_id, {
+      job_status: input.status,
+      updated_at: new Date().toISOString(),
+    });
+  },
+};
 
 const initialState: ActionState = {
   success: false,
@@ -100,9 +131,11 @@ export function JobQuickAction({
   currentStatus: JobStatus;
 }) {
   // Hooks must be called unconditionally, so declare before any early return.
-  const [, action, isPending] = useActionState(
+  // Wrapped: local-first Dexie update + outbox enqueue + offline-tolerant.
+  const [, action, isPending] = useLocalFirstAction(
     updateJobStatusAction,
-    initialState
+    initialState,
+    updateJobStatusMeta
   );
 
   if (currentStatus === "completed") return null;
