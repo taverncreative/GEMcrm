@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { QuickActions } from "@/components/dashboard/quick-actions";
+import { SessionExpiredBanner } from "@/components/sync/session-expired-banner";
 
 const SIDEBAR_KEY = "gemcrm-sidebar-collapsed";
 
@@ -49,6 +50,10 @@ export function AppShell({
       />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar userEmail={userEmail} onToggleSidebar={toggleMobileOpen} />
+        {/* Session-expired banner — only visible when sync has hit a
+            401/403. Sits above the quick-actions bar so the operator
+            sees it before they reach for any control. */}
+        <SessionExpiredBanner />
         {/* Persistent quick-actions bar — sits below the topbar on every
             route so booking / invoice / customer creation is always one
             click away. */}

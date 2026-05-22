@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { ROUTES } from "@/lib/constants/routes";
+import { SyncStatusIndicator } from "@/components/sync/sync-status-indicator";
 
 interface TopbarProps {
   userEmail: string;
@@ -48,8 +49,9 @@ export function Topbar({ userEmail, onToggleSidebar }: TopbarProps) {
 
       <div className="md:flex-1" />
 
-      {/* User info + logout */}
+      {/* Sync status chip + user info + logout */}
       <div className="flex items-center gap-3">
+        <SyncStatusIndicator />
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand/20 text-xs font-medium text-brand">
           {userEmail.charAt(0).toUpperCase()}
         </div>
