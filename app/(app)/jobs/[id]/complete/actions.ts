@@ -70,22 +70,40 @@ export async function completeServiceSheetAction(
     formData.get("photo_data_urls") as string | null
   );
 
+  // Defensive: formData.get() returns null when a field is missing.
+  // Casting to string is a TypeScript lie — at runtime the value is
+  // still null, and Zod's `z.string().optional().default("")` rejects
+  // null because optional() accepts undefined only, not null.
+  //
+  // This bit when Customer Present = No: the visible <input
+  // name="client_name"> lives inside the `{clientPresent && ...}`
+  // conditional in the form, so the field isn't in FormData at all.
+  // formData.get("client_name") → null → Zod failure → action returns
+  // { success: false, errors: { client_name: "Expected string..." } }
+  // → outbox retries 4x → stuck in the conflict inbox.
+  //
+  // Fix: coerce null → "" for every field before Zod sees it.
+  // Mirrors the same pattern from createCustomerAction (where the
+  // domestic-customer save was silently failing for the same reason).
+  const str = (key: string): string =>
+    (formData.get(key) as string | null) ?? "";
+
   const raw = {
     job_id: jobId,
-    call_type: formData.get("call_type") as string,
+    call_type: str("call_type"),
     pest_species: pestSpecies,
-    findings: formData.get("findings") as string,
-    recommendations: formData.get("recommendations") as string,
-    report_notes: formData.get("report_notes") as string,
+    findings: str("findings"),
+    recommendations: str("recommendations"),
+    report_notes: str("report_notes"),
     method_used: methodUsed,
-    pesticides_used: formData.get("pesticides_used") as string,
-    risk_level: formData.get("risk_level") as string,
-    risk_comments: formData.get("risk_comments") as string,
+    pesticides_used: str("pesticides_used"),
+    risk_level: str("risk_level"),
+    risk_comments: str("risk_comments"),
     photo_data_urls: photoDataUrls,
-    technician_signature: formData.get("technician_signature") as string,
-    client_present: formData.get("client_present") as string,
-    client_signature: formData.get("client_signature") as string,
-    client_name: formData.get("client_name") as string,
+    technician_signature: str("technician_signature"),
+    client_present: str("client_present"),
+    client_signature: str("client_signature"),
+    client_name: str("client_name"),
   };
 
   const result = ServiceSheetSchema.safeParse(raw);

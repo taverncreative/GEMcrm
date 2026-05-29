@@ -99,10 +99,30 @@ export function classifyActionResult(result: unknown): SyncResultClass {
       success: boolean;
       message?: string | null;
       error?: string | null;
+      errors?: Record<string, string>;
     };
     if (r.success) return { kind: "ok" };
-    const message = r.message ?? r.error ?? "Action reported failure";
-    return { kind: "client-error", message };
+
+    // Surface the actual reason in last_error / the conflict inbox.
+    // Order of preference: explicit message > explicit error > the
+    // field-by-field errors object (which most server actions populate
+    // for validation failures). Without this fallback the inbox just
+    // showed "Action reported failure" which buried the cause — the
+    // null-vs-undefined Zod failure on client_name took several rounds
+    // to find precisely because the actual error never reached the UI.
+    let message = r.message ?? r.error ?? null;
+    if (!message && r.errors && typeof r.errors === "object") {
+      const entries = Object.entries(r.errors).filter(
+        ([, v]) => typeof v === "string" && v.length > 0
+      );
+      if (entries.length > 0) {
+        message = entries.map(([k, v]) => `${k}: ${v}`).join("; ");
+      }
+    }
+    return {
+      kind: "client-error",
+      message: message ?? "Action reported failure",
+    };
   }
   return { kind: "ok" };
 }

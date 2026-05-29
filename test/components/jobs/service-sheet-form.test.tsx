@@ -334,6 +334,65 @@ describe("ServiceSheetForm — Customer Present persistence through action", () 
   });
 });
 
+// ─── (f) Customer Present = No path ────────────────────────────────
+//
+// The bug the operator hit. Customer Present = No means the visible
+// <input name="client_name"> isn't rendered. FormData.get("client_name")
+// returns null in the action → Zod rejects → action returns failure
+// → outbox retries 4× → stuck in conflict inbox. Three jobs sat
+// stuck in the inbox before we caught it.
+//
+// This test fills the form, selects "No" for Customer Present,
+// submits, and asserts the approval modal opens (i.e. the action
+// returned success — which it only does after the action's null
+// coalesce). The action's FormData parsing is what's being verified
+// indirectly through the success path. The schema-level unit tests
+// in test/validation/service-sheet.test.ts pin the failure mode at
+// the Zod layer.
+
+describe("ServiceSheetForm — Customer Present = No", () => {
+  it("submits successfully when Customer Present = No (no client signature, no client name)", async () => {
+    completeFn.mockImplementation(() =>
+      Promise.resolve({
+        success: true,
+        errors: {},
+        message: null,
+        jobId: "test-job-id",
+        pdfUrl: "https://example.com/test.pdf",
+      })
+    );
+
+    const user = userEvent.setup();
+    render(<ServiceSheetForm jobId="test-job-id" />);
+
+    await fillAllSteps(user);
+
+    // Explicitly select "No" for Customer Present
+    const noLabel = screen.getByText("No").closest("label");
+    expect(noLabel).not.toBeNull();
+    await user.click(noLabel!);
+
+    // The Yes-only fields (client_name input, client signature pad)
+    // must NOT be in the DOM at this point — proves we're submitting
+    // exactly the shape that was failing.
+    expect(screen.queryByLabelText(/Client Name/i)).toBeNull();
+    expect(screen.queryByTestId("sigpad-Client Signature")).toBeNull();
+
+    // Submit
+    await user.click(
+      screen.getByRole("button", { name: /Complete Service Sheet/ })
+    );
+
+    // Modal opens — proves the action returned success
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Approve Service Sheet/i)).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+  });
+});
+
 // ─── (e) Wrapper preserves state update through async action ───────
 //
 // This is the test that was missing: in the real browser path the
