@@ -1,11 +1,22 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Image from "next/image";
+import { capturePhoto, type PhotoParentType } from "@/lib/db/photos";
+import { db } from "@/lib/db";
 
 interface PhotoUploadProps {
-  /** Called whenever the list changes. Values are data-URLs (base64). */
-  onChange: (photos: string[]) => void;
+  /** Where this photo set is attached — used by `capturePhoto` to
+   *  tag the photos_pending row so the sync engine can group / clean
+   *  up by parent. */
+  parentType: PhotoParentType;
+  /** Stable id of the parent record (jobId for a service sheet). */
+  parentId: string;
+  /** Called with the list of client UUIDs whenever the photo list
+   *  changes. The form serialises these into the `photo_data_urls`
+   *  hidden field — server-side `writeServiceSheet` resolves each
+   *  UUID to a Storage URL via `getPublicUrl`. */
+  onChange: (photoIds: string[]) => void;
 }
 
 const MAX_FILES = 10;
@@ -13,47 +24,68 @@ const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8 MB per file
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
 interface QueuedPhoto {
+  /** Client-generated UUID stored in photos_pending. Goes into the
+   *  form's `photo_data_urls` hidden field. */
   id: string;
-  dataUrl: string;
+  /** Object URL minted from the compressed blob, for the preview tile.
+   *  Revoked when the photo is removed or the component unmounts. */
+  src: string;
   name: string;
   size: number;
 }
 
 /**
- * Drag-and-drop photo picker.
+ * Photo picker for the service-sheet form.
  *
- * Reads each file as a base64 data-URL and hands the full list to the parent
- * via `onChange`. Base64 matches the existing pattern (signatures) — the server
- * action decodes and uploads to Supabase Storage.
+ * **Offline-first**: every file goes through `capturePhoto()` which
+ *   1. compresses to 1600px JPEG q=0.82 (~16× smaller than a raw iPhone
+ *      photo),
+ *   2. stashes the resulting Blob in IndexedDB's `photos_pending`,
+ *   3. returns a client-generated UUID.
  *
- * Why read everything as data-URL client-side rather than POSTing files directly:
- *   - Consistency with the rest of the app's upload pipeline (signatures).
- *   - Works with the existing action-state form flow (plain FormData strings).
- *   - No multipart or presigned-URL infra required.
- *   - Trade-off: large files bloat the request. Hard-capped at MAX_FILE_SIZE.
+ * The UUID is what gets handed to the parent via `onChange` — the form
+ * stores these in a hidden `photo_data_urls` field and submits them
+ * through the wrapped action. The sync engine's photos loop uploads
+ * the blob in parallel; the server-side action replay computes the
+ * Storage URL from the UUID directly. End-to-end offline.
+ *
+ * Preview tiles use an Object URL minted from the compressed blob.
+ * Object URLs are revoked on remove / unmount to avoid leaking memory.
+ *
+ * Removing a photo from the picker also deletes its photos_pending
+ * row — there's no point letting the sync engine upload a blob the
+ * user has explicitly discarded.
  */
-export function PhotoUpload({ onChange }: PhotoUploadProps) {
+export function PhotoUpload({
+  parentType,
+  parentId,
+  onChange,
+}: PhotoUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<QueuedPhoto[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+
+  // Track all Object URLs we've minted so unmount can revoke them.
+  // setPhotos handles the per-photo case; this handles tab close /
+  // navigate-away.
+  const ownedSrcsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const owned = ownedSrcsRef.current;
+    return () => {
+      for (const src of owned) URL.revokeObjectURL(src);
+      owned.clear();
+    };
+  }, []);
 
   const publish = useCallback(
     (list: QueuedPhoto[]) => {
       setPhotos(list);
-      onChange(list.map((p) => p.dataUrl));
+      onChange(list.map((p) => p.id));
     },
     [onChange]
   );
-
-  async function fileToDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error ?? new Error("Read failed"));
-      reader.readAsDataURL(file);
-    });
-  }
 
   async function addFiles(files: FileList | File[]) {
     setError(null);
@@ -78,26 +110,52 @@ export function PhotoUpload({ onChange }: PhotoUploadProps) {
       accepted.push(f);
     }
 
+    setIsBusy(true);
     try {
-      const loaded = await Promise.all(
-        accepted.map(async (f) => ({
-          id: `${f.name}-${f.size}-${f.lastModified}-${crypto.randomUUID()}`,
-          dataUrl: await fileToDataUrl(f),
-          name: f.name,
-          size: f.size,
-        }))
-      );
+      const loaded: QueuedPhoto[] = [];
+      for (const f of accepted) {
+        // capturePhoto compresses + stores blob in photos_pending,
+        // returns the client UUID. Sequential rather than Promise.all
+        // because compression is canvas-bound and parallel work just
+        // contends for the same main-thread canvas.
+        const id = await capturePhoto(f, parentType, parentId);
+        // Read back the freshly-stored blob to mint a preview URL.
+        const row = await db.photos_pending.get(id);
+        if (!row) {
+          rejected.push(`${f.name}: capture failed`);
+          continue;
+        }
+        const src = URL.createObjectURL(row.blob);
+        ownedSrcsRef.current.add(src);
+        loaded.push({ id, src, name: f.name, size: f.size });
+      }
       publish([...photos, ...loaded]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to read files");
+      setError(e instanceof Error ? e.message : "Failed to capture photos");
+    } finally {
+      setIsBusy(false);
     }
 
     if (rejected.length > 0) {
-      setError(rejected.join(" · "));
+      setError((prev) =>
+        [prev, rejected.join(" · ")].filter(Boolean).join(" · ")
+      );
     }
   }
 
-  function removeAt(id: string) {
+  async function removeAt(id: string) {
+    const photo = photos.find((p) => p.id === id);
+    if (photo) {
+      URL.revokeObjectURL(photo.src);
+      ownedSrcsRef.current.delete(photo.src);
+      // Drop the photos_pending row too — the user has discarded this
+      // photo, no point letting the sync engine upload it.
+      try {
+        await db.photos_pending.delete(id);
+      } catch {
+        // Non-fatal — the row may already be gone if sync raced us.
+      }
+    }
     publish(photos.filter((p) => p.id !== id));
   }
 
@@ -128,7 +186,8 @@ export function PhotoUpload({ onChange }: PhotoUploadProps) {
         }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={onDrop}
-        className={`block w-full rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
+        disabled={isBusy}
+        className={`block w-full rounded-xl border-2 border-dashed p-8 text-center transition-colors disabled:cursor-wait disabled:opacity-70 ${
           isDragging
             ? "border-brand bg-brand-soft"
             : "border-gray-200 bg-gray-50 hover:border-gray-300 hover:bg-gray-100"
@@ -148,10 +207,14 @@ export function PhotoUpload({ onChange }: PhotoUploadProps) {
           />
         </svg>
         <p className="mt-3 text-sm font-medium text-gray-700">
-          {isDragging ? "Drop to add" : "Drag photos here, or click to browse"}
+          {isBusy
+            ? "Compressing…"
+            : isDragging
+            ? "Drop to add"
+            : "Drag photos here, or click to browse"}
         </p>
         <p className="mt-1 text-xs text-gray-400">
-          Up to {MAX_FILES} photos · 8 MB each
+          Up to {MAX_FILES} photos · 8 MB each · saved locally first
         </p>
       </button>
 
@@ -179,7 +242,7 @@ export function PhotoUpload({ onChange }: PhotoUploadProps) {
             >
               <div className="relative aspect-square w-full">
                 <Image
-                  src={photo.dataUrl}
+                  src={photo.src}
                   alt={photo.name}
                   fill
                   sizes="(max-width: 768px) 50vw, 25vw"
@@ -189,7 +252,7 @@ export function PhotoUpload({ onChange }: PhotoUploadProps) {
               </div>
               <button
                 type="button"
-                onClick={() => removeAt(photo.id)}
+                onClick={() => void removeAt(photo.id)}
                 aria-label={`Remove ${photo.name}`}
                 className="absolute right-1 top-1 rounded-full bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
               >

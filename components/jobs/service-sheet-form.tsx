@@ -30,6 +30,7 @@ import { PhotoUpload } from "@/components/ui/photo-upload";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
+import { isPhotoClientId, photoPublicUrl } from "@/lib/photos/path";
 
 // Re-parse the form fields the action expects, mirroring the server-side
 // completeServiceSheetAction shape. Returning null skips the local write
@@ -88,6 +89,17 @@ const completeServiceSheetMeta: WrapMeta<ServiceSheetInput> = {
   parseInput: parseServiceSheetFormData,
   applyLocal: async (input) => {
     const now = new Date().toISOString();
+    // photo_data_urls holds either client-UUID strings (offline path,
+    // photos already in photos_pending) or `data:image/...` strings
+    // (online direct path). For local rendering we resolve UUIDs to
+    // their deterministic Storage URL — matches what writeServiceSheet
+    // writes server-side. The Storage object behind the URL doesn't
+    // exist until the photos loop catches up, so the URL is dead
+    // briefly — same broken-image trade-off step 6 already committed
+    // to. data: URLs are renderable as-is.
+    const localPhotoUrls = input.photo_data_urls.map((ref) =>
+      isPhotoClientId(ref) ? photoPublicUrl(ref) : ref
+    );
     await db.jobs.update(input.job_id, {
       call_type: input.call_type,
       pest_species: input.pest_species,
@@ -99,11 +111,7 @@ const completeServiceSheetMeta: WrapMeta<ServiceSheetInput> = {
       risk_level: input.risk_level,
       risk_comments: input.risk_comments || null,
       report_notes: input.report_notes || null,
-      // photo_data_urls holds either client-UUID strings (offline path,
-      // photos already in photos_pending) or `data:image/...` strings
-      // (online direct path). Both shapes get stored verbatim — the
-      // server-side writeServiceSheet handles each at replay.
-      photo_urls: input.photo_data_urls,
+      photo_urls: localPhotoUrls,
       client_present: input.client_present,
       client_name: input.client_name || null,
       job_status: "in_progress",
@@ -586,7 +594,11 @@ export function ServiceSheetForm({
         <div>
           <label className={labelClass}>Additional Photos</label>
           <p className="mb-3 text-xs text-gray-400">Optional. Include photos of findings, treatment areas, or anything worth documenting.</p>
-          <PhotoUpload onChange={onPhotosChange} />
+          <PhotoUpload
+            parentType="job"
+            parentId={jobId}
+            onChange={onPhotosChange}
+          />
         </div>
 
         <div className="flex justify-between pt-4">

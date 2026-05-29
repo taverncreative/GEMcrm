@@ -50,3 +50,34 @@ export function photoStoragePath(photoId: string): string {
 
 /** Bucket name — exported so route handlers don't hard-code it. */
 export const PHOTO_BUCKET = BUCKET;
+
+/**
+ * Compute the public Storage URL for a photoId, client-side, without
+ * needing a Supabase client. Mirrors `supabase.storage.from(bucket)
+ * .getPublicUrl(path)` — the URL is stable and deterministic.
+ *
+ * Used by ServiceSheetForm's wrapper meta (`applyLocal`) to write
+ * renderable URLs into Dexie's `jobs.photo_urls` immediately on
+ * offline submit. The Storage object behind that URL doesn't exist
+ * yet (the photos loop hasn't uploaded), so the URL is "dead" until
+ * the photos loop catches up — brief broken-image, then live. Same
+ * deterministic trade-off step 6 already committed to.
+ *
+ * Throws if photoId is malformed (same UUID regex as the rest of this
+ * module) or if NEXT_PUBLIC_SUPABASE_URL isn't configured.
+ */
+export function photoPublicUrl(photoId: string): string {
+  if (!isPhotoClientId(photoId)) {
+    throw new Error(
+      `photoPublicUrl: invalid photoId (must be a UUID): ${photoId.slice(0, 40)}`
+    );
+  }
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!base) {
+    throw new Error(
+      "photoPublicUrl: NEXT_PUBLIC_SUPABASE_URL is not configured"
+    );
+  }
+  // Supabase public URL shape: {base}/storage/v1/object/public/{bucket}/{path}
+  return `${base}/storage/v1/object/public/${BUCKET}/${photoStoragePath(photoId)}`;
+}
