@@ -9,19 +9,27 @@
  * convention.
  *
  * Server reads (RSC) replaced with Dexie + useLiveQuery so the route
- * renders offline. The pre-filled fields (call_type, pest_species,
- * findings, etc) are exactly what the form needs to display its
- * "carry forward from last visit" defaults — those carried over from
- * the previous job state, which the pull has into Dexie.
+ * renders offline.
  *
- * If the job is already completed the page used to `redirect()` to
- * the detail page server-side. From a client component we use
- * `useRouter().replace()` post-mount instead. There's a brief flash
- * of the skeleton in this case; acceptable for the rare path.
+ * Already-completed handling
+ * --------------------------
+ * The previous (RSC) page called `redirect()` server-side before any
+ * render. Surface-2 step-7 v1 tried to mimic that with a post-mount
+ * useEffect + router.replace — that's too late, it fires AFTER the
+ * form has mounted and become interactive, so an in-flight pull that
+ * flipped status to "completed" would yank the form out from under
+ * the operator (modal closes, button vanishes, typing lost).
+ *
+ * Fix: gate the render directly. If status is "completed" at any
+ * point, render a clear "already completed" view with a link to the
+ * detail page. No useEffect, no router dance. If the operator was
+ * mid-edit when the pull landed they DO lose their in-progress
+ * changes — but that's a clear "this got finished elsewhere"
+ * message, not a silent yank. Same outcome as the RSC redirect,
+ * minus the silent navigation.
  */
 
-import { useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -67,10 +75,43 @@ function NotFoundView() {
   );
 }
 
+function AlreadyCompletedView({ jobId }: { jobId: string }) {
+  return (
+    <div className="rounded-xl bg-white p-12 text-center shadow-sm">
+      <svg
+        className="mx-auto h-12 w-12 text-green-500"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+        />
+      </svg>
+      <h2 className="mt-4 text-base font-semibold text-gray-900">
+        Service sheet already completed
+      </h2>
+      <p className="mt-1 text-sm text-gray-500">
+        This job has been signed off and finalised. The service sheet is
+        viewable on the job detail page.
+      </p>
+      <Link
+        href={ROUTES.jobDetail(jobId)}
+        className="mt-4 inline-block rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark"
+      >
+        View service sheet
+      </Link>
+    </div>
+  );
+}
+
 export default function CompleteServiceSheetPage() {
   const params = useParams<{ id: string }>();
   const id = typeof params.id === "string" ? params.id : "";
-  const router = useRouter();
 
   const job = useLiveQuery(
     async () => {
@@ -99,19 +140,19 @@ export default function CompleteServiceSheetPage() {
     [site?.customer_id]
   );
 
-  // Already-completed jobs bounce back to the detail page — the form
-  // would just rewrite a finalised sheet. Replaces (not pushes) so the
-  // back button skips this URL.
-  useEffect(() => {
-    if (job?.job_status === "completed") {
-      router.replace(ROUTES.jobDetail(job.id));
-    }
-  }, [job, router]);
+  // ─── Render gating ────────────────────────────────────────────────
 
   if (job === undefined) return <PageSkeleton />;
   if (job === null) return <NotFoundView />;
-  // While the redirect effect is in flight, keep the skeleton up.
-  if (job.job_status === "completed") return <PageSkeleton />;
+
+  // Completed-job gate runs BEFORE the form ever mounts. If status
+  // changes to "completed" mid-session (rare — another device, or
+  // post-approve pull), the form unmounts and this view takes over.
+  // The operator's in-progress local edits are lost; the message
+  // makes the cause clear.
+  if (job.job_status === "completed") {
+    return <AlreadyCompletedView jobId={job.id} />;
+  }
 
   const siteLoading = !!job.site_id && site === undefined;
   const customerLoading = !!site?.customer_id && customer === undefined;

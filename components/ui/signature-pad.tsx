@@ -44,9 +44,19 @@ export function SignaturePad({ label, onSignature, onClear }: SignaturePadProps)
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
-      // Resizing a canvas clears its content and transform — reapply both.
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
+      const newW = Math.round(rect.width * dpr);
+      const newH = Math.round(rect.height * dpr);
+      // CRITICAL: assignment to `canvas.width` / `.height` clears the
+      // bitmap (HTML5 spec). ResizeObserver fires on any sub-pixel
+      // layout shift (mobile address-bar collapse, scroll-induced
+      // viewport changes, sibling re-renders changing width by 1px).
+      // Skip the assignment when dimensions already match — preserves
+      // any in-progress signature across noop resizes. True resizes
+      // (orientation change, window drag) still clear; the user would
+      // need to re-sign in that rare case.
+      if (canvas.width === newW && canvas.height === newH) return;
+      canvas.width = newW;
+      canvas.height = newH;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
       configureContext(ctx);

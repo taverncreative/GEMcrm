@@ -49,7 +49,7 @@
  * compute authoritatively.
  */
 
-import { useActionState, useCallback } from "react";
+import { useActionState, useCallback, startTransition } from "react";
 import { enqueueAction, type EntityType } from "@/lib/db/outbox";
 
 export interface WrapMeta<TInput> {
@@ -182,8 +182,20 @@ export function useLocalFirstAction<TState, TInput>(
       }
 
       // 3. Online → dispatch the server action. Offline → skip.
+      //
+      // `baseDispatch` from useActionState MUST run inside a
+      // transition for `isPending` to update reliably. React 19's
+      // form-action prop auto-wraps the outer call in a transition,
+      // but the transition context is lost across our `await`s above —
+      // by the time we reach this line, no transition is active.
+      // Explicit `startTransition` restores it. Without this React
+      // logs "called outside of a transition" and isPending sticks at
+      // its previous value, which broke the "Saving…" UI feedback on
+      // both surface 1 and surface 2.
       if (isOnline()) {
-        baseDispatch(formData);
+        startTransition(() => {
+          baseDispatch(formData);
+        });
       }
     },
     [baseDispatch, meta]
