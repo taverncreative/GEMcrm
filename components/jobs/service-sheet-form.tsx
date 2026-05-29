@@ -175,6 +175,19 @@ export function ServiceSheetForm({
   const [callType, setCallType] = useState(defaultCallType);
   const [selectedPests, setSelectedPests] = useState<string[]>(defaultPests);
   const [selectedMethods, setSelectedMethods] = useState<string[]>(defaultMethods);
+  // All text inputs below are CONTROLLED via state. React 19's
+  // <form action={fn}> resets uncontrolled inputs to their defaults
+  // whenever the action returns (regardless of success/error payload),
+  // which would wipe operator-typed values on a validation bounce.
+  // Controlled inputs survive — state holds the truth; React rebinds
+  // value={state} on every render.
+  const [findings, setFindings] = useState(defaultFindings);
+  const [recommendations, setRecommendations] = useState(defaultRecommendations);
+  const [pesticidesUsed, setPesticidesUsed] = useState(defaultPesticides);
+  const [reportNotes, setReportNotes] = useState(defaultReportNotes);
+  const [riskLevel, setRiskLevel] = useState(defaultRiskLevel);
+  const [riskComments, setRiskComments] = useState("");
+  const [clientName, setClientName] = useState("");
   const [techSig, setTechSig] = useState("");
   const [clientSig, setClientSig] = useState("");
   const [customerPresent, setCustomerPresent] = useState<"yes" | "no" | "">("");
@@ -214,6 +227,26 @@ export function ServiceSheetForm({
         followUpDate: scheduleFollowUp ? followUpDate : null,
       });
       if (res.success) {
+        // Mirror the server-side completion to Dexie immediately so
+        // surface 1's "Fill Service Sheet" entry point hides via
+        // useLiveQuery the moment the operator lands there — was
+        // waiting up to 30s for the next pull tick to bring
+        // job_status="completed" down. The server already has the
+        // change (we just confirmed res.success); no outbox entry
+        // needed.
+        try {
+          await db.jobs.update(state.jobId!, {
+            job_status: "completed",
+            updated_at: new Date().toISOString(),
+          });
+        } catch (err) {
+          // Non-fatal — the pull will catch up at worst case 30s
+          // later. Log and continue with the navigation.
+          console.warn(
+            "[approveServiceSheet] local mirror failed:",
+            err
+          );
+        }
         router.push(ROUTES.jobDetail(state.jobId!));
       } else {
         setApprovalError(res.message ?? "Failed to finalise");
@@ -454,7 +487,8 @@ export function ServiceSheetForm({
             name="findings"
             rows={4}
             required
-            defaultValue={defaultFindings}
+            value={findings}
+            onChange={(e) => setFindings(e.target.value)}
             placeholder="What did you find on site?"
             className={inputClass}
           />
@@ -470,7 +504,8 @@ export function ServiceSheetForm({
             name="recommendations"
             rows={3}
             required
-            defaultValue={defaultRecommendations}
+            value={recommendations}
+            onChange={(e) => setRecommendations(e.target.value)}
             placeholder="Recommendations for the customer"
             className={inputClass}
           />
@@ -512,7 +547,8 @@ export function ServiceSheetForm({
             name="pesticides_used"
             rows={2}
             required
-            defaultValue={defaultPesticides}
+            value={pesticidesUsed}
+            onChange={(e) => setPesticidesUsed(e.target.value)}
             placeholder="Products and quantities used"
             className={inputClass}
           />
@@ -533,7 +569,8 @@ export function ServiceSheetForm({
             id="report_notes"
             name="report_notes"
             rows={3}
-            defaultValue={defaultReportNotes}
+            value={reportNotes}
+            onChange={(e) => setReportNotes(e.target.value)}
             placeholder="e.g. access issues, staff observations, follow-up needed..."
             className="block w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
           />
@@ -563,7 +600,15 @@ export function ServiceSheetForm({
                       : "border-red-200 text-red-700 has-[:checked]:border-red-600 has-[:checked]:bg-red-600"
                 }`}
               >
-                <input type="radio" name="risk_level" value={level} defaultChecked={level === defaultRiskLevel} required className="sr-only" />
+                <input
+                  type="radio"
+                  name="risk_level"
+                  value={level}
+                  checked={riskLevel === level}
+                  onChange={() => setRiskLevel(level)}
+                  required
+                  className="sr-only"
+                />
                 {RISK_LEVEL_LABELS[level]}
               </label>
             ))}
@@ -577,7 +622,16 @@ export function ServiceSheetForm({
           <label htmlFor="risk_comments" className={labelClass}>
             Risk Assessment Comments <span className="text-red-500">*</span>
           </label>
-          <textarea id="risk_comments" name="risk_comments" rows={3} required className={inputClass} placeholder="Describe the risks identified and any mitigations" />
+          <textarea
+            id="risk_comments"
+            name="risk_comments"
+            rows={3}
+            required
+            value={riskComments}
+            onChange={(e) => setRiskComments(e.target.value)}
+            className={inputClass}
+            placeholder="Describe the risks identified and any mitigations"
+          />
           {state.errors.risk_comments && (
             <p className="mt-1 text-sm text-red-500">{state.errors.risk_comments}</p>
           )}
@@ -652,7 +706,15 @@ export function ServiceSheetForm({
           <div className="space-y-5 rounded-xl border border-gray-200 bg-gray-50 p-5">
             <div>
               <label htmlFor="client_name" className={labelClass}>Client Name</label>
-              <input id="client_name" type="text" name="client_name" placeholder="Name of person signing" className={inputClass} />
+              <input
+                id="client_name"
+                type="text"
+                name="client_name"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="Name of person signing"
+                className={inputClass}
+              />
             </div>
             <SignaturePad
               label="Client Signature"
