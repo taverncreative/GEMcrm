@@ -45,25 +45,34 @@ export async function createAgreementAction(
     }
   }
 
+  // Defensive: formData.get() returns null for missing keys (a field
+  // not rendered, omitted by a conditional, etc). Zod's optional
+  // string fields accept undefined but REJECT null — silent action
+  // failure. Coerce null → "" before Zod. Same pattern as
+  // createCustomerAction + completeServiceSheetAction + createSite +
+  // createBookingAction.
+  const str = (key: string): string =>
+    (formData.get(key) as string | null) ?? "";
+
   const raw = {
     customer_id: site.customer_id,
     site_id: siteId,
-    reference_number: formData.get("reference_number") as string,
-    start_date: formData.get("start_date") as string,
-    visit_frequency: formData.get("visit_frequency") as string,
+    reference_number: str("reference_number"),
+    start_date: str("start_date"),
+    visit_frequency: str("visit_frequency"),
     pest_species: pestSpecies,
-    callout_terms: formData.get("callout_terms") as string,
-    contract_value: formData.get("contract_value") as string,
-    contact_name: formData.get("contact_name") as string,
-    contact_phone: formData.get("contact_phone") as string,
-    mobile: formData.get("mobile") as string,
-    contact_email: formData.get("contact_email") as string,
-    invoice_address: formData.get("invoice_address") as string,
-    terms_text: formData.get("terms_text") as string,
-    client_signature: formData.get("client_signature") as string,
-    gem_signature: formData.get("gem_signature") as string,
-    client_signatory_name: formData.get("client_signatory_name") as string,
-    signed_date: formData.get("signed_date") as string,
+    callout_terms: str("callout_terms"),
+    contract_value: str("contract_value"),
+    contact_name: str("contact_name"),
+    contact_phone: str("contact_phone"),
+    mobile: str("mobile"),
+    contact_email: str("contact_email"),
+    invoice_address: str("invoice_address"),
+    terms_text: str("terms_text"),
+    client_signature: str("client_signature"),
+    gem_signature: str("gem_signature"),
+    client_signatory_name: str("client_signatory_name"),
+    signed_date: str("signed_date"),
   };
 
   const result = AgreementSchema.safeParse(raw);

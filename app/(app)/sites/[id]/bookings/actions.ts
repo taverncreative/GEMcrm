@@ -43,14 +43,22 @@ export async function createBookingAction(
 
   const pestSpecies = parseJsonArray(formData.get("pest_species") as string | null);
 
+  // Defensive: formData.get() returns null for missing keys. Zod's
+  // optional string fields reject null (.optional() means undefined,
+  // not nullish). Coerce null → "" before passing to Zod. Same pattern
+  // as createCustomerAction + completeServiceSheetAction +
+  // createSiteAction.
+  const str = (key: string): string =>
+    (formData.get(key) as string | null) ?? "";
+
   const raw = {
     site_id: siteId,
-    job_date: formData.get("job_date") as string,
-    call_type: formData.get("call_type") as string,
+    job_date: str("job_date"),
+    call_type: str("call_type"),
     pest_species: pestSpecies,
-    value: formData.get("value") as string,
-    report_notes: formData.get("report_notes") as string,
-    parent_job_id: (formData.get("parent_job_id") as string) ?? "",
+    value: str("value"),
+    report_notes: str("report_notes"),
+    parent_job_id: str("parent_job_id"),
   };
 
   const result = BookingSchema.safeParse(raw);

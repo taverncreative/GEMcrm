@@ -24,12 +24,21 @@ export async function createSiteAction(
     return { success: false, errors: {}, message: "Customer not found" };
   }
 
+  // Defensive: formData.get() returns null when a field is missing
+  // (e.g. an "Address Line 2" left blank that React omitted from the
+  // form). Zod's `optionalString = z.string().optional().default("")`
+  // accepts undefined but REJECTS null — silent action failure that
+  // takes rounds to diagnose. Coerce null → "" before Zod sees it.
+  // Mirrors createCustomerAction + completeServiceSheetAction.
+  const str = (key: string): string =>
+    (formData.get(key) as string | null) ?? "";
+
   const raw = {
-    address_line_1: formData.get("address_line_1") as string,
-    address_line_2: formData.get("address_line_2") as string,
-    town: formData.get("town") as string,
-    county: formData.get("county") as string,
-    postcode: formData.get("postcode") as string,
+    address_line_1: str("address_line_1"),
+    address_line_2: str("address_line_2"),
+    town: str("town"),
+    county: str("county"),
+    postcode: str("postcode"),
   };
 
   const result = SiteSchema.safeParse(raw);

@@ -325,12 +325,16 @@ describe("ServiceSheetForm — Customer Present persistence through action", () 
     });
 
     // The radio is still in the form (modal is overlay). Assert it's
-    // still selected via the underlying DOM.
-    const yesRadio = document
-      .querySelector<HTMLInputElement>(
+    // still selected via the underlying DOM. Wrapped in waitFor so we
+    // don't race the React 19 form-action reset (the controlled radio
+    // momentarily unchecks during reset then re-binds from state on
+    // re-render — same flake pattern handled in test (b2)).
+    await waitFor(() => {
+      const yesRadio = document.querySelector<HTMLInputElement>(
         'input[type="radio"][name="customer_present_radio"][value="yes"]'
       );
-    expect(yesRadio?.checked).toBe(true);
+      expect(yesRadio?.checked).toBe(true);
+    });
   });
 });
 
