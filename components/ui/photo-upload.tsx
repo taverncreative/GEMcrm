@@ -17,6 +17,14 @@ interface PhotoUploadProps {
    *  hidden field — server-side `writeServiceSheet` resolves each
    *  UUID to a Storage URL via `getPublicUrl`. */
   onChange: (photoIds: string[]) => void;
+  /** Optional list of previously-captured photo IDs to restore on
+   *  mount. Used by the service-sheet form when re-mounting from a
+   *  draft: each ID is looked up in `photos_pending`, the blob is
+   *  re-wrapped into an Object URL, and the preview tile reappears
+   *  with all the operator's pre-reload work intact. IDs whose
+   *  photos_pending row has been cleaned up (e.g. already uploaded
+   *  and removed by the photos loop) are silently dropped. */
+  defaultPhotoIds?: string[];
 }
 
 const MAX_FILES = 10;
@@ -60,6 +68,7 @@ export function PhotoUpload({
   parentType,
   parentId,
   onChange,
+  defaultPhotoIds,
 }: PhotoUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<QueuedPhoto[]>([]);
@@ -77,6 +86,54 @@ export function PhotoUpload({
       for (const src of owned) URL.revokeObjectURL(src);
       owned.clear();
     };
+  }, []);
+
+  // Draft restoration: on first mount, look up each defaultPhotoId in
+  // photos_pending and rebuild the preview tile from its stored blob.
+  // We deliberately keep this effect mount-only (eslint-disable below)
+  // — the form passes `defaultPhotoIds` from the draft once at first
+  // render; subsequent operator add/remove actions flow through
+  // `publish()` and parent state, NOT through this prop. Reacting to
+  // the prop would double-mount the tiles when the parent's onChange
+  // bubbles back the same IDs.
+  //
+  // Each lookup is a tiny IDB GET. Sequential keeps it simple and
+  // ordering deterministic, matching the order in the draft. Missing
+  // rows (already-uploaded photos the sync engine cleaned up) are
+  // dropped silently — the operator sees their remaining photos and
+  // the parent's onChange call below updates the form's hidden
+  // photo_data_urls field to only the surviving IDs.
+  const restoredOnceRef = useRef(false);
+  useEffect(() => {
+    if (restoredOnceRef.current) return;
+    if (!defaultPhotoIds || defaultPhotoIds.length === 0) return;
+    restoredOnceRef.current = true;
+    void (async () => {
+      const restored: QueuedPhoto[] = [];
+      for (const id of defaultPhotoIds) {
+        try {
+          const row = await db.photos_pending.get(id);
+          if (!row) continue;
+          const src = URL.createObjectURL(row.blob);
+          ownedSrcsRef.current.add(src);
+          // PendingPhoto doesn't store the original filename — fine,
+          // the tile only shows it as a tiny caption. "Photo" + a
+          // truncated id keeps tiles distinguishable for the operator.
+          restored.push({
+            id,
+            src,
+            name: `Photo ${id.slice(0, 6)}`,
+            size: row.blob.size,
+          });
+        } catch {
+          // IDB error on this id — skip it; the others can still load.
+        }
+      }
+      if (restored.length === 0) return;
+      setPhotos(restored);
+      onChange(restored.map((p) => p.id));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const publish = useCallback(

@@ -31,6 +31,13 @@ import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
 import { isPhotoClientId, photoPublicUrl } from "@/lib/photos/path";
+import {
+  loadDraft,
+  saveDraft,
+  clearDraft,
+  type ServiceSheetDraft,
+} from "@/lib/db/drafts";
+import { useLiveQuery } from "dexie-react-hooks";
 
 // Re-parse the form fields the action expects, mirroring the server-side
 // completeServiceSheetAction shape. Returning null skips the local write
@@ -155,7 +162,44 @@ interface ServiceSheetFormProps {
   siteAddress?: string;
 }
 
-export function ServiceSheetForm({
+/**
+ * Outer wrapper: gates render on the draft query so the body's useState
+ * initial values get the draft if there is one. `useLiveQuery` returns
+ * `undefined` while the IDB query is in flight; we map "no row" → `null`
+ * so the body can distinguish loading from confirmed-no-draft.
+ *
+ * The brief skeleton here is the cost of guaranteeing draft-aware
+ * initialization without losing the React rule that hooks must be
+ * called unconditionally. Once the draft is loaded (or known absent),
+ * the body mounts ONCE with the right initial values.
+ */
+export function ServiceSheetForm(props: ServiceSheetFormProps) {
+  const draft = useLiveQuery(
+    async (): Promise<ServiceSheetDraft | null> => {
+      const d = await loadDraft(props.jobId);
+      return d ?? null;
+    },
+    [props.jobId]
+  );
+
+  if (draft === undefined) {
+    return (
+      <div className="animate-pulse">
+        <div className="h-8 w-48 rounded bg-gray-100" />
+        <div className="mt-6 h-64 rounded-xl bg-gray-100" />
+      </div>
+    );
+  }
+
+  return <ServiceSheetFormBody {...props} draft={draft} />;
+}
+
+interface ServiceSheetFormBodyProps extends ServiceSheetFormProps {
+  /** null if no draft exists, the stored draft otherwise. */
+  draft: ServiceSheetDraft | null;
+}
+
+function ServiceSheetFormBody({
   jobId,
   defaultCallType = "",
   defaultPests = [],
@@ -170,30 +214,58 @@ export function ServiceSheetForm({
   customerEmail,
   customerPhone,
   siteAddress,
-}: ServiceSheetFormProps) {
-  const [step, setStep] = useState(1);
-  const [callType, setCallType] = useState(defaultCallType);
-  const [selectedPests, setSelectedPests] = useState<string[]>(defaultPests);
-  const [selectedMethods, setSelectedMethods] = useState<string[]>(defaultMethods);
+  draft,
+}: ServiceSheetFormBodyProps) {
+  // Initial values: prefer draft if one exists, otherwise the job's
+  // saved values / defaults. `draft` is null on confirmed no-draft (the
+  // outer wrapper gated render until the IDB query resolved), so the
+  // nullish-coalesce falls through cleanly when there's nothing stored.
+  //
+  // useState initial values are read on the FIRST mount only — once the
+  // body is mounted with these values, subsequent draft writes never
+  // override what the operator is typing. The outer wrapper guarantees
+  // one-shot mounting (it renders the body only once `draft !== undefined`).
+  const [step, setStep] = useState<number>(draft?.step ?? 1);
+  const [callType, setCallType] = useState(draft?.call_type ?? defaultCallType);
+  const [selectedPests, setSelectedPests] = useState<string[]>(
+    draft?.selected_pests ?? defaultPests
+  );
+  const [selectedMethods, setSelectedMethods] = useState<string[]>(
+    draft?.selected_methods ?? defaultMethods
+  );
   // All text inputs below are CONTROLLED via state. React 19's
   // <form action={fn}> resets uncontrolled inputs to their defaults
   // whenever the action returns (regardless of success/error payload),
   // which would wipe operator-typed values on a validation bounce.
   // Controlled inputs survive — state holds the truth; React rebinds
   // value={state} on every render.
-  const [findings, setFindings] = useState(defaultFindings);
-  const [recommendations, setRecommendations] = useState(defaultRecommendations);
-  const [pesticidesUsed, setPesticidesUsed] = useState(defaultPesticides);
-  const [reportNotes, setReportNotes] = useState(defaultReportNotes);
-  const [riskLevel, setRiskLevel] = useState(defaultRiskLevel);
-  const [riskComments, setRiskComments] = useState("");
-  const [clientName, setClientName] = useState("");
-  const [techSig, setTechSig] = useState("");
-  const [clientSig, setClientSig] = useState("");
-  const [customerPresent, setCustomerPresent] = useState<"yes" | "no" | "">("");
-  const [photoDataUrls, setPhotoDataUrls] = useState<string[]>([]);
-  const [scheduleFollowUp, setScheduleFollowUp] = useState(false);
-  const [followUpDate, setFollowUpDate] = useState(() => dateUkOffset(14));
+  const [findings, setFindings] = useState(draft?.findings ?? defaultFindings);
+  const [recommendations, setRecommendations] = useState(
+    draft?.recommendations ?? defaultRecommendations
+  );
+  const [pesticidesUsed, setPesticidesUsed] = useState(
+    draft?.pesticides_used ?? defaultPesticides
+  );
+  const [reportNotes, setReportNotes] = useState(
+    draft?.report_notes ?? defaultReportNotes
+  );
+  const [riskLevel, setRiskLevel] = useState(draft?.risk_level ?? defaultRiskLevel);
+  const [riskComments, setRiskComments] = useState(draft?.risk_comments ?? "");
+  const [clientName, setClientName] = useState(draft?.client_name ?? "");
+  const [techSig, setTechSig] = useState(draft?.tech_sig ?? "");
+  const [clientSig, setClientSig] = useState(draft?.client_sig ?? "");
+  const [customerPresent, setCustomerPresent] = useState<"yes" | "no" | "">(
+    draft?.customer_present ?? ""
+  );
+  const [photoDataUrls, setPhotoDataUrls] = useState<string[]>(
+    draft?.photo_data_urls ?? []
+  );
+  const [scheduleFollowUp, setScheduleFollowUp] = useState(
+    draft?.schedule_follow_up ?? false
+  );
+  const [followUpDate, setFollowUpDate] = useState(
+    () => draft?.follow_up_date ?? dateUkOffset(14)
+  );
   const prevErrorsRef = useRef<Record<string, string>>({});
   const router = useRouter();
 
@@ -252,6 +324,17 @@ export function ServiceSheetForm({
             err
           );
         }
+        // Drop the draft now that the sheet is finalised. If this
+        // throws (IDB closed, table missing on schema mismatch), the
+        // draft would re-seed on next mount and the operator would
+        // see their old in-progress values "haunting" the completed
+        // sheet — log but don't block navigation; a stale draft
+        // beats blocking the happy path.
+        try {
+          await clearDraft(state.jobId!);
+        } catch (err) {
+          console.warn("[approveServiceSheet] clearDraft failed:", err);
+        }
         router.push(ROUTES.jobDetail(state.jobId!));
       } else {
         setApprovalError(res.message ?? "Failed to finalise");
@@ -282,6 +365,93 @@ export function ServiceSheetForm({
       prevErrorsRef.current = curr;
     }
   }, [state.errors]);
+
+  // ── Draft auto-save ──
+  //
+  // Persist every form field to IndexedDB ~500ms after the operator stops
+  // typing. Debounce: one timer, reset on every dep change. On the next
+  // mount (reload, background-foreground, navigation back), the outer
+  // wrapper's useLiveQuery pulls this row back and seeds the body's
+  // useState.
+  //
+  // The deps list mirrors every state slice the draft persists. Adding a
+  // new form field? Add it to ServiceSheetDraft, the input below, AND
+  // the deps array. ESLint's exhaustive-deps lints both, so a forgotten
+  // field is a compile-time signal.
+  //
+  // We don't save on initial mount when the form is empty — there's
+  // nothing to lose yet, and we'd churn IDB on every fresh job open.
+  // The ref-gate avoids that first save.
+  const draftSavedOnceRef = useRef(false);
+  useEffect(() => {
+    // Skip the first effect run: it fires once with the initial state
+    // (either draft-restored or all-defaults). A no-op save of the
+    // restored draft is harmless but a save of empty defaults the
+    // moment a fresh job loads creates a "ghost" draft row that
+    // changes nothing visible — still skip it to keep IDB clean.
+    if (!draftSavedOnceRef.current) {
+      // Mark only if there's actually content worth saving; otherwise
+      // wait until the operator types something.
+      const hasContent =
+        callType !== "" ||
+        selectedPests.length > 0 ||
+        selectedMethods.length > 0 ||
+        findings !== "" ||
+        recommendations !== "" ||
+        pesticidesUsed !== "" ||
+        reportNotes !== "" ||
+        riskComments !== "" ||
+        clientName !== "" ||
+        techSig !== "" ||
+        clientSig !== "" ||
+        customerPresent !== "" ||
+        photoDataUrls.length > 0;
+      if (!hasContent) return;
+      draftSavedOnceRef.current = true;
+    }
+    const t = setTimeout(() => {
+      void saveDraft({
+        job_id: jobId,
+        step,
+        call_type: callType,
+        selected_pests: selectedPests,
+        selected_methods: selectedMethods,
+        findings,
+        recommendations,
+        pesticides_used: pesticidesUsed,
+        report_notes: reportNotes,
+        risk_level: riskLevel,
+        risk_comments: riskComments,
+        client_name: clientName,
+        tech_sig: techSig,
+        client_sig: clientSig,
+        customer_present: customerPresent,
+        photo_data_urls: photoDataUrls,
+        schedule_follow_up: scheduleFollowUp,
+        follow_up_date: followUpDate,
+      });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [
+    jobId,
+    step,
+    callType,
+    selectedPests,
+    selectedMethods,
+    findings,
+    recommendations,
+    pesticidesUsed,
+    reportNotes,
+    riskLevel,
+    riskComments,
+    clientName,
+    techSig,
+    clientSig,
+    customerPresent,
+    photoDataUrls,
+    scheduleFollowUp,
+    followUpDate,
+  ]);
 
   function togglePest(pest: string) {
     setSelectedPests((prev) =>
@@ -664,6 +834,7 @@ export function ServiceSheetForm({
             parentType="job"
             parentId={jobId}
             onChange={onPhotosChange}
+            defaultPhotoIds={draft?.photo_data_urls}
           />
         </div>
 

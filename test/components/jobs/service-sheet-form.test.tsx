@@ -83,8 +83,12 @@ beforeEach(() => {
  * `findings` state whether or not step 2 is visible.
  */
 async function fillAllSteps(user: ReturnType<typeof userEvent.setup>) {
-  // Step 1: pick a call type
-  await user.click(screen.getByText("Routine"));
+  // Step 1: pick a call type. The form's outer wrapper gates render
+  // on a useLiveQuery against the drafts table — a skeleton renders
+  // for one IDB tick before the body mounts. `findByText` waits until
+  // the body appears; the synchronous `getByText` would race that and
+  // fail-fast against the skeleton.
+  await user.click(await screen.findByText("Routine"));
 
   // Step 2 fields
   await user.click(screen.getByRole("button", { name: "Mice" }));
@@ -197,8 +201,9 @@ describe("ServiceSheetForm — validation bounce", () => {
     const user = userEvent.setup();
     render(<ServiceSheetForm jobId="test-job-id" />);
 
-    // Fill everything except pesticides_used.
-    await user.click(screen.getByText("Routine"));
+    // Fill everything except pesticides_used. findByText to wait
+    // for the outer wrapper's useLiveQuery + body mount.
+    await user.click(await screen.findByText("Routine"));
     await user.click(screen.getByRole("button", { name: "Mice" }));
     await user.type(
       screen.getByLabelText(/^Findings/i),

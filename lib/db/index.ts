@@ -51,6 +51,7 @@ import type {
   Agreement,
   Task,
 } from "@/types/database";
+import type { ServiceSheetDraft } from "@/lib/db/drafts";
 
 // ─── Sync-infrastructure table types ────────────────────────────────
 
@@ -176,6 +177,7 @@ class GemCrmDb extends Dexie {
   outbox!: EntityTable<OutboxEntry, "id">;
   photos_pending!: EntityTable<PendingPhoto, "id">;
   sync_meta!: EntityTable<SyncMetaEntry, "key">;
+  service_sheet_drafts!: EntityTable<ServiceSheetDraft, "job_id">;
 
   constructor() {
     super("gemcrm");
@@ -265,6 +267,23 @@ class GemCrmDb extends Dexie {
         if (!("next_attempt_at" in row)) row.next_attempt_at = null;
         if (!("server_url" in row)) row.server_url = null;
       });
+    });
+
+    // ─── v4: service_sheet_drafts ─────────────────────────────────
+    //
+    // Step 7 draft persistence — every field of an in-progress
+    // service sheet is mirrored here on every change (debounced
+    // 500ms in the form). On reload the form rehydrates from the
+    // draft. Cleared on successful Approve. PK = job_id (one draft
+    // per job).
+    //
+    // Index on `updated_at` lets future operator-facing views (eg
+    // "Drafts older than N days" cleanup) query cheaply, but the
+    // form itself just uses get(job_id).
+    //
+    // No upgrade callback — fresh table, no migration needed.
+    this.version(4).stores({
+      service_sheet_drafts: "job_id, updated_at",
     });
   }
 }
