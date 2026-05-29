@@ -1,9 +1,34 @@
-import { notFound } from "next/navigation";
+"use client";
+
+/**
+ * Job detail — step 7 conversion.
+ *
+ * Reads job / site / customer from IndexedDB via `useLiveQuery`. The
+ * page re-renders automatically when the wrapped status action flips
+ * `job_status` locally OR when a pull brings updated values down from
+ * the server. No more RSC re-fetch on every navigation.
+ *
+ * Loading-vs-not-found convention:
+ *   - `undefined` → useLiveQuery hasn't returned yet (loading skeleton)
+ *   - `null`      → confirmed absent locally (not-found UI)
+ *   - row object  → render it
+ *
+ * Soft-deleted rows are treated as not-found at the read site,
+ * mirroring the server-side RLS filter (audit decision).
+ *
+ * Reports are not in the syncable Dexie set (audit decision). The
+ * report metadata is fetched server-side once per online mount and
+ * kept in component state. Offline = no report = placeholder UI in
+ * <ReportActions>.
+ */
+
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
-import { getJobById } from "@/lib/data/jobs";
-import { getSiteById } from "@/lib/data/sites";
-import { getCustomerById } from "@/lib/data/customers";
-import { getReportByJobId } from "@/lib/data/reports";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "@/lib/db";
+import { useIsOnline } from "@/lib/hooks/use-is-online";
+import { getReportByJobIdAction } from "@/app/(app)/jobs/[id]/actions";
 import { ROUTES } from "@/lib/constants/routes";
 import {
   CALL_TYPE_LABELS,
@@ -13,11 +38,10 @@ import {
 import { ReportActions } from "@/components/jobs/report-actions";
 import { JobStatusActions } from "@/components/jobs/job-status-actions";
 import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
-import type { Job } from "@/types/database";
+import { SyncStatePill } from "@/components/sync/sync-state-pill";
+import type { Job, Report } from "@/types/database";
 
-interface JobDetailPageProps {
-  params: Promise<{ id: string }>;
-}
+// ─── Section primitives (unchanged from RSC version) ────────────────
 
 function DetailField({ label, value }: { label: string; value: string }) {
   return (
@@ -202,6 +226,7 @@ function SignaturesSection({ job }: { job: Job }) {
         {job.technician_signature_url && (
           <div>
             <p className="text-xs text-gray-400">Technician</p>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={job.technician_signature_url}
               alt="Technician signature"
@@ -212,6 +237,7 @@ function SignaturesSection({ job }: { job: Job }) {
         {job.client_signature_url && (
           <div>
             <p className="text-xs text-gray-400">Client</p>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={job.client_signature_url}
               alt="Client signature"
@@ -224,19 +250,110 @@ function SignaturesSection({ job }: { job: Job }) {
   );
 }
 
-export default async function JobDetailPage({ params }: JobDetailPageProps) {
-  const { id } = await params;
-  const job = await getJobById(id);
+// ─── Loading + not-found views ──────────────────────────────────────
 
-  if (!job) {
-    notFound();
-  }
+function PageSkeleton() {
+  return (
+    <div className="animate-pulse">
+      <div className="h-8 w-64 rounded bg-gray-100" />
+      <div className="mt-2 h-4 w-48 rounded bg-gray-100" />
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="space-y-6">
+          <div className="h-40 rounded-xl bg-gray-100" />
+          <div className="h-32 rounded-xl bg-gray-100" />
+        </div>
+        <div className="space-y-6">
+          <div className="h-32 rounded-xl bg-gray-100" />
+          <div className="h-40 rounded-xl bg-gray-100" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  const [site, report] = await Promise.all([
-    getSiteById(job.site_id),
-    getReportByJobId(id),
-  ]);
-  const customer = site ? await getCustomerById(site.customer_id) : null;
+function NotFoundView() {
+  return (
+    <div className="rounded-xl bg-white p-12 text-center shadow-sm">
+      <p className="text-sm text-gray-500">
+        This job isn&apos;t available locally. It may have been deleted, or
+        your local data may not have caught up yet.
+      </p>
+      <Link
+        href={ROUTES.JOBS}
+        className="mt-4 inline-block text-sm font-medium text-brand-darker hover:underline"
+      >
+        ← Back to jobs
+      </Link>
+    </div>
+  );
+}
+
+// ─── Page ──────────────────────────────────────────────────────────
+
+export default function JobDetailPage() {
+  const params = useParams<{ id: string }>();
+  const id = typeof params.id === "string" ? params.id : "";
+  const online = useIsOnline();
+
+  // Job — undefined while loading, null if missing-or-soft-deleted, Job otherwise.
+  // `async` querier so TypeScript unwraps cleanly to `Job | null` rather than
+  // Dexie's `PromiseExtended<Job | null>` wrapper.
+  const job = useLiveQuery(
+    async () => {
+      if (!id) return null;
+      const j = await db.jobs.get(id);
+      return j && !j.deleted_at ? j : null;
+    },
+    [id]
+  );
+
+  // Site — depends on job.site_id, same loading/missing convention.
+  const site = useLiveQuery(
+    async () => {
+      if (!job?.site_id) return null;
+      const s = await db.sites.get(job.site_id);
+      return s && !s.deleted_at ? s : null;
+    },
+    [job?.site_id]
+  );
+
+  // Customer — depends on site.customer_id.
+  const customer = useLiveQuery(
+    async () => {
+      if (!site?.customer_id) return null;
+      const c = await db.customers.get(site.customer_id);
+      return c && !c.deleted_at ? c : null;
+    },
+    [site?.customer_id]
+  );
+
+  // Report — server-only, not in Dexie. Fetch once per online mount.
+  const [report, setReport] = useState<Report | null>(null);
+  const [reportLoaded, setReportLoaded] = useState(false);
+  useEffect(() => {
+    if (!id || !online || reportLoaded) return;
+    let cancelled = false;
+    void getReportByJobIdAction(id).then((r) => {
+      if (cancelled) return;
+      setReport(r);
+      setReportLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, online, reportLoaded]);
+
+  // ─── Render gating ────────────────────────────────────────────────
+
+  // Job hasn't been queried yet, OR we're still waiting on site/customer
+  // when the job has those references. Treat all undefineds as loading.
+  if (job === undefined) return <PageSkeleton />;
+  if (job === null) return <NotFoundView />;
+
+  // job exists; site/customer may still be loading
+  const siteLoading = !!job.site_id && site === undefined;
+  const customerLoading = !!site?.customer_id && customer === undefined;
+  if (siteLoading || customerLoading) return <PageSkeleton />;
 
   return (
     <div>
@@ -262,7 +379,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
             {job.job_status !== "completed" && (
               <Link
                 href={`${ROUTES.jobDetail(job.id)}/complete`}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-dark"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all duration-75 hover:bg-brand-dark active:scale-95"
               >
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487 18.549 2.799a2.121 2.121 0 1 1 3 3L10.5 16.846a4.5 4.5 0 0 1-1.897 1.13L6 19l.023-2.606a4.5 4.5 0 0 1 1.13-1.897l9.709-9.71Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
@@ -302,6 +419,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
                 Invoiced
               </span>
             )}
+            <SyncStatePill />
           </div>
           {site && (
             <p className="text-sm text-gray-500">{site.address_line_1}</p>

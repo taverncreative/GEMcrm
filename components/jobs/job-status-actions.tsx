@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { updateJobStatusAction } from "@/app/(app)/jobs/[id]/actions";
 import { JOB_STATUS_COLORS } from "@/lib/constants/job-labels";
 import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
@@ -8,7 +7,7 @@ import { db } from "@/lib/db";
 import type { ActionState } from "@/types/actions";
 import type { JobStatus } from "@/types/database";
 
-// Meta for the JobQuickAction wrapper — module-level for ref stability.
+// Meta for the wrapper — module-level for ref stability.
 const VALID_STATUSES: readonly JobStatus[] = [
   "scheduled",
   "in_progress",
@@ -43,6 +42,32 @@ const initialState: ActionState = {
   message: null,
 };
 
+// Tiny inline spinner used by both button variants for the "saving" state.
+function Spinner({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg
+      className={`animate-spin ${className}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z"
+      />
+    </svg>
+  );
+}
+
 function StatusButton({
   jobId,
   targetStatus,
@@ -54,21 +79,35 @@ function StatusButton({
   label: string;
   className: string;
 }) {
-  const [state, action, isPending] = useActionState(
+  // Wrapped: local-first Dexie update + outbox enqueue + offline-tolerant.
+  // (Step 7: previously this larger detail-page variant used raw
+  // useActionState — wrap-on-touch as we convert jobs/[id].)
+  const [state, action, isPending] = useLocalFirstAction(
     updateJobStatusAction,
-    initialState
+    initialState,
+    updateJobStatusMeta
   );
 
   return (
-    <form action={action}>
+    <form action={action} className="inline-flex flex-col items-start">
       <input type="hidden" name="job_id" value={jobId} />
       <input type="hidden" name="status" value={targetStatus} />
       <button
         type="submit"
         disabled={isPending}
-        className={`rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 transition-colors ${className}`}
+        // active:scale-95 gives instant tactile feedback on press,
+        // before isPending propagates — matters on touch devices where
+        // the operator otherwise wonders if their tap registered.
+        className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-75 active:scale-95 disabled:cursor-wait disabled:opacity-70 ${className}`}
       >
-        {isPending ? "..." : label}
+        {isPending ? (
+          <>
+            <Spinner />
+            <span>Saving…</span>
+          </>
+        ) : (
+          label
+        )}
       </button>
       {state.message && (
         <p className="mt-1 text-xs text-red-500">{state.message}</p>
@@ -150,9 +189,16 @@ export function JobQuickAction({
       <button
         type="submit"
         disabled={isPending}
-        className="rounded px-3 py-1.5 text-xs font-medium text-brand-darker hover:bg-brand-soft disabled:opacity-50 transition-colors"
+        className="inline-flex items-center justify-center gap-1 rounded px-3 py-1.5 text-xs font-medium text-brand-darker transition-all duration-75 hover:bg-brand-soft active:scale-95 disabled:cursor-wait disabled:opacity-70"
       >
-        {isPending ? "..." : label}
+        {isPending ? (
+          <>
+            <Spinner className="h-3 w-3" />
+            <span>Saving…</span>
+          </>
+        ) : (
+          label
+        )}
       </button>
     </form>
   );

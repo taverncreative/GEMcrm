@@ -5,9 +5,10 @@ import { updateJobStatus } from "@/lib/data/jobs";
 import { onJobCompleted } from "@/lib/services/job-events";
 import { getJobById } from "@/lib/data/jobs";
 import { getSiteById } from "@/lib/data/sites";
+import { getReportByJobId } from "@/lib/data/reports";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
-import type { JobStatus } from "@/types/database";
+import type { JobStatus, Report } from "@/types/database";
 
 const VALID_STATUSES: JobStatus[] = ["scheduled", "in_progress", "completed"];
 
@@ -51,4 +52,28 @@ export async function updateJobStatusAction(
   revalidatePath("/jobs");
   revalidatePath("/dashboard");
   return { success: true, errors: {}, message: null };
+}
+
+/**
+ * Read action for the job detail page (step 7 conversion).
+ *
+ * Reports are not in the syncable set (audit decision) — the offline
+ * store never holds them. When the job detail page renders, it reads
+ * the job/site/customer from Dexie via `useLiveQuery` but fetches the
+ * report metadata server-side via this action on first online mount.
+ *
+ * Returns null if no report exists (or if the read fails). The detail
+ * page renders a "PDF will be generated when synced" placeholder in
+ * either case offline.
+ */
+export async function getReportByJobIdAction(
+  jobId: string
+): Promise<Report | null> {
+  await requireUser();
+  if (!jobId) return null;
+  try {
+    return await getReportByJobId(jobId);
+  } catch {
+    return null;
+  }
 }

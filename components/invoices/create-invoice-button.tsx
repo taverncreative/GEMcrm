@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { InvoiceCreatorModal } from "./invoice-creator-modal";
+import { useIsOnline } from "@/lib/hooks/use-is-online";
 import type { Customer } from "@/types/database";
 
 interface CreateInvoiceButtonProps {
@@ -13,6 +14,11 @@ interface CreateInvoiceButtonProps {
   presetDescription?: string | null;
 }
 
+// `createInvoiceDraftAction` / `sendInvoiceAction` are skip-classified
+// (server-side PDF generation + Resend email). Gate the button itself —
+// don't open the modal when offline; the operator would just fill it
+// in to fail at submit. The tooltip explains rather than letting them
+// reach for it blindly.
 export function CreateInvoiceButton({
   label = "Create Invoice",
   variant = "outline",
@@ -22,9 +28,10 @@ export function CreateInvoiceButton({
   presetDescription = null,
 }: CreateInvoiceButtonProps) {
   const [open, setOpen] = useState(false);
+  const online = useIsOnline();
 
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors";
+    "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-75 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
   const cls =
     variant === "primary"
       ? `${base} bg-brand text-white shadow-sm hover:bg-brand-dark`
@@ -32,7 +39,13 @@ export function CreateInvoiceButton({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className={cls}>
+      <button
+        type="button"
+        onClick={() => online && setOpen(true)}
+        disabled={!online}
+        title={!online ? "Needs internet — invoicing is online-only" : undefined}
+        className={cls}
+      >
         <svg
           className="h-4 w-4"
           fill="none"
