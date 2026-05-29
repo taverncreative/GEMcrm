@@ -215,7 +215,12 @@ export function ServiceSheetForm({
     if (state.success) {
       setApprovalOpen(true);
     }
-  }, [state.success]);
+    // Depend on the full state OBJECT, not state.success. useActionState
+    // returns a fresh state reference each dispatch — depending on the
+    // boolean meant the effect was a no-op for a second successful
+    // submit (true → true). Result: after Edit + tweak + resubmit the
+    // modal never reopened, and the button looked dead.
+  }, [state]);
 
   function handleApprove(opts: { sendEmail: boolean }) {
     if (!state.jobId) return;
@@ -300,7 +305,14 @@ export function ServiceSheetForm({
 
   return (
     <>
-    <form action={formAction}>
+    {/* noValidate: required fields live across multiple steps (rendered
+        with `hidden` rather than unmounted). The browser's HTML5 validator
+        scans all of them on submit; when a hidden one is empty it tries
+        to focus an invisible input and most browsers silently swallow the
+        click. Server-side Zod is the source of truth — the useEffect on
+        state.errors below navigates to the failing step and the field's
+        inline error renders, so the operator always sees what's missing. */}
+    <form action={formAction} noValidate>
       <input type="hidden" name="job_id" value={jobId} />
       <input type="hidden" name="call_type" value={callType} />
       <input type="hidden" name="pest_species" value={JSON.stringify(selectedPests)} />
