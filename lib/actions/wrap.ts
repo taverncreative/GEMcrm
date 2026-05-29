@@ -49,7 +49,7 @@
  * compute authoritatively.
  */
 
-import { useActionState, useCallback, startTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { enqueueAction, type EntityType } from "@/lib/db/outbox";
 
 export interface WrapMeta<TInput> {
@@ -136,10 +136,31 @@ export function useLocalFirstAction<TState, TInput>(
   initialState: Awaited<TState>,
   meta: WrapMeta<TInput>
 ): [Awaited<TState>, (formData: FormData) => Promise<void>, boolean] {
-  const [state, baseDispatch, isPending] = useActionState(
-    serverAction,
-    initialState
-  );
+  // Manually own state + pending. We DELIBERATELY do NOT use
+  // useActionState here, even though our return shape mimics it.
+  //
+  // Why: React 19's `<form action={fn}>` wraps `fn` in its own
+  // transition. When fn is async (like our wrappedDispatch), React
+  // treats the form-action transition as COMPLETE the moment fn's
+  // Promise resolves. Our applyLocal + enqueueAction resolve quickly
+  // (local Dexie work). If we then dispatch via useActionState's
+  // baseDispatch, the late state update from baseDispatch's async
+  // server action can be dropped on the floor because the outer
+  // form-action transition has already settled.
+  //
+  // The symptom: action fires server-side (sync pill animates), but
+  // state.success never flips → the modal-open effect never runs →
+  // operator stares at the form thinking the button is dead. Caught
+  // in surface-2 hands-on testing; not reproducible in jsdom because
+  // React 19's test-environment transition lifecycle is more
+  // permissive than the production build.
+  //
+  // Fix: own state via plain useState; manually call the server
+  // action and setState the result. Pending tracked via useTransition
+  // wrapping the dispatch. State updates are detached from React's
+  // form-action lifecycle and always land.
+  const [state, setState] = useState<Awaited<TState>>(initialState);
+  const [isPending, startTransition] = useTransition();
 
   const wrappedDispatch = useCallback(
     async (formData: FormData) => {
@@ -181,24 +202,32 @@ export function useLocalFirstAction<TState, TInput>(
         }
       }
 
-      // 3. Online → dispatch the server action. Offline → skip.
-      //
-      // `baseDispatch` from useActionState MUST run inside a
-      // transition for `isPending` to update reliably. React 19's
-      // form-action prop auto-wraps the outer call in a transition,
-      // but the transition context is lost across our `await`s above —
-      // by the time we reach this line, no transition is active.
-      // Explicit `startTransition` restores it. Without this React
-      // logs "called outside of a transition" and isPending sticks at
-      // its previous value, which broke the "Saving…" UI feedback on
-      // both surface 1 and surface 2.
+      // 3. Online → call the server action directly, await it, store
+      //    the result via setState. The whole thing is wrapped in
+      //    startTransition so isPending stays true until the server
+      //    responds. Detached from the outer form-action lifecycle.
       if (isOnline()) {
-        startTransition(() => {
-          baseDispatch(formData);
+        startTransition(async () => {
+          try {
+            const result = await serverAction(state, formData);
+            setState(result);
+          } catch (err) {
+            console.error(
+              `[useLocalFirstAction] server call failed for ${meta.actionName}:`,
+              err
+            );
+            // Leave state unchanged — the outbox entry survives so the
+            // sync engine will retry. The operator can also retry by
+            // resubmitting; the (entity_type, entity_id) compaction in
+            // the outbox folds duplicate attempts.
+          }
         });
       }
     },
-    [baseDispatch, meta]
+    // `state` is in deps because we pass it as `prev` to the server
+    // action. The callback re-creates on each state change; the form
+    // sees the latest reference via the action prop on next render.
+    [serverAction, meta, state, startTransition]
   );
 
   return [state, wrappedDispatch, isPending];

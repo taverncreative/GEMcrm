@@ -334,6 +334,61 @@ describe("ServiceSheetForm — Customer Present persistence through action", () 
   });
 });
 
+// ─── (e) Wrapper preserves state update through async action ───────
+//
+// This is the test that was missing: in the real browser path the
+// server action returns AFTER the form-action's outer transition has
+// already settled (because wrappedDispatch resolves quickly after
+// applyLocal + enqueue, before the network round-trip completes).
+//
+// useActionState-based dispatching can drop the state update on the
+// floor in that case — the modal never opens because state.success
+// never flips. We reproduce the timing by delaying the mocked action
+// past wrappedDispatch's own resolution. With the old
+// useActionState-backed wrapper this fails; with the useState +
+// useTransition wrapper it must pass.
+
+describe("ServiceSheetForm — async server action timing", () => {
+  it("opens approval modal even when server action returns AFTER wrappedDispatch resolves", async () => {
+    // Server action takes 100ms — much longer than the local
+    // applyLocal + enqueue, so wrappedDispatch's own Promise resolves
+    // first. This is the real-browser shape (network round-trip).
+    completeFn.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                success: true,
+                errors: {},
+                message: null,
+                jobId: "test-job-id",
+                pdfUrl: "https://example.com/test.pdf",
+              }),
+            100
+          );
+        })
+    );
+
+    const user = userEvent.setup();
+    render(<ServiceSheetForm jobId="test-job-id" />);
+
+    await fillAllSteps(user);
+    await user.click(
+      screen.getByRole("button", { name: /Complete Service Sheet/ })
+    );
+
+    // The wrapped action must complete and the modal must open even
+    // though the server action resolved AFTER wrappedDispatch did.
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Approve Service Sheet/i)).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+  });
+});
+
 // ─── (d) Modal reopens after Edit ──────────────────────────────────
 
 describe("ServiceSheetForm — modal reopen", () => {
