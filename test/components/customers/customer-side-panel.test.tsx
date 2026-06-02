@@ -376,7 +376,7 @@ describe("CustomerSidePanel — online-required guards", () => {
     expect(reviewCheckbox).not.toBeDisabled();
   });
 
-  it("buttons are disabled (and tooltip set) when offline", async () => {
+  it("multi-entity buttons are disabled (and tooltip set) when offline", async () => {
     await db.customers.put(makeCustomer());
     render(<CustomerSidePanel customerId="cust-1" onClose={vi.fn()} />);
 
@@ -385,9 +385,12 @@ describe("CustomerSidePanel — online-required guards", () => {
     });
 
     // Flip offline AFTER the panel mounted so we exercise the
-    // event-listener path the use-online hook exposes.
+    // event-listener path the useIsOnline hook exposes.
     setOffline();
 
+    // The three multi-entity write paths (Booking/Invoice/Delete)
+    // remain online-only — the entity_ids[] multi-entity sync guard
+    // hasn't shipped yet so wrapping them isn't safe.
     await waitFor(() => {
       const bookingBtn = screen.getAllByRole("button", { name: /New Booking/i })[0];
       expect(bookingBtn).toBeDisabled();
@@ -400,9 +403,81 @@ describe("CustomerSidePanel — online-required guards", () => {
     expect(
       screen.getByRole("button", { name: /Delete customer/i })
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Commercial" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Domestic" })).toBeDisabled();
-    expect(screen.getByRole("checkbox")).toBeDisabled();
+
+    // The two single-entity toggles (type, review) are NOW wrapped
+    // local-first — they work offline. The disabled-state assertion
+    // that used to live here was the regression the operator caught:
+    // the controls "felt broken" because they weren't updating
+    // immediately. After wrapAction, the controls are always live and
+    // useLiveQuery picks up the applyLocal write within a tick.
+    expect(
+      screen.getByRole("button", { name: "Commercial" })
+    ).not.toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Domestic" })
+    ).not.toBeDisabled();
+    expect(screen.getByRole("checkbox")).not.toBeDisabled();
+  });
+});
+
+// ─── (g) Local-first toggles — instant UI feedback ────────────────
+
+describe("CustomerSidePanel — local-first toggles", () => {
+  it("review checkbox flips immediately when clicked (Dexie applyLocal lands first)", async () => {
+    await db.customers.put(
+      makeCustomer({ id: "cust-rev", google_review_received: false })
+    );
+    // Tell our mock to behave like a working server — the wrapper
+    // fires it in the background; the local write is what we assert.
+    setReviewReceivedMock.mockResolvedValue({ success: true });
+
+    render(<CustomerSidePanel customerId="cust-rev" onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Customer")).toBeInTheDocument();
+    });
+
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+
+    // Click. With wrapAction, applyLocal writes Dexie BEFORE the
+    // server call, so useLiveQuery should re-render with checked=true
+    // within a tick — no waiting on the (mocked) server.
+    checkbox.click();
+
+    await waitFor(() => {
+      const reflowed = screen.getByRole("checkbox") as HTMLInputElement;
+      expect(reflowed.checked).toBe(true);
+    });
+
+    // And the underlying Dexie row reflects the change too — proof
+    // that applyLocal actually ran, not just optimistic component
+    // state.
+    const row = await db.customers.get("cust-rev");
+    expect(row?.google_review_received).toBe(true);
+  });
+
+  it("type segmented control flips immediately when clicked", async () => {
+    await db.customers.put(
+      makeCustomer({ id: "cust-typ", customer_type: "domestic" })
+    );
+    setCustomerTypeMock.mockResolvedValue({ success: true });
+
+    render(<CustomerSidePanel customerId="cust-typ" onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Customer")).toBeInTheDocument();
+    });
+
+    // Click "Commercial" — applyLocal updates Dexie → useLiveQuery
+    // emits → the "Commercial" button gains the active class.
+    const commercialBtn = screen.getByRole("button", { name: "Commercial" });
+    commercialBtn.click();
+
+    await waitFor(async () => {
+      const row = await db.customers.get("cust-typ");
+      expect(row?.customer_type).toBe("commercial");
+    });
   });
 });
 

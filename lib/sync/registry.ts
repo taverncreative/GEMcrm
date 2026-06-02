@@ -31,7 +31,10 @@
 import { completeTaskAction } from "@/app/(app)/dashboard/actions";
 import { updateJobStatusAction } from "@/app/(app)/jobs/[id]/actions";
 import { updateAgreementStatusAction } from "@/app/(app)/agreements/[id]/actions";
-import { setReviewReceivedAction } from "@/app/(app)/customers/actions";
+import {
+  setReviewReceivedAction,
+  setCustomerTypeAction,
+} from "@/app/(app)/customers/actions";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
 import type { ActionState } from "@/types/actions";
 
@@ -90,6 +93,14 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     kind: "direct",
     invoke: (...args) =>
       setReviewReceivedAction(args[0] as string, args[1] as boolean),
+  },
+  setCustomerTypeAction: {
+    kind: "direct",
+    invoke: (...args) =>
+      setCustomerTypeAction(
+        args[0] as string,
+        args[1] as "commercial" | "domestic"
+      ),
   },
 
   // ─── agreement ──────────────────────────────────────────────

@@ -10,6 +10,54 @@ import {
   getServiceReportsForCustomerAction,
   type ServiceReportSummary,
 } from "@/app/(app)/customers/actions";
+import { wrapAction } from "@/lib/actions/wrap";
+
+// ─── Local-first wraps for the two single-entity toggles ──────────
+//
+// Post-Surface-3 operator feedback: the bare server-action call gave
+// no immediate UI response, because the checkbox state was read via
+// useLiveQuery from Dexie and the server action only mutated the
+// remote row. The local row didn't change until the next pull.
+//
+// Fix: route both toggles through `wrapAction` so the local Dexie row
+// updates immediately (applyLocal), the change is enqueued in the
+// outbox, and the server call fires when online. useLiveQuery picks
+// up the local write within a tick and the checkbox / segmented
+// control reflects the new value instantly. Same wrapper used by
+// completeServiceSheetAction — battle-tested.
+//
+// Both actions are SINGLE-entity (one column on one row), so the
+// single-entity conflict guard the outbox already enforces is
+// sufficient. The multi-entity entity_ids[] guard remains a hard
+// prerequisite for any future wrap of Booking / Invoice / Delete,
+// which all touch >1 row.
+//
+// Defined at module scope rather than inside the component so React
+// re-renders don't churn the wrapper closures (the wrapper has no
+// React state — it's a plain async function factory).
+const wrappedSetReviewReceived = wrapAction(setReviewReceivedAction, {
+  actionName: "setReviewReceivedAction",
+  entityType: "customer",
+  entityId: ([customerId]) => customerId,
+  applyLocal: async ([customerId, received]) => {
+    await db.customers.update(customerId, {
+      google_review_received: received,
+      updated_at: new Date().toISOString(),
+    });
+  },
+});
+
+const wrappedSetCustomerType = wrapAction(setCustomerTypeAction, {
+  actionName: "setCustomerTypeAction",
+  entityType: "customer",
+  entityId: ([customerId]) => customerId,
+  applyLocal: async ([customerId, type]) => {
+    await db.customers.update(customerId, {
+      customer_type: type,
+      updated_at: new Date().toISOString(),
+    });
+  },
+});
 import { BookingModal } from "@/components/bookings/booking-modal";
 import { InvoiceCreatorModal } from "@/components/invoices/invoice-creator-modal";
 import { DeleteCustomerConfirm } from "@/components/customers/delete-customer-confirm";
@@ -222,32 +270,41 @@ export function CustomerSidePanel({
   const detail = customer && !loading && !notFound ? customer : null;
 
   function handleReviewToggle(received: boolean) {
-    // Online guard: setReviewReceivedAction is a single-entity write
-    // that step-7 surface-3 deliberately leaves unwrapped. Offline,
-    // the click is a no-op and the checkbox stays at its prior state.
-    // The control's `disabled` already prevents this, but the guard
-    // here is belt-and-braces in case a future caller bypasses the
-    // disabled attr.
-    if (!detail || !online) return;
+    // Local-first via wrapAction: applyLocal updates Dexie BEFORE the
+    // network call (so useLiveQuery flips the checkbox immediately),
+    // outbox enqueues, server call fires when online. Works offline
+    // — the outbox drains on next reconnect. No online guard here:
+    // the operator can flip review state on the side of the road.
+    if (!detail) return;
     startTransition(async () => {
-      const res = await setReviewReceivedAction(detail.id, received);
-      if (res.success) {
-        router.refresh();
+      const res = await wrappedSetReviewReceived(detail.id, received);
+      if (!res.success) {
+        // Local write failed (rare — Dexie constraint or schema
+        // mismatch). Roll back by writing the previous value. The
+        // wrapper itself logs the underlying error.
+        await db.customers.update(detail.id, {
+          google_review_received: !received,
+        });
+      } else {
+        // The router.refresh() that the old online-only path called
+        // for revalidation isn't needed anymore — every read on this
+        // panel goes through useLiveQuery against Dexie, and the
+        // applyLocal write already triggered a re-render.
       }
-      // On failure: nothing local to revert — the next pull will
-      // bring the server's authoritative value back into Dexie and
-      // useLiveQuery will re-render. No optimistic UI here because we
-      // own no local state for this field anymore (Dexie is the
-      // source of truth via useLiveQuery).
     });
   }
 
   function handleTypeChange(type: CustomerType) {
-    if (!detail || !online) return;
+    // Same local-first pattern as handleReviewToggle. The segmented
+    // control reflects the new selection within a tick.
+    if (!detail) return;
+    const previousType = detail.customer_type;
     startTransition(async () => {
-      const res = await setCustomerTypeAction(detail.id, type);
-      if (res.success) {
-        router.refresh();
+      const res = await wrappedSetCustomerType(detail.id, type);
+      if (!res.success) {
+        await db.customers.update(detail.id, {
+          customer_type: previousType,
+        });
       }
     });
   }
@@ -439,28 +496,24 @@ export function CustomerSidePanel({
               <Section title="Details">
                 <dl className="space-y-2.5 text-sm">
                   <Row label="Customer">
-                    {/* Customer type toggle — single-entity customer
-                        write (setCustomerTypeAction). Step-7 reads-only
-                        keeps it online-only. When offline, the buttons
-                        appear with the current selection but click is
-                        a no-op (guarded inside handleTypeChange too).
-                        Cursor + opacity make the disabled state
-                        visible without a layout shift. */}
-                    <div
-                      className="flex gap-1 rounded-lg bg-gray-100 p-0.5 text-xs"
-                      title={online ? undefined : "Online required"}
-                    >
+                    {/* Customer type toggle — single-entity write,
+                        local-first via wrapAction. Works offline. No
+                        online guard, no disabled state. The applyLocal
+                        flip lands in Dexie within a tick so the
+                        operator sees the segmented control move
+                        immediately; the outbox drains the server call
+                        on reconnect. */}
+                    <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5 text-xs">
                       {(["commercial", "domestic"] as const).map((t) => (
                         <button
                           key={t}
                           type="button"
                           onClick={() => handleTypeChange(t)}
-                          disabled={!online}
                           className={`rounded-md px-2 py-0.5 font-medium transition-colors ${
                             detail.customer_type === t
                               ? "bg-white text-gray-900 shadow-sm"
                               : "text-gray-500"
-                          } disabled:cursor-not-allowed disabled:opacity-60`}
+                          }`}
                         >
                           {t === "commercial" ? "Commercial" : "Domestic"}
                         </button>
@@ -590,21 +643,18 @@ export function CustomerSidePanel({
                   </Row>
                   <Row label="Added">{formatDate(detail.created_at)}</Row>
                   <Row label="Google review">
-                    {/* Google review checkbox — single-entity write to
-                        the customer row. Same online-only treatment as
-                        the type toggle. The label's cursor is upgraded
-                        to "not-allowed" when offline so the disabled
-                        state is felt as well as seen. */}
-                    <label
-                      className={`flex items-center gap-2 ${online ? "cursor-pointer" : "cursor-not-allowed"}`}
-                      title={online ? undefined : "Online required"}
-                    >
+                    {/* Google review checkbox — single-entity write,
+                        local-first via wrapAction. Same offline-OK
+                        treatment as the type toggle: the tick flips
+                        the moment the operator clicks because
+                        applyLocal updates Dexie and useLiveQuery
+                        re-renders us with the new value. */}
+                    <label className="flex cursor-pointer items-center gap-2">
                       <input
                         type="checkbox"
                         checked={detail.google_review_received}
                         onChange={(e) => handleReviewToggle(e.target.checked)}
-                        disabled={!online}
-                        className="h-4 w-4 rounded border-gray-300 text-brand-darker focus:ring-brand disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-4 w-4 rounded border-gray-300 text-brand-darker focus:ring-brand"
                       />
                       <span className="text-xs text-gray-500">
                         {detail.google_review_received
