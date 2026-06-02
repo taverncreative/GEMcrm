@@ -45,6 +45,20 @@ import {
 
 const USER_ID_KEY = "current_user_id";
 
+/**
+ * Maximum time the boot effect is allowed to remain in a non-terminal
+ * state (checking / wiping / initial) before the watchdog forces a
+ * visible error so the operator can retry. 15s is a deliberately
+ * generous ceiling — a real initial sync on a slow line typically
+ * lands well inside this. A hung Dexie open (e.g. blocked-upgrade
+ * the singleton's `blocked` event missed) or a wedged server-action
+ * call will trip the timer; any normal flow completes long before.
+ *
+ * Tighten if operators report needing slow-network leeway during the
+ * INITIAL pull — but only after auditing pullAll's own timeouts.
+ */
+const BOOT_TIMEOUT_MS = 15_000;
+
 function initialProgress(): InitialProgressState {
   return {
     customers: { state: "pending", count: 0 },
@@ -72,102 +86,194 @@ export function SyncBoot({ userId }: { userId: string }) {
   const [retryToken, setRetryToken] = useState(0);
 
   // ─── Boot sequence ──────────────────────────────────────────────
+  //
+  // Robustness invariant (post step-7 bugfix): boot MUST terminate
+  // in finite time to one of {ready, visible error, disconnected}.
+  // It must NEVER be possible to hang silently at "checking" — the
+  // operator should always see either the app or an actionable
+  // failure state with a retry button.
+  //
+  // Three guards that together enforce that invariant:
+  //
+  //   (a) Outer try/catch wraps the entire boot() body. Any throw
+  //       before the inner pullAll try/catch (e.g. Dexie open
+  //       blocked by another tab, sync_meta query throws,
+  //       wipeLocalDb fails) now routes to setError(...) instead
+  //       of leaving bootState at "checking" forever.
+  //
+  //   (b) A watchdog timer (BOOT_TIMEOUT_MS) flips bootState to
+  //       an error state if boot hasn't reached ready/error within
+  //       the limit. Catches "the await never resolves" cases that
+  //       no try/catch can — IndexedDB upgrade blocked, a hung
+  //       server-action call, network event that never fires.
+  //
+  //   (c) The Dexie singleton dispatches `gemcrm:db-blocked` when
+  //       a schema upgrade is blocked by another tab at the old
+  //       version. We listen and route to setError so the operator
+  //       sees a "close other tabs and retry" message rather than
+  //       waiting indefinitely.
+  //
+  // Each guard alone leaves a hole; together they close them all.
   useEffect(() => {
     let cancelled = false;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+
+    // Clear the watchdog once boot has reached a terminal state
+    // (ready / error / disconnected). Without this the timer would
+    // fire BOOT_TIMEOUT_MS later and overwrite the working app with
+    // a misleading timeout error.
+    function clearWatchdog() {
+      if (watchdog !== null) {
+        clearTimeout(watchdog);
+        watchdog = null;
+      }
+    }
+
+    // (c) Dexie upgrade-blocked → visible error. Also a terminal
+    // state for boot — clear the watchdog so we don't double-up
+    // with a timeout message.
+    function onBlocked() {
+      if (cancelled) return;
+      clearWatchdog();
+      setError(
+        "Schema upgrade blocked — another tab or window is still on the old version. Close other GEM CRM tabs and tap Retry."
+      );
+    }
+    window.addEventListener("gemcrm:db-blocked", onBlocked);
 
     async function boot() {
       setBootState({ kind: "checking" });
       setError(null);
       setDisconnected(false);
 
-      // 1. User-change detection
-      const storedRow = await db.sync_meta.get(USER_ID_KEY);
-      const previousUserId =
-        typeof storedRow?.value === "string" ? storedRow.value : null;
+      try {
+        // 1. User-change detection
+        const storedRow = await db.sync_meta.get(USER_ID_KEY);
+        const previousUserId =
+          typeof storedRow?.value === "string" ? storedRow.value : null;
 
-      if (previousUserId && previousUserId !== userId) {
-        setBootState({ kind: "wiping" });
-        await wipeLocalDb();
-      }
+        if (previousUserId && previousUserId !== userId) {
+          setBootState({ kind: "wiping" });
+          await wipeLocalDb();
+        }
 
-      // 2. Determine whether initial sync is needed.
-      // Heuristic: any cursor present → initial sync done before.
-      // After a wipe, no cursors exist.
-      const anyCursor = await db.sync_meta
-        .where("key")
-        .startsWith("cursor.")
-        .count();
+        // 2. Determine whether initial sync is needed.
+        // Heuristic: any cursor present → initial sync done before.
+        // After a wipe, no cursors exist.
+        const anyCursor = await db.sync_meta
+          .where("key")
+          .startsWith("cursor.")
+          .count();
 
-      const needsInitial = anyCursor === 0;
+        const needsInitial = anyCursor === 0;
 
-      // Write user_id now so even if the user closes the tab mid-sync,
-      // a re-mount won't re-wipe. (Initial sync may still need to run
-      // — heuristic is cursor presence, not user_id presence.)
-      await db.sync_meta.put({ key: USER_ID_KEY, value: userId });
+        // Write user_id now so even if the user closes the tab
+        // mid-sync, a re-mount won't re-wipe.
+        await db.sync_meta.put({ key: USER_ID_KEY, value: userId });
 
-      // 3. Auto-clear authExpired now that we're booted with a fresh
-      //    session. This is the "post-login auto-retry" hook (edge
-      //    case 12) — after re-login, the user lands back on /(app)/*,
-      //    SyncBoot mounts, clears the flag, and triggers a sync.
-      if (getSyncStatus().authExpired) {
-        clearAuthExpired();
-      }
+        // 3. Auto-clear authExpired now that we're booted with a
+        // fresh session.
+        if (getSyncStatus().authExpired) {
+          clearAuthExpired();
+        }
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (needsInitial) {
-        setBootState({ kind: "initial" });
-        setProgress(initialProgress());
+        if (needsInitial) {
+          setBootState({ kind: "initial" });
+          setProgress(initialProgress());
 
-        const onProgress: PullProgress = (entity, state, count) => {
-          if (cancelled) return;
-          setProgress((p) => ({
-            ...p,
-            [entity as EntityName]: { state, count },
-          }));
-        };
+          const onProgress: PullProgress = (entity, state, count) => {
+            if (cancelled) return;
+            setProgress((p) => ({
+              ...p,
+              [entity as EntityName]: { state, count },
+            }));
+          };
 
-        try {
-          if (!navigator.onLine) {
-            setDisconnected(true);
-            return;
-          }
-          const result = await pullAll(onProgress);
-          if (cancelled) return;
-          if (result.halted) {
-            setError(result.halt_reason ?? "Sync halted");
-            return;
-          }
-          // Detect any per-entity errors — surface but allow proceed
-          // because some data is better than no data. The next normal
-          // sync tick will retry the failed entities.
-          const firstErr = result.entities.find((e) => e.error);
-          if (firstErr?.error) {
-            console.warn(
-              `[sync-boot] initial pull partial: ${firstErr.entity} errored`,
-              firstErr.error
+          try {
+            if (!navigator.onLine) {
+              clearWatchdog();
+              setDisconnected(true);
+              return;
+            }
+            const result = await pullAll(onProgress);
+            if (cancelled) return;
+            if (result.halted) {
+              clearWatchdog();
+              setError(result.halt_reason ?? "Sync halted");
+              return;
+            }
+            const firstErr = result.entities.find((e) => e.error);
+            if (firstErr?.error) {
+              console.warn(
+                `[sync-boot] initial pull partial: ${firstErr.entity} errored`,
+                firstErr.error
+              );
+            }
+            clearWatchdog();
+            setBootState({ kind: "ready" });
+          } catch (err) {
+            if (cancelled) return;
+            if (!navigator.onLine) {
+              clearWatchdog();
+              setDisconnected(true);
+              return;
+            }
+            clearWatchdog();
+            setError(
+              err instanceof Error ? err.message : "Unknown sync error"
             );
           }
+        } else {
+          // 4. Steady state: skip the screen entirely.
+          clearWatchdog();
           setBootState({ kind: "ready" });
-        } catch (err) {
-          if (cancelled) return;
-          if (!navigator.onLine) {
-            setDisconnected(true);
-            return;
-          }
-          setError(
-            err instanceof Error ? err.message : "Unknown sync error"
-          );
         }
-      } else {
-        // 4. Steady state: skip the screen entirely.
-        setBootState({ kind: "ready" });
+      } catch (err) {
+        // (a) Anything that escaped from the user-detection / cursor
+        // probe / put / wipe path. Most likely: Dexie blocked, IDB
+        // corruption, or storage quota. Route to visible error.
+        if (cancelled) return;
+        console.error("[sync-boot] boot failed before pullAll:", err);
+        clearWatchdog();
+        setError(
+          err instanceof Error
+            ? `Local store unavailable: ${err.message}`
+            : "Local store unavailable"
+        );
       }
     }
 
+    // (b) Watchdog. If boot() hasn't pushed us out of "checking" within
+    // BOOT_TIMEOUT_MS, force a visible error. The operator can tap
+    // Retry; if the underlying cause cleared (other tab closed, hung
+    // network recovered), the retry will succeed. If it didn't, we're
+    // no worse off than the silent hang we replaced.
+    //
+    // The cancelled flag prevents the timer from firing after cleanup
+    // or after boot has resolved (the cleanup function clears it
+    // explicitly, but the cancelled check is defence-in-depth in
+    // case React batches the clearTimeout against a fired timer).
+    //
+    // We use the functional form of setError so a previously-set
+    // error (e.g. a more specific pullAll error that ran in parallel)
+    // isn't overwritten with our generic timeout message.
+    watchdog = setTimeout(() => {
+      if (cancelled) return;
+      setError(
+        (prev) =>
+          prev ??
+          "Sync took too long. Close other GEM CRM tabs/windows and tap Retry."
+      );
+    }, BOOT_TIMEOUT_MS);
+
     boot();
+
     return () => {
       cancelled = true;
+      clearWatchdog();
+      window.removeEventListener("gemcrm:db-blocked", onBlocked);
     };
   }, [userId, retryToken]);
 
@@ -226,19 +332,21 @@ export function SyncBoot({ userId }: { userId: string }) {
   }, [bootState.kind]);
 
   // ─── Render gating ───────────────────────────────────────────────
+  //
+  // If boot completed, render nothing — the app shell is the only
+  // thing on screen.
+  //
+  // Otherwise show the overlay with the live error/disconnected
+  // signals. CRITICAL: `error` is passed through regardless of which
+  // boot phase we're in. The old code hardcoded `error={null}` while
+  // bootState was "checking"/"wiping", which meant the watchdog
+  // timer's setError(...) couldn't surface anything to the operator
+  // until boot had at least advanced to "initial" — exactly the
+  // wrong contract when a hang happens BEFORE that phase. Now any
+  // error (Dexie blocked, watchdog trip, sync_meta probe throw)
+  // shows immediately in the InitialSyncScreen with its retry
+  // button.
   if (bootState.kind === "ready") return null;
-  if (bootState.kind === "checking" || bootState.kind === "wiping") {
-    // Brief flash; keep the screen consistent with the initial-sync
-    // overlay so there's no layout shift.
-    return (
-      <InitialSyncScreen
-        progress={progress}
-        disconnected={false}
-        error={null}
-        onRetry={() => setRetryToken((t) => t + 1)}
-      />
-    );
-  }
   return (
     <InitialSyncScreen
       progress={progress}

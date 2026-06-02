@@ -290,6 +290,50 @@ class GemCrmDb extends Dexie {
 
 export const db = new GemCrmDb();
 
+// ─── Upgrade-deadlock guards ────────────────────────────────────────
+//
+// IndexedDB's well-known foot-gun: a new tab opening at version N+1
+// hangs forever in `await db.open()` if any OTHER tab/worker still has
+// the same database open at version N. The browser fires `blocked` and
+// just waits. Without handling, SyncBoot's first `await db.sync_meta
+// .get(...)` never resolves — bootState sticks at "checking" and the
+// operator sees "Loading your data…" indefinitely.
+//
+// Strategy: when another tab holds the old version, we ask the OLD
+// tab to close its connection (via `on.versionchange`), and if some
+// tab refuses, we surface that to the operator via Dexie's
+// `on.blocked` event. The actual operator-facing notification is
+// hooked at the SyncBoot level — the singleton just makes the events
+// observable rather than letting them hang silently.
+//
+// We also dispatch a window event so SyncBoot can react without
+// coupling to Dexie internals.
+if (typeof window !== "undefined") {
+  // OLD tab: another tab is trying to upgrade us. Close our connection
+  // so the upgrade can proceed. The next call against `db` will lazily
+  // reopen at the new version. Failing to close here is what bites the
+  // OTHER tab — both tabs end up stuck.
+  db.on("versionchange", () => {
+    console.warn(
+      "[db] another tab is upgrading the schema — closing this tab's connection"
+    );
+    db.close();
+    window.dispatchEvent(new Event("gemcrm:db-versionchange"));
+    // Don't return true — Dexie's default behaviour after our handler
+    // is to abort the active transaction, which is exactly what we want.
+  });
+
+  // NEW tab: we can't upgrade because someone else holds the old
+  // version. Surface this. SyncBoot listens and shows a recoverable
+  // error state asking the operator to close other tabs.
+  db.on("blocked", () => {
+    console.error(
+      "[db] schema upgrade blocked — another tab/worker still holds the old version"
+    );
+    window.dispatchEvent(new Event("gemcrm:db-blocked"));
+  });
+}
+
 // ─── Dev-only escape hatch ──────────────────────────────────────────
 //
 // Mount `__db` on `window` in development so a developer can poke the
