@@ -11,6 +11,7 @@ import {
   deleteCustomer,
   getDeleteImpact,
 } from "@/lib/data/customers";
+import { getInvoiceCountsByCustomer } from "@/lib/data/invoices";
 import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
@@ -173,6 +174,33 @@ export interface ServiceReportSummary {
   job_id: string;
   pdf_url: string | null;
   created_at: string;
+}
+
+/**
+ * Online-only fetch of invoice counts for the customers list page.
+ *
+ * Step-8 Phase A — list-page offline conversion. The customer side
+ * panel reads everything from Dexie via useLiveQuery, but the
+ * `invoices` table is NOT synced (offline-pwa Gap A → Option A,
+ * same precedent as `reports`). Without a way to surface this gap,
+ * the existing "Invoices" column in the desktop customers table
+ * would show 0 for everyone offline — silently wrong.
+ *
+ * This action is called LAZILY from the converted page only when
+ * `useIsOnline()` is true. Offline, the column shows em-dashes.
+ *
+ * Returns a plain `Record<customerId, number>` rather than a Map so
+ * the result serialises through the server-action boundary cleanly.
+ */
+export async function getInvoiceCountsForCustomersAction(
+  customerIds: string[]
+): Promise<Record<string, number>> {
+  await requireUser();
+  if (customerIds.length === 0) return {};
+  const counts = await getInvoiceCountsByCustomer(customerIds);
+  const result: Record<string, number> = {};
+  for (const [k, v] of counts) result[k] = v;
+  return result;
 }
 
 export async function getServiceReportsForCustomerAction(

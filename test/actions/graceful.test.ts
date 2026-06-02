@@ -26,11 +26,19 @@ import {
   wrapDirectCallGracefully,
 } from "@/lib/actions/graceful";
 
-const STATE_PREV = { success: false, errors: {}, message: null };
+// Match the wrapper's TState constraint (`message: string | null`).
+// Annotating the const avoids TS narrowing `message` to `null` and
+// then complaining when the action returns `message: string`.
+interface TestState {
+  success: boolean;
+  errors: Record<string, string>;
+  message: string | null;
+}
+const STATE_PREV: TestState = { success: false, errors: {}, message: null };
 
 describe("wrapFormActionGracefully", () => {
   it("passes server-side {success:true} results through unchanged", async () => {
-    const action = async () => ({
+    const action = async (): Promise<TestState> => ({
       success: true,
       errors: {},
       message: "Booked",
@@ -42,7 +50,7 @@ describe("wrapFormActionGracefully", () => {
   });
 
   it("passes server-side {success:false, message} results through unchanged", async () => {
-    const action = async () => ({
+    const action = async (): Promise<TestState> => ({
       success: false,
       errors: { name: "Required" },
       message: "Validation failed",
@@ -55,7 +63,7 @@ describe("wrapFormActionGracefully", () => {
   });
 
   it("converts TypeError: fetch failed into the connection-lost shape", async () => {
-    const action = async () => {
+    const action = async (): Promise<TestState> => {
       throw new TypeError("fetch failed");
     };
     const wrapped = wrapFormActionGracefully(action);
@@ -66,7 +74,7 @@ describe("wrapFormActionGracefully", () => {
   });
 
   it("converts 'Failed to fetch' (Chrome shape) the same way", async () => {
-    const action = async () => {
+    const action = async (): Promise<TestState> => {
       throw new TypeError("Failed to fetch");
     };
     const wrapped = wrapFormActionGracefully(action);
@@ -76,7 +84,7 @@ describe("wrapFormActionGracefully", () => {
   });
 
   it("re-throws non-network errors so real bugs aren't hidden", async () => {
-    const action = async () => {
+    const action = async (): Promise<TestState> => {
       throw new Error("Database constraint violation");
     };
     const wrapped = wrapFormActionGracefully(action);

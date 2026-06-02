@@ -309,7 +309,15 @@ export async function updateCustomerType(
 export interface CustomerListItem extends Customer {
   jobCount: number;
   serviceSheetCount: number;
-  invoiceCount: number;
+  /**
+   * Invoice count for this customer. `null` when the count is
+   * unavailable — this happens offline on the converted list page
+   * because the `invoices` table is not synced to Dexie (offline-pwa
+   * Gap A → Option A; same precedent as `reports`). The
+   * `CustomersTable` renders "—" for null. The server-side
+   * `getCustomerListItems` always returns an actual number.
+   */
+  invoiceCount: number | null;
   primarySite: Site | null;
   latestJobCallType: string | null;
   upcomingJob: { id: string; job_date: string; site_id: string } | null;

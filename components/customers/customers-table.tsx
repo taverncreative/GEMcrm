@@ -261,7 +261,11 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
                       {c.serviceSheetCount}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-center text-gray-700">
-                      {c.invoiceCount}
+                      {/* `null` happens when reading from Dexie on
+                          the offline-converted list page — invoices
+                          aren't synced (Gap A). The em-dash signals
+                          "unknown" rather than "zero". */}
+                      {c.invoiceCount ?? "—"}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-gray-500">
                       {c.latestJobCallType
