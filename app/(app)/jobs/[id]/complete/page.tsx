@@ -4,29 +4,54 @@
  * Service-sheet host page — step 7 surface 2.
  *
  * The ServiceSheetForm itself is already wrapped (step 6 commit 9).
- * This page just needs to hand the form its prefill data — same
- * job/site/customer chain as surface 1, same loading-vs-not-found
- * convention.
+ * This page hands the form its prefill data — same job/site/customer
+ * chain as surface 1, same loading-vs-not-found convention.
  *
  * Server reads (RSC) replaced with Dexie + useLiveQuery so the route
  * renders offline.
  *
- * Already-completed handling
- * --------------------------
- * The previous (RSC) page called `redirect()` server-side before any
- * render. Surface-2 step-7 v1 tried to mimic that with a post-mount
- * useEffect + router.replace — that's too late, it fires AFTER the
- * form has mounted and become interactive, so an in-flight pull that
- * flipped status to "completed" would yank the form out from under
- * the operator (modal closes, button vanishes, typing lost).
+ * Editable vs view-only gate (WHITELIST)
+ * --------------------------------------
+ * The form is rendered ONLY when the job is in a fill-able status —
+ * `scheduled` or `in_progress`. Every other status (currently just
+ * `completed`, but a new status would default to locked) renders the
+ * read-only `ServiceSheetViewOnly` display.
  *
- * Fix: gate the render directly. If status is "completed" at any
- * point, render a clear "already completed" view with a link to the
- * detail page. No useEffect, no router dance. If the operator was
- * mid-edit when the pull landed they DO lose their in-progress
- * changes — but that's a clear "this got finished elsewhere"
- * message, not a silent yank. Same outcome as the RSC redirect,
- * minus the silent navigation.
+ * Why a whitelist (and not a `=== "completed"` blacklist):
+ *
+ *   1. **Structural safety.** A blacklist needs an exhaustive list of
+ *      forbidden statuses; if a new status is added later (eg.
+ *      "cancelled", "on_hold") and the blacklist isn't updated, the
+ *      editable form silently opens. A whitelist defaults the wrong
+ *      way around: unknown statuses → locked, which is the correct
+ *      bias for "can the operator overwrite committed data?".
+ *   2. **Race-window closure.** Reported bug: after `Approve`, the
+ *      route was momentarily reachable in editable form via browser
+ *      back / URL because `useLiveQuery`'s emit can be deferred
+ *      inside a React 19 transition (handleApprove runs `await db
+ *      .jobs.update(..., {job_status:"completed"})` inside
+ *      `startTransition`, so the page's re-render to the gate is
+ *      transitional — it can land AFTER `router.push`). The
+ *      whitelist closes the window even if the gate's re-render
+ *      arrives late: the form never instantiates without an
+ *      affirmative fill-able status reading.
+ *   3. **Forward-compat for a correction path.** When we add an
+ *      "Add correction" button later, the view-only state is the
+ *      host. Keeping the whitelist makes "correction" a third path
+ *      (alongside scheduled/in_progress and locked-view-only)
+ *      rather than something tangled into the gate.
+ *
+ * Status enum confirmed exhaustive (types/database.ts: JobStatus +
+ * supabase CHECK constraint): `scheduled | in_progress | completed`.
+ * No `reopened` / `revisit` / `cancelled` exist. If one is added
+ * later, decide whether it's fill-able in the constant below.
+ *
+ * Loading-state contract
+ * ----------------------
+ * `job === undefined` → `<PageSkeleton />`. Neutral — does NOT
+ * render the form pre-emptively. Without the skeleton gate, the form
+ * could briefly mount on a yet-to-load status reading and run its
+ * draft auto-save effect against a possibly-completed job.
  */
 
 import { useParams } from "next/navigation";
@@ -34,10 +59,28 @@ import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { ServiceSheetForm } from "@/components/jobs/service-sheet-form";
+import { ServiceSheetViewOnly } from "@/components/jobs/service-sheet-view-only";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { ROUTES } from "@/lib/constants/routes";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
-import type { CallType } from "@/types/database";
+import type { CallType, JobStatus } from "@/types/database";
+
+/**
+ * The whitelist. ANY job status not in this set renders view-only.
+ *
+ * Source of truth for the enum is `types/database.ts` (JobStatus) and
+ * the SQL `jobs.job_status` CHECK constraint. If either gains a new
+ * value, decide here whether it permits a service-sheet fill.
+ *
+ * Kept as a Set<string> rather than Set<JobStatus> so a status read
+ * from Dexie that happens to be an unexpected string (corruption,
+ * pre-validation server response, etc.) defaults to "not fill-able"
+ * rather than getting type-narrowed past the guard.
+ */
+const FILLABLE_STATUSES: ReadonlySet<JobStatus> = new Set([
+  "scheduled",
+  "in_progress",
+]);
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-GB", {
@@ -75,39 +118,10 @@ function NotFoundView() {
   );
 }
 
-function AlreadyCompletedView({ jobId }: { jobId: string }) {
-  return (
-    <div className="rounded-xl bg-white p-12 text-center shadow-sm">
-      <svg
-        className="mx-auto h-12 w-12 text-green-500"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-        />
-      </svg>
-      <h2 className="mt-4 text-base font-semibold text-gray-900">
-        Service sheet already completed
-      </h2>
-      <p className="mt-1 text-sm text-gray-500">
-        This job has been signed off and finalised. The service sheet is
-        viewable on the job detail page.
-      </p>
-      <Link
-        href={ROUTES.jobDetail(jobId)}
-        className="mt-4 inline-block rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark"
-      >
-        View service sheet
-      </Link>
-    </div>
-  );
-}
+// AlreadyCompletedView removed — replaced by the richer
+// `ServiceSheetViewOnly` component which actually shows the saved sheet
+// rather than a bare "go to detail" link. See the page-level docstring
+// for the gate-rewrite rationale.
 
 export default function CompleteServiceSheetPage() {
   const params = useParams<{ id: string }>();
@@ -141,22 +155,77 @@ export default function CompleteServiceSheetPage() {
   );
 
   // ─── Render gating ────────────────────────────────────────────────
+  //
+  // Order matters:
+  //   1. job loading (undefined)              → neutral skeleton
+  //   2. job missing locally (null)           → not-found
+  //   3. site / customer loading              → neutral skeleton
+  //   4. job's status NOT in the whitelist    → view-only
+  //   5. fall through                         → editable form
+  //
+  // The site/customer skeleton (step 3) sits BEFORE the whitelist
+  // because both views consume customer/site context. Without this
+  // ordering the view-only header could briefly render "—" for the
+  // customer name on cold mount.
+  //
+  // Step 4's whitelist closes the post-approve race window: even if
+  // `useLiveQuery` momentarily returns a stale "in_progress" reading
+  // after the approve transition commits (and React 19 defers the
+  // re-render to "completed"), the form's mount is gated on an
+  // affirmative fill-able status check. The view-only renders for
+  // anything else.
 
   if (job === undefined) return <PageSkeleton />;
   if (job === null) return <NotFoundView />;
 
-  // Completed-job gate runs BEFORE the form ever mounts. If status
-  // changes to "completed" mid-session (rare — another device, or
-  // post-approve pull), the form unmounts and this view takes over.
-  // The operator's in-progress local edits are lost; the message
-  // makes the cause clear.
-  if (job.job_status === "completed") {
-    return <AlreadyCompletedView jobId={job.id} />;
-  }
-
   const siteLoading = !!job.site_id && site === undefined;
   const customerLoading = !!site?.customer_id && customer === undefined;
   if (siteLoading || customerLoading) return <PageSkeleton />;
+
+  if (!FILLABLE_STATUSES.has(job.job_status)) {
+    return (
+      <div>
+        <div className="flex items-start gap-3">
+          <Link
+            href={ROUTES.jobDetail(id)}
+            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            aria-label="Back to job"
+          >
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15.75 19.5 8.25 12l7.5-7.5"
+              />
+            </svg>
+          </Link>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-semibold text-gray-900">
+                Service Sheet
+              </h1>
+              <SyncStatePill />
+            </div>
+            <p className="text-sm text-gray-500">
+              {customer ? customer.name : "Customer"}
+              {" · "}
+              {formatDate(job.job_date)}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <ServiceSheetViewOnly job={job} site={site} customer={customer} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
