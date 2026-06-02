@@ -49,6 +49,28 @@ import { useEffect } from "react";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { isNetworkError } from "@/lib/sync/is-network-error";
 
+// Shared "Try again" button styling, matched to the app's primary
+// button pattern (see e.g. the New Booking button in the side panel).
+// Operator feedback after Phase C: the previous one-liner only had
+// `hover:bg-gray-800` and felt dead — no press/active feedback, no
+// transition, no keyboard focus ring. Both error branches use this
+// constant so they stay visually identical.
+//
+//   transition-colors duration-75   — smooths the hover/active flip
+//   hover:bg-gray-800               — mouse hover state
+//   active:bg-black active:scale-[0.98] — press-down feedback
+//   focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-2
+//                                  — keyboard focus ring; `focus-visible`
+//                                    so a mouse click doesn't paint it
+//   outline-none                    — Tailwind's default focus outline is
+//                                    redundant with our ring
+const TRY_AGAIN_CLS =
+  "mt-4 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white " +
+  "outline-none transition-colors duration-75 " +
+  "hover:bg-gray-800 " +
+  "active:bg-black active:scale-[0.98] " +
+  "focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-2";
+
 export default function AppError({
   error,
   reset,
@@ -93,10 +115,7 @@ export default function AppError({
             This page needs a connection to load. Your job and customer
             lists still work offline — go back and try those.
           </p>
-          <button
-            onClick={reset}
-            className="mt-4 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-          >
+          <button onClick={reset} className={TRY_AGAIN_CLS}>
             Try again
           </button>
         </div>
