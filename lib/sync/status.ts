@@ -40,6 +40,41 @@ export interface SyncStatus {
   /** True if the most recent halt was a 401/403. Surfaces the
    *  "Session expired — sign in to continue syncing" banner. */
   authExpired: boolean;
+  /**
+   * Did the most recent sync attempt actually reach the server?
+   *
+   *   null   — no attempt has run yet (cold boot, pre-first-sync).
+   *   true   — last attempt completed without a network/server error.
+   *   false  — last attempt failed with a non-auth error (network
+   *            timeout, fetch threw, 5xx, etc).
+   *
+   * Required because `navigator.onLine` is an unreliable POSITIVE
+   * signal: on macOS with Wi-Fi off the loopback adapter keeps
+   * `navigator.onLine === true`, and captive portals / "connected but
+   * no internet" return true too. This field is the empirical
+   * counterpart — the engine actually attempted a fetch and recorded
+   * the outcome.
+   *
+   * Auth failures (401/403) leave this `true` because we DID reach
+   * the server (it just rejected the session). The "session expired"
+   * banner is the right surface for that case; the offline pill +
+   * write guards must remain disengaged so the operator sees the
+   * sign-in prompt.
+   *
+   * Effective-online consumers (`useIsOnline`, SyncStatePill, write
+   * guards) combine this with `navigator.onLine`:
+   *
+   *     effective_online =
+   *       navigator.onLine !== false &&
+   *       status.serverReachable !== false
+   *
+   * A single transient failure flips this immediately to `false`.
+   * The next successful attempt flips it back to `true`. We don't
+   * hysteresis-guard the flip (per the operator's "don't
+   * over-engineer this" note) — recovery on the next success is
+   * sufficient and the simpler model is easier to reason about.
+   */
+  serverReachable: boolean | null;
   /** Most recent trigger reason. Surfaced in the status panel for
    *  diagnostic ("syncing — triggered by: online"). */
   lastReason: SyncReason | null;
@@ -51,6 +86,7 @@ const INITIAL: SyncStatus = {
   currentRunStartedAt: null,
   lastError: null,
   authExpired: false,
+  serverReachable: null,
   lastReason: null,
 };
 
@@ -82,6 +118,10 @@ export function syncFinished(): void {
     syncing: false,
     currentRunStartedAt: null,
     lastSyncAt: new Date().toISOString(),
+    // We reached the server and got valid data back. Flip to true so
+    // a previous "unreachable" state clears the moment connectivity
+    // recovers. No hysteresis — the simplest model that works.
+    serverReachable: true,
   };
   notify();
 }
@@ -93,6 +133,11 @@ export function syncFailed(message: string, kind: "auth" | "other"): void {
     currentRunStartedAt: null,
     lastError: message,
     authExpired: kind === "auth" ? true : state.authExpired,
+    // Auth failures DID reach the server (it just rejected us). Don't
+    // flip serverReachable in that case — the authExpired banner is
+    // the right surface, and the offline pill / guards must stay
+    // disengaged so the operator sees the sign-in prompt.
+    serverReachable: kind === "auth" ? state.serverReachable : false,
   };
   notify();
 }

@@ -23,7 +23,7 @@ import {
   JOB_STATUS_COLORS,
 } from "@/lib/constants/job-labels";
 import { db } from "@/lib/db";
-import { useOnline } from "@/lib/hooks/use-online";
+import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { todayUk } from "@/lib/utils/today-uk";
 import type {
   Agreement,
@@ -63,7 +63,12 @@ export function CustomerSidePanel({
   onClose,
 }: CustomerSidePanelProps) {
   const router = useRouter();
-  const online = useOnline();
+  // Effective online (navigator.onLine + last sync attempt outcome).
+  // Surface 3's post-test fix — the bare navigator.onLine read used
+  // to keep `true` with Wi-Fi off on localhost, so the guards never
+  // engaged. Now it stays `true` only while the engine's last sync
+  // attempt actually reached the server.
+  const online = useIsOnline();
   const [bookingOpen, setBookingOpen] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
