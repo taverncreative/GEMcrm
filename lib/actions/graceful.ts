@@ -41,28 +41,10 @@
  * goal is just "don't hang silently."
  */
 
+import { isNetworkError } from "@/lib/sync/is-network-error";
+
 const OFFLINE_MESSAGE =
   "Couldn't save — connection lost. Try again when you're back online.";
-
-/**
- * Recognises network-shape errors. Server actions failing at the
- * transport layer surface as TypeError (fetch failed) in modern
- * browsers; older / less standard runtimes use different shapes but
- * all include either "fetch" or "network" in the message. The string
- * check is wide on purpose — false positives here only mean a
- * server-thrown error gets the connection-lost message instead of
- * its real text, which is still an improvement on "silent hang".
- */
-function isNetworkError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const message = err.message.toLowerCase();
-  return (
-    message.includes("fetch") ||
-    message.includes("network") ||
-    message.includes("failed to fetch") ||
-    err.name === "TypeError" // covers TypeError: NetworkError when attempting...
-  );
-}
 
 export interface GracefulFailureResult {
   success: false;
