@@ -6,6 +6,14 @@ import {
   getDeleteImpactAction,
 } from "@/app/(app)/customers/actions";
 import type { DeleteImpact } from "@/lib/data/customers";
+import { wrapDirectCallGracefully } from "@/lib/actions/graceful";
+
+// Wrap the delete action so a transport-layer failure resolves to a
+// `{success:false, message:"…connection lost…"}` shape that the
+// existing error rendering already understands. Surface 3 disable-
+// guard is the primary defense; this is the safety net for the
+// race window between modal open and submit.
+const wrappedDeleteCustomer = wrapDirectCallGracefully(deleteCustomerAction);
 
 interface DeleteCustomerConfirmProps {
   customerId: string;
@@ -54,7 +62,13 @@ export function DeleteCustomerConfirm({
   function handleDelete() {
     setError(null);
     startTransition(async () => {
-      const res = await deleteCustomerAction(customerId);
+      // The wrapped action intercepts transport-layer failures and
+      // returns `{success: false, message: "…connection lost…"}` so
+      // the existing error-rendering path below catches it. Without
+      // this, a fetch failure threw out of the transition and the
+      // modal hung silently. Server-side `{success:false}` results
+      // pass through unchanged.
+      const res = await wrappedDeleteCustomer(customerId);
       if (res.success) {
         onDeleted();
       } else {

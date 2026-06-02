@@ -18,6 +18,14 @@ import { CALL_TYPE_LABELS, COMMON_PESTS } from "@/lib/constants/job-labels";
 import { todayUk } from "@/lib/utils/today-uk";
 import type { ActionState } from "@/types/actions";
 import type { Customer, CustomerType, Site } from "@/types/database";
+import { wrapFormActionGracefully } from "@/lib/actions/graceful";
+
+// Module-scope wrap (the action is module-scope too, so this is one
+// closure for the lifetime of the page — not allocated per modal
+// open).
+const gracefulCreateQuickBookingAction = wrapFormActionGracefully(
+  createQuickBookingAction
+);
 
 const initialState: ActionState = {
   success: false,
@@ -94,8 +102,15 @@ export function BookingModal({
   const customerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOpenRef = useRef(false);
 
+  // Wrapped so a transport-layer failure (Wi-Fi off mid-submit etc)
+  // resolves to `{success:false, message:"…connection lost…"}`
+  // instead of throwing out of React's form-action machinery and
+  // hanging the modal silently. Server-side `{success:false}` shapes
+  // pass through unchanged. The disable guard on the parent button
+  // is the primary defense; this is the safety net for the race
+  // window between modal open and submit.
   const [state, action, isPending] = useActionState(
-    createQuickBookingAction,
+    gracefulCreateQuickBookingAction,
     initialState
   );
 

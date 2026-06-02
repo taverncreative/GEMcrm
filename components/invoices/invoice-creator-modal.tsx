@@ -19,6 +19,14 @@ import { buildInvoiceEmailDraft } from "@/lib/services/invoice-email";
 import { dateUkOffset } from "@/lib/utils/today-uk";
 import { BUSINESS } from "@/lib/constants/branding";
 import type { Customer, Invoice } from "@/types/database";
+import { wrapFormActionGracefully } from "@/lib/actions/graceful";
+
+// Wrapped so a transport-layer failure on submit (Wi-Fi off etc) lands
+// in the modal's state with a "…connection lost…" message instead of
+// hanging silently. Server-side errors pass through unchanged.
+const gracefulCreateInvoiceDraftAction = wrapFormActionGracefully(
+  createInvoiceDraftAction
+);
 
 const initialState: CreateDraftResult = {
   success: false,
@@ -131,7 +139,7 @@ export function InvoiceCreatorModal({
   const [isSending, startSendTransition] = useTransition();
 
   const [draftState, draftAction, draftPending] = useActionState(
-    createInvoiceDraftAction,
+    gracefulCreateInvoiceDraftAction,
     initialState
   );
 
