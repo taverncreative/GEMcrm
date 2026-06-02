@@ -150,6 +150,45 @@ export async function getCustomerDetailAction(
   return getCustomerDetail(customerId);
 }
 
+/**
+ * Online-only fetch for the side-panel's Documents section.
+ *
+ * The Surface-3 offline conversion moved customer/sites/jobs/agreements/
+ * tasks reads to Dexie via useLiveQuery, but the `reports` table is
+ * NOT synced (offline-pwa Gap A → Option A). Report PDF URLs live in
+ * Supabase Storage and require an online round-trip to open anyway, so
+ * caching the rows offline would just produce dead-on-tap entries.
+ *
+ * This action is called LAZILY from the side panel only when
+ * `navigator.onLine` is true. Offline, the panel renders a
+ * "Service report PDFs require an online connection" notice instead
+ * and never invokes this action.
+ *
+ * Returns the same shape `getCustomerDetail` previously returned for
+ * the `reports` field — minimised projection so we don't ship
+ * unnecessary bytes back to the browser.
+ */
+export interface ServiceReportSummary {
+  id: string;
+  job_id: string;
+  pdf_url: string | null;
+  created_at: string;
+}
+
+export async function getServiceReportsForCustomerAction(
+  customerId: string
+): Promise<ServiceReportSummary[]> {
+  await requireUser();
+  if (!customerId) return [];
+  const detail = await getCustomerDetail(customerId);
+  // Reuse the existing reports query embedded in getCustomerDetail
+  // rather than duplicate the join logic. Slight over-fetch (we throw
+  // away the rest of the detail bundle) but the function is online-only
+  // and rarely the bottleneck — keeping the join in one place avoids
+  // drift when the underlying schema changes.
+  return detail?.reports ?? [];
+}
+
 // ─── Inline toggles ──────────────────────────────────────────────────────
 
 export async function setReviewReceivedAction(

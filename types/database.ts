@@ -89,6 +89,30 @@ export interface Job {
   is_paid: boolean;
   reference_number: string | null;
   parent_job_id: string | null;
+  /**
+   * Server-side "hide from normal views without deleting" flag added
+   * by migration 005. The Supabase pull RPC (`sync_pull_jobs`)
+   * returns the column as part of `setof public.jobs`, so it IS
+   * present on synced rows — but the offline-PWA roll-out missed it
+   * from this interface and the server's READ-side filters (e.g.
+   * `getCustomerDetail`'s `.eq("is_archived", false)`) had no
+   * Dexie-side equivalent. Result: archived jobs would surface
+   * offline in the customer side panel that don't appear online.
+   *
+   * Added now as part of Surface 3 (customer side panel) so client
+   * reads can match the server's archive filter. No Dexie schema
+   * bump — the column is read-filtered in JS at the query site, NOT
+   * indexed (chosen explicitly to avoid another schema migration
+   * after the v4 bump caused boot grief).
+   *
+   * Pre-existing job rows synced before this addition will have
+   * `is_archived === undefined` at runtime (the column was always
+   * in the pull payload, but the field name was absent from the TS
+   * type, so callers didn't read it). For safety the filter site
+   * checks `!j.is_archived`, which is true for both `false` and
+   * `undefined` — newly synced rows have the explicit boolean.
+   */
+  is_archived?: boolean;
 }
 
 export type InvoiceStatus = "draft" | "sent" | "paid";
