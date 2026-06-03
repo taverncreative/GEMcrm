@@ -95,33 +95,79 @@ async function writeCursor(key: string, value: string): Promise<void> {
 }
 
 /**
+ * Build the set of entity ids currently guarded by the outbox — ids
+ * whose local row must NOT be overwritten by a server pull because a
+ * local write for them hasn't synced yet.
+ *
+ * Unifies two guards into one mechanism:
+ *   - single-entity: the entry's primary `entity_id`
+ *   - multi-entity:  every id in the entry's `entity_ids[]` (e.g. an
+ *     offline booking that created a customer + site + job in one
+ *     atomic action — all three must be protected until that action
+ *     has synced, not just the job the entry is keyed on).
+ *
+ * Type-agnostic on purpose: ids are UUIDs (`crypto.randomUUID`), so a
+ * customer id can never collide with a job id, and `entity_ids[]`
+ * legitimately mixes types. Membership in the set is sufficient; we
+ * don't need to scope by entity_type the way the old per-row
+ * `[entity_type+entity_id]` count did.
+ *
+ * Stuck entries are included — a row awaiting conflict resolution in
+ * the inbox must not be clobbered out from under the operator.
+ *
+ * Built fresh per mergeRows call (i.e. per entity, right before that
+ * entity's merge loop) rather than once per pull pass. This keeps the
+ * snapshot as late as possible: an entry enqueued while an EARLIER
+ * entity was merging in the same pass is still seen when the next
+ * entity merges. One small scan per entity; the outbox holds a handful
+ * of rows at GEM's single-operator scale.
+ */
+async function buildGuardedIds(): Promise<Set<string>> {
+  const guarded = new Set<string>();
+  for (const e of await db.outbox.toArray()) {
+    guarded.add(e.entity_id);
+    e.entity_ids?.forEach((id) => guarded.add(id));
+  }
+  return guarded;
+}
+
+/**
  * Generic merge helper. For each returned row, either write it through
  * (LWW says server wins) or skip it (outbox-guarded). Returns the
  * count actually merged + skipped, and the max updated_at observed.
+ *
+ * Exported for the guard regression test — not part of the public pull
+ * API. Callers in this module use it via pullEntity.
  */
-async function mergeRows<T extends SyncableRow>(
+export async function mergeRows<T extends SyncableRow>(
   rows: T[],
-  table: Table<T, string>,
-  entityType: string
+  table: Table<T, string>
 ): Promise<{ merged: number; skipped: number; maxUpdatedAt: string | null }> {
   let merged = 0;
   let skipped = 0;
   let maxUpdatedAt: string | null = null;
+
+  // Snapshot the guarded ids as late as possible — immediately before
+  // the merge loop. Accepted narrow race (single-operator): an entry
+  // enqueued AFTER this snapshot but before the loop finishes won't be
+  // guarded this pass. It does NOT affect offline CREATES — no server
+  // row exists yet to clobber — and the next pull picks it up. The old
+  // per-row count closed this window per-row at the cost of a DB query
+  // per row; for the multi-entity union an in-memory set is simpler and
+  // the residual race is immaterial at this scale.
+  const guarded = await buildGuardedIds();
 
   for (const row of rows) {
     if (!maxUpdatedAt || row.updated_at > maxUpdatedAt) {
       maxUpdatedAt = row.updated_at;
     }
 
-    // Outbox guard — is there a pending unsynced wrapper-write on
-    // this row? If so, the local version is newer-than-server in the
-    // logical sense even though updated_at hasn't been bumped server-side
-    // yet. Skip the merge; the next push will sync local→server.
-    const outboxCount = await db.outbox
-      .where("[entity_type+entity_id]")
-      .equals([entityType, row.id])
-      .count();
-    if (outboxCount > 0) {
+    // Outbox guard — a pending (or stuck) local write references this
+    // row (directly or as a multi-entity child). The local version is
+    // logically newer than the server's even if updated_at hasn't been
+    // bumped server-side yet. Skip; the next push syncs local→server,
+    // then a later pull refreshes us cleanly once the entry drains.
+    if (guarded.has(row.id)) {
       skipped++;
       continue;
     }
@@ -171,11 +217,9 @@ async function pullEntity<T extends SyncableRow>(
   }
 
   out.fetched = rows.length;
-  const { merged, skipped, maxUpdatedAt } = await mergeRows(
-    rows,
-    table,
-    entity.slice(0, -1) // "customers" → "customer" to match outbox entity_type
-  );
+  // The guard is now type-agnostic (UUID ids can't collide across
+  // tables), so mergeRows no longer needs the entity_type.
+  const { merged, skipped, maxUpdatedAt } = await mergeRows(rows, table);
   out.merged = merged;
   out.skipped_dirty = skipped;
 
