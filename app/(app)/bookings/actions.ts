@@ -126,6 +126,16 @@ export async function createQuickBookingAction(
 
   const data = parsed.data;
 
+  // Offline-first id-injection (step 8). When this action is invoked
+  // via the local-first wrapper (online fast-path) OR replayed from the
+  // outbox, these carry the client-generated UUIDs that applyLocal
+  // already wrote to Dexie, so the server rows match the local rows
+  // (no remapping). Plain callers that don't supply them get fresh
+  // server-side UUIDs (the `?? newId()` default inside each data fn).
+  const jobIdNew = (formData.get("job_id") as string) || undefined;
+  const customerIdNew = (formData.get("customer_id_new") as string) || undefined;
+  const siteIdNew = (formData.get("site_id_new") as string) || undefined;
+
   // Step 1 — resolve customer
   let customerId = data.customer_id;
   try {
@@ -148,7 +158,9 @@ export async function createQuickBookingAction(
         }
         return { success: false, errors, message: null };
       }
-      const created = await createCustomer(customerResult.data);
+      const created = await createCustomer(customerResult.data, [], {
+        id: customerIdNew,
+      });
       customerId = created.id;
     } else {
       if (!customerId) {
@@ -206,7 +218,9 @@ export async function createQuickBookingAction(
         }
         return { success: false, errors, message: null };
       }
-      const created = await createSite(customerId, siteResult.data);
+      const created = await createSite(customerId, siteResult.data, {
+        id: siteIdNew,
+      });
       siteId = created.id;
     } else {
       if (!siteId) {
@@ -253,7 +267,7 @@ export async function createQuickBookingAction(
   }
 
   try {
-    await createBooking(bookingResult.data);
+    await createBooking(bookingResult.data, { id: jobIdNew });
   } catch (err) {
     if (err instanceof JobClashError) {
       return {

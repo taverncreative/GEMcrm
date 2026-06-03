@@ -97,13 +97,19 @@ function siteRow(customerId: string, input: SiteInputLoose) {
 
 export async function createCustomer(
   input: CustomerInput,
-  additionalSites: SiteInputLoose[] = []
+  additionalSites: SiteInputLoose[] = [],
+  opts?: { id?: string }
 ): Promise<Customer> {
   const supabase = await createClient();
+  // `opts.id` from the offline-first path (applyLocal wrote this client
+  // UUID locally; the outbox replay passes it so server == local).
+  // upsert(onConflict:"id") makes a lost-ack replay re-run idempotent.
+  // Plain online callers omit it → fresh UUID, behaves like an insert
+  // (no conflict possible on a brand-new id).
   const { data, error } = await supabase
     .from("customers")
-    .insert({
-      id: newId(),
+    .upsert({
+      id: opts?.id ?? newId(),
       name: input.name.trim(),
       company_name: emptyToNull(input.company_name),
       email: emptyToNull(input.email),

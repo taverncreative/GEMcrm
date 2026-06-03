@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  useActionState,
   useCallback,
   useEffect,
   useRef,
@@ -16,22 +15,253 @@ import {
 import { CALL_TYPES } from "@/lib/validation/booking";
 import { CALL_TYPE_LABELS, COMMON_PESTS } from "@/lib/constants/job-labels";
 import { todayUk } from "@/lib/utils/today-uk";
+import {
+  useLocalFirstAction,
+  formDataToObject,
+  type WrapMeta,
+  type LocalFirstOptions,
+} from "@/lib/actions/wrap";
+import { db } from "@/lib/db";
+import { newId } from "@/lib/utils/id";
 import type { ActionState } from "@/types/actions";
-import type { Customer, CustomerType, Site } from "@/types/database";
-import { wrapFormActionGracefully } from "@/lib/actions/graceful";
-
-// Module-scope wrap (the action is module-scope too, so this is one
-// closure for the lifetime of the page — not allocated per modal
-// open).
-const gracefulCreateQuickBookingAction = wrapFormActionGracefully(
-  createQuickBookingAction
-);
+import type { Customer, CustomerType, Job, Site } from "@/types/database";
 
 const initialState: ActionState = {
   success: false,
   errors: {},
   message: null,
 };
+
+// ─── Local-first booking wrap (step 8 — offline New Booking) ────────
+//
+// One outbox entry for the whole multi-entity action. parseInput
+// generates the client UUIDs (job always; new customer/site when the
+// modal is in "new" mode); applyLocal writes those rows to Dexie so
+// the jobs list / customer panel show the booking instantly; the
+// wrapper enqueues with entity_ids[] (the multi-entity guard) and
+// replayArgs carrying the ids so the server creates the SAME rows on
+// drain — online via the fast-path call, offline on reconnect.
+
+export interface BookingWrapInput {
+  jobId: string;
+  /** Set only when the modal created a NEW customer — drives both the
+   *  local write and (via entityIds) the discard-revert. Never the id
+   *  of an existing/selected customer. */
+  newCustomerId: string | null;
+  newSiteId: string | null;
+  /** Resolved ids the job hangs off (existing selection OR the new id). */
+  customerId: string;
+  siteId: string;
+  modeCustomer: "existing" | "new";
+  modeSite: "existing" | "new";
+  // Field snapshot for applyLocal's Dexie rows.
+  fields: {
+    customer_name: string;
+    customer_company: string;
+    customer_email: string;
+    customer_phone: string;
+    customer_type: CustomerType;
+    site_line1: string;
+    site_line2: string;
+    site_town: string;
+    site_county: string;
+    site_postcode: string;
+    job_date: string;
+    job_time: string;
+    call_type: string;
+    pest_species: string[];
+    value: string;
+    report_notes: string;
+  };
+}
+
+function s(formData: FormData, key: string): string {
+  return (formData.get(key) as string | null) ?? "";
+}
+
+function parseBookingPests(formData: FormData): string[] {
+  try {
+    const raw = formData.get("pest_species");
+    if (typeof raw !== "string" || !raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export const bookingMeta: WrapMeta<BookingWrapInput> = {
+  actionName: "createQuickBookingAction",
+  entityType: "job",
+  parseInput: (formData) => {
+    const modeCustomer = (s(formData, "mode_customer") || "existing") as
+      | "existing"
+      | "new";
+    const modeSite = (s(formData, "mode_site") || "existing") as
+      | "existing"
+      | "new";
+    const jobDate = s(formData, "job_date");
+    const callType = s(formData, "call_type");
+
+    const newCustomerId = modeCustomer === "new" ? newId() : null;
+    const newSiteId = modeSite === "new" ? newId() : null;
+    const customerId =
+      modeCustomer === "new" ? newCustomerId! : s(formData, "customer_id");
+    const siteId = modeSite === "new" ? newSiteId! : s(formData, "site_id");
+
+    // Light guard so an incomplete offline submit doesn't write a
+    // broken local booking. The server still does full Zod validation
+    // online (and the modal's own UI requires these). Returning null
+    // skips local write + enqueue; online the server call still runs
+    // and surfaces field errors.
+    if (!jobDate || !callType || !customerId || !siteId) return null;
+
+    return {
+      jobId: newId(),
+      newCustomerId,
+      newSiteId,
+      customerId,
+      siteId,
+      modeCustomer,
+      modeSite,
+      fields: {
+        customer_name: s(formData, "customer_name"),
+        customer_company: s(formData, "customer_company"),
+        customer_email: s(formData, "customer_email"),
+        customer_phone: s(formData, "customer_phone"),
+        customer_type: (s(formData, "customer_type") || "commercial") as
+          | "commercial"
+          | "domestic",
+        site_line1: s(formData, "site_line1"),
+        site_line2: s(formData, "site_line2"),
+        site_town: s(formData, "site_town"),
+        site_county: s(formData, "site_county"),
+        site_postcode: s(formData, "site_postcode"),
+        job_date: jobDate,
+        job_time: s(formData, "job_time"),
+        call_type: callType,
+        pest_species: parseBookingPests(formData),
+        value: s(formData, "value"),
+        report_notes: s(formData, "report_notes"),
+      },
+    };
+  },
+  applyLocal: async (input) => {
+    const now = new Date().toISOString();
+    const f = input.fields;
+    // New customer (only in "new" mode). Full-ish row with sane
+    // defaults so the customers list / side panel render it cleanly.
+    if (input.newCustomerId) {
+      await db.customers.add({
+        id: input.newCustomerId,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+        name: f.customer_name.trim(),
+        company_name: f.customer_company.trim() || null,
+        email: f.customer_email.trim() || null,
+        phone: f.customer_phone.trim() || null,
+        customer_type: f.customer_type,
+        google_review_received: false,
+        review_request_snoozed_until: null,
+        review_email_sent_at: null,
+        mobile: null,
+        position: null,
+        address: null,
+        address_line_1: null,
+        address_line_2: null,
+        town: null,
+        county: null,
+        postcode: null,
+        website: null,
+        notes: null,
+        annual_contract_value: null,
+      } as Customer);
+    }
+    // New site (only in "new" mode).
+    if (input.newSiteId) {
+      await db.sites.add({
+        id: input.newSiteId,
+        customer_id: input.customerId,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+        address_line_1: f.site_line1.trim() || null,
+        address_line_2: f.site_line2.trim() || null,
+        town: f.site_town.trim() || null,
+        county: (f.site_county.trim() || "—") || null,
+        postcode: f.site_postcode.trim().toUpperCase() || null,
+      } as Site);
+    }
+    // The job — always. reference_number is null until the server
+    // computes it on sync (UI falls back to the short id meanwhile).
+    await db.jobs.add({
+      id: input.jobId,
+      site_id: input.siteId,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+      job_date: f.job_date,
+      job_time: f.job_time.trim() || null,
+      call_type: (f.call_type || null) as Job["call_type"],
+      pest_species: f.pest_species,
+      findings: null,
+      recommendations: null,
+      treatment: null,
+      pesticides_used: null,
+      risk_level: null,
+      risk_comments: null,
+      technician_signature_url: null,
+      client_signature_url: null,
+      job_status: "scheduled",
+      agreement_id: null,
+      environmental_risk: null,
+      environmental_comments: null,
+      protected_species_present: false,
+      method_used: [],
+      photo_urls: [],
+      client_present: false,
+      client_name: null,
+      report_notes: f.report_notes.trim() || null,
+      value: f.value.trim() ? Number(f.value) : null,
+      is_invoiced: false,
+      is_paid: false,
+      reference_number: null,
+      parent_job_id: null,
+      is_archived: false,
+    } as Job);
+  },
+  entityId: (input) => input.jobId,
+  // ONLY newly-created ids — keeps discard-revert surgical (an existing
+  // selected customer/site is never listed here, so it can't be deleted).
+  entityIds: (input) =>
+    [input.newCustomerId, input.newSiteId, input.jobId].filter(
+      (id): id is string => !!id
+    ),
+  op: "create",
+  // Carry every form field plus the generated ids, so the server
+  // (online fast-path AND outbox replay) creates the same rows.
+  replayArgs: (input, formData) => ({
+    ...formDataToObject(formData),
+    job_id: input.jobId,
+    customer_id_new: input.newCustomerId ?? "",
+    site_id_new: input.newSiteId ?? "",
+  }),
+};
+
+// Offline: no server result to flip state, so close the modal on the
+// local write landing. Online, the server result drives state as
+// before (so a validation failure keeps the modal open with errors).
+const bookingLocalFirstOpts: LocalFirstOptions<ActionState, BookingWrapInput> =
+  {
+    localSuccessState: () => ({
+      success: true,
+      errors: {},
+      message: "Booking saved — will sync when online",
+    }),
+  };
 
 interface BookingModalProps {
   open: boolean;
@@ -102,16 +332,18 @@ export function BookingModal({
   const customerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOpenRef = useRef(false);
 
-  // Wrapped so a transport-layer failure (Wi-Fi off mid-submit etc)
-  // resolves to `{success:false, message:"…connection lost…"}`
-  // instead of throwing out of React's form-action machinery and
-  // hanging the modal silently. Server-side `{success:false}` shapes
-  // pass through unchanged. The disable guard on the parent button
-  // is the primary defense; this is the safety net for the race
-  // window between modal open and submit.
-  const [state, action, isPending] = useActionState(
-    gracefulCreateQuickBookingAction,
-    initialState
+  // Local-first (step 8): applyLocal writes the booking (+ new
+  // customer/site) to Dexie immediately, enqueues one multi-entity
+  // outbox entry, and — online — fires the server action with the
+  // same client ids. Offline, the booking is queued and the modal
+  // closes via the localSuccessState option. Replaces the previous
+  // graceful-online-only wrap; a mid-submit connection loss now just
+  // queues the booking instead of erroring.
+  const [state, action, isPending] = useLocalFirstAction(
+    createQuickBookingAction,
+    initialState,
+    bookingMeta,
+    bookingLocalFirstOpts
   );
 
   // Reset state on every fresh open. The guard means re-renders while open
@@ -231,7 +463,6 @@ export function BookingModal({
       // address so a fresh "+ Add site" form isn't blank.
       prefillSiteFromCustomer(c);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const togglePest = useCallback((pest: string) => {

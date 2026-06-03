@@ -464,12 +464,13 @@ export function CustomerSidePanel({
                   fail. The same actions live in the sticky mobile bar
                   below; this block only renders on md+. */}
               <div className="hidden grid-cols-2 gap-2 md:grid">
+                {/* New Booking is offline-capable (step 8) — no guard.
+                    Create Invoice stays online-only (multi-entity write
+                    not yet wrapped). */}
                 <button
                   type="button"
                   onClick={() => setBookingOpen(true)}
-                  disabled={!online}
-                  title={online ? undefined : "Online required"}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:hover:bg-gray-200"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -914,7 +915,7 @@ export function CustomerSidePanel({
             md+. `env(safe-area-inset-bottom)` keeps the buttons clear of
             the iOS home indicator.
 
-            "New Booking" mirrors the desktop online-only guard. "Open
+            "New Booking" is offline-capable (step 8) — no guard. "Open
             page" is replaced with a disabled placeholder offline rather
             than removed, so the layout doesn't reshuffle when
             connectivity flips. */}
@@ -926,9 +927,7 @@ export function CustomerSidePanel({
               <button
                 type="button"
                 onClick={() => setBookingOpen(true)}
-                disabled={!online}
-                title={online ? undefined : "Online required"}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand text-sm font-semibold text-white shadow-sm active:bg-brand-darker disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand text-sm font-semibold text-white shadow-sm active:bg-brand-darker"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />

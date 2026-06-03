@@ -152,3 +152,42 @@ export async function enqueueAction(input: EnqueueInput): Promise<EnqueueResult>
 export async function removeOutboxEntry(id: number): Promise<void> {
   await db.outbox.delete(id);
 }
+
+/**
+ * Discard-revert for an unsynced multi-entity CREATE (step 8).
+ *
+ * When the operator discards a stuck `op: "create"` entry from the
+ * conflict inbox, the local rows that action created must be removed
+ * too — otherwise they linger in Dexie forever (visible in the UI,
+ * never synced).
+ *
+ * SAFETY — surgical by construction:
+ *   - No-op unless `op === "create"`. Update/delete entries never
+ *     touch rows here.
+ *   - Deletes ONLY `entity_id` + `entity_ids` — and the create
+ *     wrappers populate `entity_ids` with ONLY newly-created ids (an
+ *     existing/selected customer behind a booking is never listed), so
+ *     this can never delete a referenced/pre-existing row.
+ *   - ids are UUIDs (unique across tables), so deleting each id from
+ *     every entity table hits only its real owner; absent keys are
+ *     no-ops. Avoids per-id type tracking on the entry.
+ *
+ * Does NOT remove the outbox entry itself — the caller does that after
+ * (so the row-revert and entry-removal stay independently testable).
+ */
+export async function revertLocalCreate(entry: {
+  op?: "create" | "update" | "delete";
+  entity_id: string;
+  entity_ids?: string[];
+}): Promise<void> {
+  if (entry.op !== "create") return;
+  const ids = new Set<string>([entry.entity_id, ...(entry.entity_ids ?? [])]);
+  for (const id of ids) {
+    if (!id) continue;
+    await db.customers.delete(id);
+    await db.sites.delete(id);
+    await db.jobs.delete(id);
+    await db.agreements.delete(id);
+    await db.tasks.delete(id);
+  }
+}

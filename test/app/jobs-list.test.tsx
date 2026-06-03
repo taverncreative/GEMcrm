@@ -363,9 +363,10 @@ describe("JobsPage — soft-delete exclusion", () => {
   });
 });
 
-// ─── (g) StartJobButton offline guard ─────────────────────────────
+// ─── (g) StartJobButton stays enabled offline (New Booking is now ──
+//        offline-capable, step 8) ─────────────────────────────────
 
-describe("JobsPage — StartJobButton offline guard", () => {
+describe("JobsPage — StartJobButton (New Booking offline-capable)", () => {
   it("StartJobButton is enabled when online", async () => {
     await db.customers.put(makeCustomer());
     await db.sites.put(makeSite());
@@ -378,7 +379,7 @@ describe("JobsPage — StartJobButton offline guard", () => {
     });
   });
 
-  it("StartJobButton is disabled (Online required tooltip) when offline", async () => {
+  it("StartJobButton STAYS enabled offline (local-first booking)", async () => {
     await db.customers.put(makeCustomer());
     await db.sites.put(makeSite());
 
@@ -391,8 +392,9 @@ describe("JobsPage — StartJobButton offline guard", () => {
 
     await waitFor(() => {
       const btn = screen.getByRole("button", { name: /New Booking/i });
-      expect(btn).toBeDisabled();
-      expect(btn).toHaveAttribute("title", "Online required");
+      // No online guard anymore — the modal is local-first.
+      expect(btn).not.toBeDisabled();
+      expect(btn).not.toHaveAttribute("title", "Online required");
     });
   });
 });

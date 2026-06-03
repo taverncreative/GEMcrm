@@ -376,7 +376,7 @@ describe("CustomerSidePanel — online-required guards", () => {
     expect(reviewCheckbox).not.toBeDisabled();
   });
 
-  it("multi-entity buttons are disabled (and tooltip set) when offline", async () => {
+  it("Invoice + Delete stay disabled offline; New Booking + toggles do NOT", async () => {
     await db.customers.put(makeCustomer());
     render(<CustomerSidePanel customerId="cust-1" onClose={vi.fn()} />);
 
@@ -388,28 +388,26 @@ describe("CustomerSidePanel — online-required guards", () => {
     // event-listener path the useIsOnline hook exposes.
     setOffline();
 
-    // The three multi-entity write paths (Booking/Invoice/Delete)
-    // remain online-only — the entity_ids[] multi-entity sync guard
-    // hasn't shipped yet so wrapping them isn't safe.
+    // Create Invoice + Delete remain online-only — those multi-entity
+    // writes aren't wrapped (Invoice/Agreement out of scope; Delete is
+    // a cascade). They stay disabled with the tooltip.
     await waitFor(() => {
-      const bookingBtn = screen.getAllByRole("button", { name: /New Booking/i })[0];
-      expect(bookingBtn).toBeDisabled();
-      expect(bookingBtn).toHaveAttribute("title", "Online required");
+      expect(
+        screen.getByRole("button", { name: /Create Invoice/i })
+      ).toBeDisabled();
     });
-
-    expect(
-      screen.getByRole("button", { name: /Create Invoice/i })
-    ).toBeDisabled();
     expect(
       screen.getByRole("button", { name: /Delete customer/i })
     ).toBeDisabled();
 
-    // The two single-entity toggles (type, review) are NOW wrapped
-    // local-first — they work offline. The disabled-state assertion
-    // that used to live here was the regression the operator caught:
-    // the controls "felt broken" because they weren't updating
-    // immediately. After wrapAction, the controls are always live and
-    // useLiveQuery picks up the applyLocal write within a tick.
+    // New Booking is now offline-capable (step 8) — NOT disabled.
+    const bookingBtn = screen.getAllByRole("button", {
+      name: /New Booking/i,
+    })[0];
+    expect(bookingBtn).not.toBeDisabled();
+    expect(bookingBtn).not.toHaveAttribute("title", "Online required");
+
+    // The single-entity toggles (type, review) are local-first too.
     expect(
       screen.getByRole("button", { name: "Commercial" })
     ).not.toBeDisabled();

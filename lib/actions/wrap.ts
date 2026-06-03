@@ -69,6 +69,47 @@ export interface WrapMeta<TInput> {
   parseInput?: (formData: FormData) => TInput | null;
   /** Write the local Dexie row. Throws on failure. */
   applyLocal: (input: TInput) => Promise<void>;
+
+  // ─── Multi-entity create support (additive; all optional) ─────────
+  // Added for offline New Booking (step 8). Every field below is
+  // OPTIONAL — when omitted, the wrapper behaves byte-for-byte as it
+  // did for the single-entity callers (e.g. the service sheet). The
+  // service-sheet enqueue-shape regression test pins this.
+
+  /** Op kind for the outbox entry. Defaults (in enqueueAction) to
+   *  "update". Multi-entity create wrappers pass "create" so the
+   *  conflict inbox's discard-revert knows it may delete the created
+   *  local rows. */
+  op?: "create" | "update" | "delete";
+  /** Secondary entity ids this action created/touched, for the
+   *  multi-entity pull-merge guard. MUST return ONLY ids the action
+   *  newly created (never an existing/referenced row) — the
+   *  discard-revert deletes exactly these, so an existing customer
+   *  behind a booking must not appear here. */
+  entityIds?: (input: TInput) => string[];
+  /** Build the replay args persisted on the outbox entry. When present,
+   *  REPLACES the default `formDataToObject(formData)` for BOTH the
+   *  enqueued args AND the online server call — so client-generated ids
+   *  produced in `parseInput` reach the server identically online and
+   *  on replay. When absent, the raw form data is used unchanged
+   *  (existing single-entity behaviour). */
+  replayArgs?: (
+    input: TInput,
+    formData: FormData
+  ) => Record<string, string | string[]>;
+}
+
+/** Extra, fully-optional hook options. Separate from WrapMeta because
+ *  `localSuccessState` is typed against the hook's TState, which
+ *  WrapMeta<TInput> doesn't carry. Omitting this object leaves every
+ *  existing caller unchanged. */
+export interface LocalFirstOptions<TState, TInput> {
+  /** Offline-only: the state to set after a successful local write +
+   *  enqueue when there's no server round-trip to produce one. Lets a
+   *  modal that closes on `state.success` also close after an offline
+   *  create. Online, the server action's result drives state as before,
+   *  so this is ignored. */
+  localSuccessState?: (input: TInput) => TState;
 }
 
 // ─── FormData ↔ JSON ────────────────────────────────────────────────
@@ -83,7 +124,9 @@ export interface WrapMeta<TInput> {
  * to stash the blob in `photos_pending` and submit the resulting
  * client id as a plain string field instead.
  */
-function formDataToObject(formData: FormData): Record<string, string | string[]> {
+export function formDataToObject(
+  formData: FormData
+): Record<string, string | string[]> {
   const obj: Record<string, string | string[]> = {};
   formData.forEach((value, key) => {
     if (typeof value !== "string") {
@@ -112,6 +155,25 @@ function isOnline(): boolean {
   return typeof navigator === "undefined" || navigator.onLine;
 }
 
+/**
+ * Inverse of `formDataToObject` — rebuild a FormData from a JSON-safe
+ * object so the online server call can be invoked with the SAME
+ * id-enriched payload that gets persisted to the outbox. Mirrors
+ * `objectToFormData` in lib/sync/registry.ts (kept local to avoid a
+ * wrap→registry import edge); array values become repeated appends.
+ */
+function objectToFormData(obj: Record<string, string | string[]>): FormData {
+  const fd = new FormData();
+  for (const [key, value] of Object.entries(obj)) {
+    if (Array.isArray(value)) {
+      for (const v of value) fd.append(key, v);
+    } else {
+      fd.append(key, value);
+    }
+  }
+  return fd;
+}
+
 // ─── Form-action hook ────────────────────────────────────────────────
 
 /**
@@ -134,7 +196,8 @@ function isOnline(): boolean {
 export function useLocalFirstAction<TState, TInput>(
   serverAction: (prev: Awaited<TState>, formData: FormData) => Promise<TState>,
   initialState: Awaited<TState>,
-  meta: WrapMeta<TInput>
+  meta: WrapMeta<TInput>,
+  opts?: LocalFirstOptions<Awaited<TState>, TInput>
 ): [Awaited<TState>, (formData: FormData) => Promise<void>, boolean] {
   // Manually own state + pending. We DELIBERATELY do NOT use
   // useActionState here, even though our return shape mimics it.
@@ -166,6 +229,15 @@ export function useLocalFirstAction<TState, TInput>(
     async (formData: FormData) => {
       const input = meta.parseInput?.(formData) ?? null;
 
+      // Replay args: when a wrapper supplies `replayArgs` (multi-entity
+      // creates), it injects the client-generated ids so the SAME ids
+      // are used by the local write, the outbox replay, AND the online
+      // server call below. Absent → raw form data (existing behaviour).
+      const replay =
+        input !== null && meta.replayArgs
+          ? meta.replayArgs(input, formData)
+          : null;
+
       if (input !== null) {
         // 1. Local-first Dexie write. If this throws (constraint
         //    violation, table missing, etc) we surface the error and
@@ -187,9 +259,11 @@ export function useLocalFirstAction<TState, TInput>(
         try {
           await enqueueAction({
             action_name: meta.actionName,
-            args: formDataToObject(formData),
+            args: replay ?? formDataToObject(formData),
             entity_type: meta.entityType,
             entity_id: meta.entityId(input),
+            ...(meta.op ? { op: meta.op } : {}),
+            ...(meta.entityIds ? { entity_ids: meta.entityIds(input) } : {}),
           });
         } catch (err) {
           console.error(
@@ -202,14 +276,20 @@ export function useLocalFirstAction<TState, TInput>(
         }
       }
 
-      // 3. Online → call the server action directly, await it, store
-      //    the result via setState. The whole thing is wrapped in
-      //    startTransition so isPending stays true until the server
-      //    responds. Detached from the outer form-action lifecycle.
+      // 3a. Online → call the server action directly, await it, store
+      //     the result via setState. The whole thing is wrapped in
+      //     startTransition so isPending stays true until the server
+      //     responds. Detached from the outer form-action lifecycle.
+      //
+      //     When `replay` is present, invoke with a FormData rebuilt
+      //     from the SAME id-enriched args we enqueued — otherwise the
+      //     online insert would mint fresh ids that don't match the
+      //     rows applyLocal just wrote.
       if (isOnline()) {
+        const serverFormData = replay ? objectToFormData(replay) : formData;
         startTransition(async () => {
           try {
-            const result = await serverAction(state, formData);
+            const result = await serverAction(state, serverFormData);
             setState(result);
           } catch (err) {
             console.error(
@@ -222,12 +302,19 @@ export function useLocalFirstAction<TState, TInput>(
             // the outbox folds duplicate attempts.
           }
         });
+      } else if (input !== null && opts?.localSuccessState) {
+        // 3b. Offline → there's no server result to flip state. If the
+        //     caller provided a local-success state (e.g. a modal that
+        //     closes on state.success), set it now that the local write
+        //     + enqueue have landed. Online callers and callers without
+        //     this option are unaffected.
+        setState(opts.localSuccessState(input));
       }
     },
     // `state` is in deps because we pass it as `prev` to the server
     // action. The callback re-creates on each state change; the form
     // sees the latest reference via the action prop on next render.
-    [serverAction, meta, state, startTransition]
+    [serverAction, meta, state, startTransition, opts]
   );
 
   return [state, wrappedDispatch, isPending];

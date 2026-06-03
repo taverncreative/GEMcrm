@@ -292,7 +292,10 @@ export class JobClashError extends Error {
  * call type, move on. Service Sheet gets filled later via
  * {@link completeServiceSheet}.
  */
-export async function createBooking(input: BookingInput): Promise<Job> {
+export async function createBooking(
+  input: BookingInput,
+  opts?: { id?: string }
+): Promise<Job> {
   const supabase = await createClient();
 
   // We need the customer's type + company_name to compute the reference.
@@ -315,21 +318,38 @@ export async function createBooking(input: BookingInput): Promise<Job> {
     parentJobId,
   });
 
+  // `opts.id` is supplied by the offline-first path: applyLocal already
+  // wrote the job to Dexie with this client UUID, and the outbox replay
+  // passes the same id so the server row matches — no remapping. Plain
+  // online callers omit it and get a fresh server-side UUID.
+  //
+  // upsert(onConflict:"id") makes a replay RE-run idempotent on a lost
+  // response (the entry didn't get deleted, retries, the row already
+  // exists → DO UPDATE rewrites the same payload rather than 23505-ing
+  // a false conflict). Critically, ON CONFLICT (id) only handles the
+  // PK; a violation of the partial-unique index
+  // idx_jobs_site_date_unique still raises 23505 → JobClashError, which
+  // is the REAL conflict we want surfaced. (Edge: a true re-run
+  // recomputes reference_number; harmless — still valid, and only
+  // happens on the rare lost-ack retry.)
   const { data, error } = await supabase
     .from("jobs")
-    .insert({
-      id: newId(),
-      site_id: input.site_id,
-      job_date: input.job_date,
-      job_time: emptyToNull(input.job_time),
-      call_type: input.call_type,
-      pest_species: input.pest_species,
-      value: input.value ?? null,
-      report_notes: emptyToNull(input.report_notes),
-      job_status: "scheduled",
-      reference_number: referenceNumber,
-      parent_job_id: parentJobId,
-    })
+    .upsert(
+      {
+        id: opts?.id ?? newId(),
+        site_id: input.site_id,
+        job_date: input.job_date,
+        job_time: emptyToNull(input.job_time),
+        call_type: input.call_type,
+        pest_species: input.pest_species,
+        value: input.value ?? null,
+        report_notes: emptyToNull(input.report_notes),
+        job_status: "scheduled",
+        reference_number: referenceNumber,
+        parent_job_id: parentJobId,
+      },
+      { onConflict: "id" }
+    )
     .select()
     .single();
 

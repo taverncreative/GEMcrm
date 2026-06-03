@@ -25,8 +25,9 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
+import type { OutboxEntry } from "@/lib/db";
 import { unstickEntry } from "@/lib/sync/push";
-import { removeOutboxEntry } from "@/lib/db/outbox";
+import { removeOutboxEntry, revertLocalCreate } from "@/lib/db/outbox";
 import { runSync } from "@/lib/sync/engine";
 
 export function ConflictsInbox() {
@@ -50,10 +51,14 @@ export function ConflictsInbox() {
     }
   }
 
-  async function handleDiscard(id: number) {
+  async function handleDiscard(entry: OutboxEntry) {
     setBusy(true);
     try {
-      await removeOutboxEntry(id);
+      // For a never-synced CREATE, also remove the local rows it made
+      // (surgical: op==="create" only, newly-created ids only — see
+      // revertLocalCreate). Then drop the outbox entry.
+      await revertLocalCreate(entry);
+      await removeOutboxEntry(entry.id!);
       setConfirmDiscardId(null);
     } finally {
       setBusy(false);
@@ -136,7 +141,7 @@ export function ConflictsInbox() {
                     <div className="flex gap-1">
                       <button
                         type="button"
-                        onClick={() => handleDiscard(e.id!)}
+                        onClick={() => handleDiscard(e)}
                         disabled={busy}
                         className="rounded-md bg-red-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
                       >

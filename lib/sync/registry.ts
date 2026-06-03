@@ -36,6 +36,7 @@ import {
   setCustomerTypeAction,
 } from "@/app/(app)/customers/actions";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
+import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
 import type { ActionState } from "@/types/actions";
 
 /** Fresh initial state to satisfy the React `useActionState` calling
@@ -74,6 +75,15 @@ export const REGISTRY: Record<string, RegistryEntry> = {
   updateJobStatusAction: {
     kind: "form",
     invoke: (fd) => updateJobStatusAction(INITIAL_FORM_STATE, fd),
+  },
+  // Multi-entity create (step 8). Replayed from the id-enriched args
+  // the wrapper persisted (job_id / customer_id_new / site_id_new), so
+  // the server rows match the locally-created ones. Idempotent on
+  // re-run via upsert-on-id in the data layer; a real partial-unique
+  // clash surfaces as a stuck entry in the conflict inbox.
+  createQuickBookingAction: {
+    kind: "form",
+    invoke: (fd) => createQuickBookingAction(INITIAL_FORM_STATE, fd),
   },
   completeServiceSheetAction: {
     kind: "form",

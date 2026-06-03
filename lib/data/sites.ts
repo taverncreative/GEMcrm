@@ -45,13 +45,17 @@ export async function getSiteById(id: string): Promise<Site | null> {
 
 export async function createSite(
   customerId: string,
-  input: SiteInput
+  input: SiteInput,
+  opts?: { id?: string }
 ): Promise<Site> {
   const supabase = await createClient();
+  // `opts.id` from the offline-first path; upsert(onConflict:"id")
+  // keeps a lost-ack replay re-run idempotent. Online callers omit it
+  // → fresh UUID, behaves like an insert.
   const { data, error } = await supabase
     .from("sites")
-    .insert({
-      id: newId(),
+    .upsert({
+      id: opts?.id ?? newId(),
       customer_id: customerId,
       address_line_1: input.address_line_1.trim(),
       address_line_2: emptyToNull(input.address_line_2),
