@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { QuickActions } from "@/components/dashboard/quick-actions";
+import { BottomNav } from "@/components/bottom-nav";
 import { SessionExpiredBanner } from "@/components/sync/session-expired-banner";
 import { SyncBoot } from "@/components/sync/sync-boot";
 
@@ -62,14 +63,22 @@ export function AppShell({
             401/403. Sits above the quick-actions bar so the operator
             sees it before they reach for any control. */}
         <SessionExpiredBanner />
-        {/* Persistent quick-actions bar — sits below the topbar on every
-            route so booking / invoice / customer creation is always one
-            click away. */}
-        <div className="border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
+        {/* Persistent quick-actions bar — desktop only. On mobile the
+            bottom tab bar's central "+ New" supersedes it, so we hide
+            this bar below md to avoid a duplicate create affordance. */}
+        <div className="hidden border-b border-gray-200 bg-white px-4 py-3 sm:px-6 md:block">
           <QuickActions />
         </div>
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        {/* Extra bottom padding on mobile so the last content clears the
+            fixed bottom tab bar; normal padding at md: where the bar is
+            hidden. */}
+        <main className="flex-1 overflow-y-auto p-6 pb-24 md:pb-6">
+          {children}
+        </main>
       </div>
+
+      {/* Mobile bottom tab bar — self-hides at md:. */}
+      <BottomNav />
     </div>
   );
 }
