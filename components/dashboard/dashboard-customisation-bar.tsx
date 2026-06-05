@@ -20,7 +20,9 @@ export const WIDGET_REGISTRY = [
   { id: "revenue-stats", title: "Revenue", desktopOnly: true },
   { id: "service-sheets-to-fill", title: "Service sheets to fill", desktopOnly: false },
   { id: "jobs-today", title: "Jobs today", desktopOnly: false },
-  { id: "upcoming-visits", title: "Upcoming visits", desktopOnly: false },
+  // "upcoming-visits" is intentionally absent: it's now a featured,
+  // full-width section at the top of the dashboard (see dashboard/page.tsx),
+  // rendered outside the reorderable grid — so it's not customisable here.
   { id: "review-requests", title: "Request review", desktopOnly: true },
   { id: "customers-to-contact", title: "Customers to contact", desktopOnly: false },
   { id: "pma-renewals", title: "PMA renewals", desktopOnly: true },

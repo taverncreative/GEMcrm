@@ -138,6 +138,13 @@ async function DashboardWidgets() {
           </div>
         )}
 
+      {/* Featured: Upcoming visits — promoted out of the reorderable grid
+          to a prominent, full-width section at the top of the dashboard.
+          The section is featured; the rows inside stay minimal. */}
+      <div className="mb-6">
+        <UpcomingVisits jobs={upcomingJobs} />
+      </div>
+
       {/* Reorderable widget grid — DnD + column-flow compacting. Revenue
           lives inside the grid as the default first card so the user can
           move it around like any other widget. */}
@@ -167,14 +174,6 @@ async function DashboardWidgets() {
             node: (
               <WidgetFrame id="jobs-today" title="Jobs today">
                 <JobsToday jobs={todayJobs} />
-              </WidgetFrame>
-            ),
-          },
-          {
-            id: "upcoming-visits",
-            node: (
-              <WidgetFrame id="upcoming-visits" title="Upcoming visits">
-                <UpcomingVisits jobs={upcomingJobs} />
               </WidgetFrame>
             ),
           },

@@ -39,6 +39,7 @@ import { ReportActions } from "@/components/jobs/report-actions";
 import { JobStatusActions } from "@/components/jobs/job-status-actions";
 import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
+import { SmartBackButton } from "@/components/smart-back-button";
 import type { Job, Report } from "@/types/database";
 
 // ─── Section primitives (unchanged from RSC version) ────────────────
@@ -359,14 +360,10 @@ export default function JobDetailPage() {
     <div>
       <div className="flex items-center gap-3">
         {site && (
-          <Link
-            href={ROUTES.siteDetail(site.id)}
+          <SmartBackButton
+            fallbackHref={ROUTES.siteDetail(site.id)}
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-            </svg>
-          </Link>
+          />
         )}
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-3">

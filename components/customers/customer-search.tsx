@@ -24,7 +24,7 @@ export function CustomerSearch() {
     <div className="relative">
       <input
         type="text"
-        placeholder="Search customers..."
+        aria-label="Search customers"
         defaultValue={searchParams.get("q") ?? ""}
         onChange={(e) => handleSearch(e.target.value)}
         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 sm:w-72"

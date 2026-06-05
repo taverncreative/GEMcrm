@@ -91,9 +91,6 @@ export default async function CalendarPage({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Monthly view of scheduled jobs and pending tasks.
-          </p>
         </div>
         <StartJobButton label="New Booking" />
       </div>

@@ -51,7 +51,7 @@ export function JobsFilter() {
       <div className="flex gap-2 sm:w-72">
         <input
           type="search"
-          placeholder="Search customer or address..."
+          aria-label="Search customer or address"
           value={searchValue}
           onChange={(e) => handleSearchChange(e.target.value)}
           onKeyDown={(e) => {

@@ -61,6 +61,7 @@ import { db } from "@/lib/db";
 import { ServiceSheetForm } from "@/components/jobs/service-sheet-form";
 import { ServiceSheetViewOnly } from "@/components/jobs/service-sheet-view-only";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
+import { SmartBackButton } from "@/components/smart-back-button";
 import { ROUTES } from "@/lib/constants/routes";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
 import type { CallType, JobStatus } from "@/types/database";
@@ -186,25 +187,11 @@ export default function CompleteServiceSheetPage() {
     return (
       <div>
         <div className="flex items-start gap-3">
-          <Link
-            href={ROUTES.jobDetail(id)}
+          <SmartBackButton
+            fallbackHref={ROUTES.jobDetail(id)}
+            label="Back to job"
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-            aria-label="Back to job"
-          >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15.75 19.5 8.25 12l7.5-7.5"
-              />
-            </svg>
-          </Link>
+          />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-semibold text-gray-900">
@@ -230,14 +217,11 @@ export default function CompleteServiceSheetPage() {
   return (
     <div>
       <div className="flex items-start gap-3">
-        <Link
-          href={ROUTES.jobDetail(id)}
+        <SmartBackButton
+          fallbackHref={ROUTES.jobDetail(id)}
+          label="Back to job"
           className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-        >
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-          </svg>
-        </Link>
+        />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold text-gray-900">

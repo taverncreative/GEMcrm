@@ -7,14 +7,18 @@ import { SyncStatusIndicator } from "@/components/sync/sync-status-indicator";
 
 interface TopbarProps {
   userEmail: string;
-  onToggleSidebar: () => void;
 }
 
 /**
  * Dark-mode app header. Matches the sidebar palette so the chrome reads
  * as one unit; main content remains light.
+ *
+ * No mobile hamburger: below `md` the bottom tab bar's "More" sheet is the
+ * single overflow path (the slide-in sidebar drawer is desktop-only now).
+ * At `md` and up the persistent sidebar carries navigation, so the header
+ * stays a thin status/identity strip on every breakpoint.
  */
-export function Topbar({ userEmail, onToggleSidebar }: TopbarProps) {
+export function Topbar({ userEmail }: TopbarProps) {
   const router = useRouter();
 
   async function handleLogout() {
@@ -26,28 +30,10 @@ export function Topbar({ userEmail, onToggleSidebar }: TopbarProps) {
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-ink-strong bg-ink px-4 sm:px-6">
-      {/* Mobile hamburger */}
-      <button
-        onClick={onToggleSidebar}
-        className="rounded-lg p-2 text-gray-400 hover:bg-ink-soft hover:text-gray-200 md:hidden"
-        aria-label="Open menu"
-      >
-        <svg
-          className="h-5 w-5"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={1.5}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-          />
-        </svg>
-      </button>
-
-      <div className="md:flex-1" />
+      {/* Spacer keeps the status/identity cluster right-aligned on every
+          breakpoint (the mobile hamburger that used to sit here is gone —
+          "More" in the bottom tab bar is the overflow path now). */}
+      <div className="flex-1" />
 
       {/* Sync status chip + user info + logout */}
       <div className="flex items-center gap-3">

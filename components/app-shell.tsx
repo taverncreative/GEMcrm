@@ -20,7 +20,6 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -39,10 +38,6 @@ export function AppShell({
     });
   }
 
-  function toggleMobileOpen() {
-    setSidebarOpen((prev) => !prev);
-  }
-
   return (
     <div className="flex h-full">
       {/* SyncBoot is invisible when idle — only paints the initial
@@ -50,15 +45,18 @@ export function AppShell({
           (inside the auth-gated shell) so it has the authenticated
           user_id available. */}
       <SyncBoot userId={userId} />
+      {/* Sidebar is the desktop nav (md:+). Its slide-in mobile drawer is
+          no longer triggered — the bottom tab bar replaces it below md —
+          so it's pinned closed; the desktop sidebar itself is unchanged. */}
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleCollapsed}
-        mobileOpen={sidebarOpen}
-        onCloseMobile={() => setSidebarOpen(false)}
+        mobileOpen={false}
+        onCloseMobile={() => {}}
         mounted={mounted}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar userEmail={userEmail} onToggleSidebar={toggleMobileOpen} />
+        <Topbar userEmail={userEmail} />
         {/* Session-expired banner — only visible when sync has hit a
             401/403. Sits above the quick-actions bar so the operator
             sees it before they reach for any control. */}

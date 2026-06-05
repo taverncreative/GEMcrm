@@ -206,9 +206,6 @@ export default function JobsPage() {
             <h1 className="text-2xl font-semibold text-gray-900">Jobs</h1>
             <SyncStatePill />
           </div>
-          <p className="mt-1 text-sm text-gray-500">
-            Bookings and completed service sheets.
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <CreateInvoiceButton />

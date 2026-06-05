@@ -31,21 +31,29 @@ function setPath(p: string) {
 }
 
 describe("BottomNav — tabs", () => {
-  it("renders the four tabs and the center + New", () => {
+  it("renders the tabs (Home/Jobs/Customers) + More + center + New", () => {
     setPath("/jobs");
     render(<BottomNav />);
+    expect(screen.getByRole("link", { name: /Home/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Jobs/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Customers/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Calendar/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^More$/i })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Create new/i })
     ).toBeInTheDocument();
+    // Calendar is no longer a top-level tab — it lives in the More sheet.
+    expect(
+      screen.queryByRole("link", { name: /Calendar/i })
+    ).not.toBeInTheDocument();
   });
 
   it("links point at the real routes", () => {
     setPath("/jobs");
     render(<BottomNav />);
+    expect(screen.getByRole("link", { name: /Home/i })).toHaveAttribute(
+      "href",
+      "/dashboard"
+    );
     expect(screen.getByRole("link", { name: /Jobs/i })).toHaveAttribute(
       "href",
       "/jobs"
@@ -53,10 +61,6 @@ describe("BottomNav — tabs", () => {
     expect(screen.getByRole("link", { name: /Customers/i })).toHaveAttribute(
       "href",
       "/customers"
-    );
-    expect(screen.getByRole("link", { name: /Calendar/i })).toHaveAttribute(
-      "href",
-      "/calendar"
     );
   });
 });
@@ -89,10 +93,30 @@ describe("BottomNav — active state (sidebar predicate)", () => {
       screen.getByRole("button", { name: /^More$/i })
     ).toHaveAttribute("aria-current", "page");
   });
+
+  it("marks More active on /calendar (now a More destination)", () => {
+    setPath("/calendar");
+    render(<BottomNav />);
+    expect(
+      screen.getByRole("button", { name: /^More$/i })
+    ).toHaveAttribute("aria-current", "page");
+  });
+
+  it("marks Home active on /dashboard (not More)", () => {
+    setPath("/dashboard");
+    render(<BottomNav />);
+    expect(screen.getByRole("link", { name: /Home/i })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+    expect(
+      screen.getByRole("button", { name: /^More$/i })
+    ).not.toHaveAttribute("aria-current");
+  });
 });
 
 describe("BottomNav — sheets", () => {
-  it("More opens the overflow sheet with Dashboard / Documentation / Settings", async () => {
+  it("More opens the overflow sheet with Calendar / Documentation / Settings", async () => {
     setPath("/jobs");
     const user = userEvent.setup();
     render(<BottomNav />);
@@ -100,8 +124,8 @@ describe("BottomNav — sheets", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole("link", { name: /Dashboard/i })
-      ).toHaveAttribute("href", "/dashboard");
+        screen.getByRole("link", { name: /Calendar/i })
+      ).toHaveAttribute("href", "/calendar");
     });
     expect(
       screen.getByRole("link", { name: /Documentation/i })

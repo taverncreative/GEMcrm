@@ -292,9 +292,6 @@ export default function CustomersPage() {
             <h1 className="text-2xl font-semibold text-gray-900">Customers</h1>
             <SyncStatePill />
           </div>
-          <p className="mt-1 text-sm text-gray-500">
-            Click a row to see the customer panel.
-          </p>
         </div>
         {/* Add Customer link — the target /customers/new is still an
             RSC form that needs a connection to submit. Disabling the

@@ -4,6 +4,7 @@ import { getCustomerById } from "@/lib/data/customers";
 import { getSitesByCustomer } from "@/lib/data/sites";
 import { getAgreementsByCustomer } from "@/lib/data/agreements";
 import { AddSiteForm } from "@/components/sites/add-site-form";
+import { SmartBackButton } from "@/components/smart-back-button";
 import { formatAddress } from "@/lib/utils/format-address";
 import { ROUTES } from "@/lib/constants/routes";
 import { AGREEMENT_STATUS_LABELS, AGREEMENT_STATUS_COLORS } from "@/lib/constants/job-labels";
@@ -58,14 +59,11 @@ export default async function CustomerDetailPage({
   return (
     <div>
       <div className="flex items-center gap-3">
-        <Link
-          href={ROUTES.CUSTOMERS}
+        <SmartBackButton
+          fallbackHref={ROUTES.CUSTOMERS}
+          label="Back to customers"
           className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-        >
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-          </svg>
-        </Link>
+        />
         <h1 className="text-2xl font-semibold text-gray-900">
           {customer.name}
         </h1>
