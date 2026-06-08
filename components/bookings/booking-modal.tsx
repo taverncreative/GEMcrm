@@ -7,11 +7,11 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
 import {
-  createQuickBookingAction,
-  searchCustomersAction,
-  getSitesForCustomerAction,
-} from "@/app/(app)/bookings/actions";
+  searchCustomersLocal,
+  getSitesForCustomerLocal,
+} from "@/lib/db/lookups";
 import { CALL_TYPES } from "@/lib/validation/booking";
 import { CALL_TYPE_LABELS, COMMON_PESTS } from "@/lib/constants/job-labels";
 import { todayUk } from "@/lib/utils/today-uk";
@@ -31,6 +31,15 @@ const initialState: ActionState = {
   errors: {},
   message: null,
 };
+
+// Booking success carries an `offline` flag so the post-save effect can
+// branch on HOW the save landed — the offline local-success path vs the
+// online server result — rather than re-reading connectivity at nav time.
+// Re-reading (useIsOnline) risks a race: if the connection flips between
+// save and nav, an offline-queued booking could still hit router.refresh()
+// → failed RSC fetch → hard nav → offline dino. Keying off the branch that
+// actually fired removes that race.
+type BookingActionState = ActionState & { offline?: boolean };
 
 // ─── Local-first booking wrap (step 8 — offline New Booking) ────────
 //
@@ -254,14 +263,19 @@ export const bookingMeta: WrapMeta<BookingWrapInput> = {
 // Offline: no server result to flip state, so close the modal on the
 // local write landing. Online, the server result drives state as
 // before (so a validation failure keeps the modal open with errors).
-const bookingLocalFirstOpts: LocalFirstOptions<ActionState, BookingWrapInput> =
-  {
-    localSuccessState: () => ({
-      success: true,
-      errors: {},
-      message: "Booking saved — will sync when online",
-    }),
-  };
+const bookingLocalFirstOpts: LocalFirstOptions<
+  BookingActionState,
+  BookingWrapInput
+> = {
+  localSuccessState: () => ({
+    success: true,
+    errors: {},
+    message: "Booking saved — will sync when online",
+    // Marks this as the OFFLINE branch — the post-save effect reads it to
+    // avoid router.refresh() (which hard-navs → dino offline).
+    offline: true,
+  }),
+};
 
 interface BookingModalProps {
   open: boolean;
@@ -339,12 +353,36 @@ export function BookingModal({
   // closes via the localSuccessState option. Replaces the previous
   // graceful-online-only wrap; a mid-submit connection loss now just
   // queues the booking instead of erroring.
-  const [state, action, isPending] = useLocalFirstAction(
-    createQuickBookingAction,
-    initialState,
-    bookingMeta,
-    bookingLocalFirstOpts
-  );
+  const [state, action, isPending] = useLocalFirstAction<
+    BookingActionState,
+    BookingWrapInput
+  >(createQuickBookingAction, initialState, bookingMeta, bookingLocalFirstOpts);
+
+  /** When a customer has no sites but the customer record itself has an
+   *  address, swing the form into "new site" mode and pre-fill it from
+   *  the customer record. Saves the operator from re-typing what they
+   *  already entered when adding the customer.
+   *
+   *  Declared above the effects that call it (the open-effect below and
+   *  pickCustomer) so the reference is lexically valid — it's a hoisted
+   *  function declaration, so this is purely a lexical-order tidy with no
+   *  behaviour change. */
+  function prefillSiteFromCustomer(c: Customer) {
+    if (
+      !c.address_line_1?.trim() &&
+      !c.town?.trim() &&
+      !c.postcode?.trim()
+    ) {
+      // No address on the customer record either — leave in existing mode.
+      return;
+    }
+    setSiteMode("new");
+    setNewSiteLine1(c.address_line_1 ?? "");
+    setNewSiteLine2(c.address_line_2 ?? "");
+    setNewSiteTown(c.town ?? "");
+    setNewSiteCounty(c.county ?? "");
+    setNewSitePostcode(c.postcode ?? "");
+  }
 
   // Reset state on every fresh open. The guard means re-renders while open
   // don't wipe the user's input.
@@ -356,6 +394,13 @@ export function BookingModal({
     if (lastOpenRef.current) return;
     lastOpenRef.current = true;
 
+    // Reset-on-open: when the modal transitions closed→open we deliberately
+    // reset every field to its default in this effect. It's guarded by
+    // lastOpenRef so it runs exactly once per open — an intentional
+    // synchronous reset, not the cascading-render pattern the rule targets.
+    // (This warning was previously masked by the use-before-declare error
+    // that the prefillSiteFromCustomer reorder just cleared.)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCustomerMode("existing");
     setSiteMode("existing");
     setCustomerQuery("");
@@ -380,15 +425,14 @@ export function BookingModal({
     setReportNotes("");
 
     if (!presetCustomer) {
-      setLoadingCustomers(true);
-      void searchCustomersAction("").then((data) => {
-        setCustomerResults(data);
-        setLoadingCustomers(false);
-        setTimeout(() => customerInputRef.current?.focus(), 50);
-      });
+      // Search-only picker: no list until the user types (≥1 char). Just
+      // clear any prior results and focus the box on open.
+      setCustomerResults([]);
+      setLoadingCustomers(false);
+      setTimeout(() => customerInputRef.current?.focus(), 50);
     } else {
       setLoadingSites(true);
-      void getSitesForCustomerAction(presetCustomer.id).then((s) => {
+      void getSitesForCustomerLocal(presetCustomer.id).then((s) => {
         setSites(s);
         setLoadingSites(false);
         if (!presetSite && s.length > 0) {
@@ -404,43 +448,42 @@ export function BookingModal({
     }
   }, [open, presetCustomer, presetSite]);
 
-  /** When a customer has no sites but the customer record itself has an
-   *  address, swing the form into "new site" mode and pre-fill it from
-   *  the customer record. Saves the operator from re-typing what they
-   *  already entered when adding the customer. */
-  function prefillSiteFromCustomer(c: Customer) {
-    if (
-      !c.address_line_1?.trim() &&
-      !c.town?.trim() &&
-      !c.postcode?.trim()
-    ) {
-      // No address on the customer record either — leave in existing mode.
-      return;
-    }
-    setSiteMode("new");
-    setNewSiteLine1(c.address_line_1 ?? "");
-    setNewSiteLine2(c.address_line_2 ?? "");
-    setNewSiteTown(c.town ?? "");
-    setNewSiteCounty(c.county ?? "");
-    setNewSitePostcode(c.postcode ?? "");
-  }
-
-  // Close + refresh on successful submission.
+  // Close on successful submission, then update the view.
+  //
+  //   Online  → router.refresh(): re-fetch the current route in place
+  //             (e.g. the dashboard updates to show the new booking).
+  //   Offline → close only, NO navigation. ANY navigation offline risks an
+  //             RSC fetch (router-cache miss) → hard navigation → the
+  //             browser's offline error page (a soft push to /jobs was
+  //             tried and still dino'd on a cache miss). The queued booking
+  //             still appears wherever an offline-converted page reads
+  //             Dexie via useLiveQuery, and syncs on reconnect.
+  //
+  // We branch on `state.offline` (set by the wrapper's offline
+  // local-success path), NOT a live connectivity read, so a connection
+  // flip between save and nav can't re-trigger the refresh-→-dino path.
   useEffect(() => {
-    if (state.success) {
-      onClose();
+    if (!state.success) return;
+    onClose();
+    if (!state.offline) {
       router.refresh();
     }
-  }, [state.success, onClose, router]);
+  }, [state.success, state.offline, onClose, router]);
 
   const runCustomerSearch = useCallback((v: string) => {
     setCustomerQuery(v);
     if (customerDebounceRef.current) {
       clearTimeout(customerDebounceRef.current);
     }
+    // Search-only: an empty box shows no list (and skips the lookup).
+    if (!v.trim()) {
+      setCustomerResults([]);
+      setLoadingCustomers(false);
+      return;
+    }
     customerDebounceRef.current = setTimeout(() => {
       setLoadingCustomers(true);
-      void searchCustomersAction(v).then((data) => {
+      void searchCustomersLocal(v).then((data) => {
         setCustomerResults(data);
         setLoadingCustomers(false);
       });
@@ -452,7 +495,7 @@ export function BookingModal({
     setSelectedSite(null);
     setSiteMode("existing");
     setLoadingSites(true);
-    const list = await getSitesForCustomerAction(c.id);
+    const list = await getSitesForCustomerLocal(c.id);
     setSites(list);
     setLoadingSites(false);
     if (list.length > 0) {
@@ -634,6 +677,9 @@ export function BookingModal({
                       placeholder="Search by name or company…"
                       className={inputClass}
                     />
+                    {/* Search-only: the results list appears only once the
+                        operator types — an empty box shows nothing beneath. */}
+                    {customerQuery.trim() && (
                     <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-gray-100">
                       {loadingCustomers ? (
                         <p className="px-3 py-4 text-center text-xs text-gray-400">
@@ -641,7 +687,7 @@ export function BookingModal({
                         </p>
                       ) : customerResults.length === 0 ? (
                         <p className="px-3 py-4 text-center text-xs text-gray-400">
-                          No customers. Try “+ New” above.
+                          No matches. Try “+ New” above.
                         </p>
                       ) : (
                         customerResults.map((c) => (
@@ -668,6 +714,7 @@ export function BookingModal({
                         ))
                       )}
                     </div>
+                    )}
                     {state.errors.customer_id && (
                       <p className="mt-1 text-xs text-red-500">
                         {state.errors.customer_id}
