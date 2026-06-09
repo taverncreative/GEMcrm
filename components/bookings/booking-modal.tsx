@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
 import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
 import {
   searchCustomersLocal,
@@ -31,15 +30,6 @@ const initialState: ActionState = {
   errors: {},
   message: null,
 };
-
-// Booking success carries an `offline` flag so the post-save effect can
-// branch on HOW the save landed — the offline local-success path vs the
-// online server result — rather than re-reading connectivity at nav time.
-// Re-reading (useIsOnline) risks a race: if the connection flips between
-// save and nav, an offline-queued booking could still hit router.refresh()
-// → failed RSC fetch → hard nav → offline dino. Keying off the branch that
-// actually fired removes that race.
-type BookingActionState = ActionState & { offline?: boolean };
 
 // ─── Local-first booking wrap (step 8 — offline New Booking) ────────
 //
@@ -260,22 +250,18 @@ export const bookingMeta: WrapMeta<BookingWrapInput> = {
   }),
 };
 
-// Offline: no server result to flip state, so close the modal on the
-// local write landing. Online, the server result drives state as
-// before (so a validation failure keeps the modal open with errors).
-const bookingLocalFirstOpts: LocalFirstOptions<
-  BookingActionState,
-  BookingWrapInput
-> = {
-  localSuccessState: () => ({
-    success: true,
-    errors: {},
-    message: "Booking saved — will sync when online",
-    // Marks this as the OFFLINE branch — the post-save effect reads it to
-    // avoid router.refresh() (which hard-navs → dino offline).
-    offline: true,
-  }),
-};
+// Optimistic close: providing `localSuccessState` puts the booking on the
+// wrapper's optimistic path — the modal closes the instant the local Dexie
+// write + outbox entry land, regardless of connectivity, and the engine
+// syncs to the server in the background. No server action runs at submit.
+const bookingLocalFirstOpts: LocalFirstOptions<ActionState, BookingWrapInput> =
+  {
+    localSuccessState: () => ({
+      success: true,
+      errors: {},
+      message: "Booking saved",
+    }),
+  };
 
 interface BookingModalProps {
   open: boolean;
@@ -307,8 +293,6 @@ export function BookingModal({
   presetCustomer,
   presetSite,
 }: BookingModalProps) {
-  const router = useRouter();
-
   // ── Customer state ──
   const [customerMode, setCustomerMode] = useState<CustomerMode>("existing");
   const [customerQuery, setCustomerQuery] = useState("");
@@ -342,6 +326,12 @@ export function BookingModal({
   const [reportNotes, setReportNotes] = useState("");
   const [selectedPests, setSelectedPests] = useState<string[]>([]);
 
+  // Client-side required-field validation. Offline, the server action that
+  // normally returns field errors never runs (or fails as a network error),
+  // so without this a missing required field is a silent no-op. Merged with
+  // any server-returned errors for display.
+  const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+
   const customerInputRef = useRef<HTMLInputElement>(null);
   const customerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOpenRef = useRef(false);
@@ -354,7 +344,7 @@ export function BookingModal({
   // graceful-online-only wrap; a mid-submit connection loss now just
   // queues the booking instead of erroring.
   const [state, action, isPending] = useLocalFirstAction<
-    BookingActionState,
+    ActionState,
     BookingWrapInput
   >(createQuickBookingAction, initialState, bookingMeta, bookingLocalFirstOpts);
 
@@ -408,6 +398,7 @@ export function BookingModal({
     setSelectedSite(presetSite ?? null);
     setSites([]);
     setSelectedPests([]);
+    setClientErrors({});
     setNewCustomerType("commercial");
     setNewCustomerName("");
     setNewCustomerCompany("");
@@ -448,27 +439,25 @@ export function BookingModal({
     }
   }, [open, presetCustomer, presetSite]);
 
-  // Close on successful submission, then update the view.
+  // Close on successful submission — and that's it. The post-save NEVER
+  // touches the network. router.refresh() used to live here, but it's the
+  // wrong tool: on the FIRST offline booking serverReachable is still `true`
+  // (it only flips false after a sync fails), so even a serverReachable-gated
+  // refresh fired an offline RSC fetch → route error → "something went
+  // wrong". A later booking skipped it (serverReachable now false) — that
+  // page-dependence was the tell.
   //
-  //   Online  → router.refresh(): re-fetch the current route in place
-  //             (e.g. the dashboard updates to show the new booking).
-  //   Offline → close only, NO navigation. ANY navigation offline risks an
-  //             RSC fetch (router-cache miss) → hard navigation → the
-  //             browser's offline error page (a soft push to /jobs was
-  //             tried and still dino'd on a cache miss). The queued booking
-  //             still appears wherever an offline-converted page reads
-  //             Dexie via useLiveQuery, and syncs on reconnect.
-  //
-  // We branch on `state.offline` (set by the wrapper's offline
-  // local-success path), NOT a live connectivity read, so a connection
-  // flip between save and nav can't re-trigger the refresh-→-dino path.
+  // We don't need a refresh: every place the new booking shows reads Dexie
+  // via useLiveQuery (Jobs, Customers, the customer profile, the side panel,
+  // the dashboard's Upcoming/Service-sheets sections) and updates the instant
+  // applyLocal writes. Only the dashboard's server-rendered cards (e.g.
+  // Revenue) wait until the next navigation — acceptable, and consistent with
+  // the dashboard-stale decision. Keeping the save fully connectivity-
+  // independent is the whole point of the optimistic redesign.
   useEffect(() => {
     if (!state.success) return;
     onClose();
-    if (!state.offline) {
-      router.refresh();
-    }
-  }, [state.success, state.offline, onClose, router]);
+  }, [state.success, onClose]);
 
   const runCustomerSearch = useCallback((v: string) => {
     setCustomerQuery(v);
@@ -514,11 +503,50 @@ export function BookingModal({
     );
   }, []);
 
+  // Required-field check — mirrors the server's Zod requirements (customer,
+  // location, date, call type) so the operator gets the same gating offline
+  // as online. Returns a field→message map; empty means valid.
+  function validateBooking(): Record<string, string> {
+    const errs: Record<string, string> = {};
+    if (customerMode === "existing") {
+      if (!selectedCustomer) errs.customer_id = "Choose a customer";
+    } else if (!newCustomerName.trim()) {
+      errs.customer_name = "Enter the customer's name";
+    }
+    if (siteMode === "existing") {
+      if (!selectedSite) errs.site_id = "Add a location";
+    } else {
+      if (!newSiteLine1.trim()) errs.site_line1 = "Add an address";
+      if (!newSiteTown.trim()) errs.site_town = "Add a town";
+      if (!newSitePostcode.trim()) errs.site_postcode = "Add a postcode";
+    }
+    if (!jobDate) errs.job_date = "Pick a date";
+    if (!callType) errs.call_type = "Choose a call type";
+    return errs;
+  }
+
+  // Validate before dispatching. On a missing required field, block the
+  // submit and surface inline + summary errors — never a silent no-op (which
+  // is what happened offline, when the server validation couldn't run).
+  async function handleSubmit(formData: FormData) {
+    const errs = validateBooking();
+    if (Object.keys(errs).length > 0) {
+      setClientErrors(errs);
+      return;
+    }
+    setClientErrors({});
+    await action(formData);
+  }
+
   if (!open) return null;
 
   const inputClass =
     "mt-1 block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand";
   const labelClass = "block text-xs font-medium text-gray-600";
+
+  // Server-returned errors (online) overlaid with client validation errors.
+  const errors: Record<string, string> = { ...state.errors, ...clientErrors };
+  const hasClientErrors = Object.keys(clientErrors).length > 0;
 
   return (
     // Full-screen on mobile (no padding, no rounded corners — feels native);
@@ -554,7 +582,7 @@ export function BookingModal({
           </button>
         </div>
 
-        <form action={action} className="flex min-h-0 flex-1 flex-col">
+        <form action={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           {/* All values are now sent via controlled hidden inputs derived from
               state — that way a failed submit + re-submit doesn't wipe what
               the user typed. */}
@@ -592,6 +620,11 @@ export function BookingModal({
             value={JSON.stringify(selectedPests)}
           />
 
+          {hasClientErrors && (
+            <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-600">
+              Please complete the highlighted fields.
+            </div>
+          )}
           {state.message && !state.success && (
             <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-600">
               {state.message}
@@ -715,9 +748,9 @@ export function BookingModal({
                       )}
                     </div>
                     )}
-                    {state.errors.customer_id && (
+                    {errors.customer_id && (
                       <p className="mt-1 text-xs text-red-500">
-                        {state.errors.customer_id}
+                        {errors.customer_id}
                       </p>
                     )}
                   </>
@@ -761,9 +794,9 @@ export function BookingModal({
                     placeholder="Full name"
                     className={inputClass}
                   />
-                  {state.errors.customer_name && (
+                  {errors.customer_name && (
                     <p className="mt-1 text-xs text-red-500">
-                      {state.errors.customer_name}
+                      {errors.customer_name}
                     </p>
                   )}
                 </div>
@@ -805,9 +838,9 @@ export function BookingModal({
                     placeholder="Optional"
                     className={inputClass}
                   />
-                  {state.errors.customer_email && (
+                  {errors.customer_email && (
                     <p className="mt-1 text-xs text-red-500">
-                      {state.errors.customer_email}
+                      {errors.customer_email}
                     </p>
                   )}
                 </div>
@@ -943,9 +976,9 @@ export function BookingModal({
                     ))}
                   </div>
                 )}
-                {state.errors.site_id && (
+                {errors.site_id && (
                   <p className="mt-1 text-xs text-red-500">
-                    {state.errors.site_id}
+                    {errors.site_id}
                   </p>
                 )}
               </div>
@@ -964,9 +997,9 @@ export function BookingModal({
                     placeholder="Street address"
                     className={inputClass}
                   />
-                  {state.errors.site_line1 && (
+                  {errors.site_line1 && (
                     <p className="mt-1 text-xs text-red-500">
-                      {state.errors.site_line1}
+                      {errors.site_line1}
                     </p>
                   )}
                 </div>
@@ -982,9 +1015,9 @@ export function BookingModal({
                     required
                     className={inputClass}
                   />
-                  {state.errors.site_town && (
+                  {errors.site_town && (
                     <p className="mt-1 text-xs text-red-500">
-                      {state.errors.site_town}
+                      {errors.site_town}
                     </p>
                   )}
                 </div>
@@ -1001,9 +1034,9 @@ export function BookingModal({
                     placeholder="e.g. SW1A 1AA"
                     className={inputClass}
                   />
-                  {state.errors.site_postcode && (
+                  {errors.site_postcode && (
                     <p className="mt-1 text-xs text-red-500">
-                      {state.errors.site_postcode}
+                      {errors.site_postcode}
                     </p>
                   )}
                 </div>
@@ -1045,9 +1078,9 @@ export function BookingModal({
                     className="block w-28 shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   />
                 </div>
-                {state.errors.job_date && (
+                {errors.job_date && (
                   <p className="mt-1 text-xs text-red-500">
-                    {state.errors.job_date}
+                    {errors.job_date}
                   </p>
                 )}
                 <p className="mt-1 text-[11px] text-gray-400">
@@ -1074,9 +1107,9 @@ export function BookingModal({
                     </option>
                   ))}
                 </select>
-                {state.errors.call_type && (
+                {errors.call_type && (
                   <p className="mt-1 text-xs text-red-500">
-                    {state.errors.call_type}
+                    {errors.call_type}
                   </p>
                 )}
               </div>

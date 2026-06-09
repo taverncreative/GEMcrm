@@ -291,6 +291,14 @@ export function SyncBoot({ userId }: { userId: string }) {
     const onOnline = () => void runSync("online");
     window.addEventListener("online", onOnline);
 
+    // App-requested sync — fired by the local-first wrapper right after an
+    // optimistic write (window.dispatchEvent("gemcrm:request-sync")) so the
+    // booking reaches the server immediately when online, without the wrapper
+    // importing runSync (which would create a wrap→engine→push→registry
+    // cycle). Offline it no-ops / backs off like any other trigger.
+    const onRequestSync = () => void runSync("manual");
+    window.addEventListener("gemcrm:request-sync", onRequestSync);
+
     // `visibilitychange` — fire on becoming visible AND control the
     // background interval.
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -317,6 +325,7 @@ export function SyncBoot({ userId }: { userId: string }) {
 
     return () => {
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("gemcrm:request-sync", onRequestSync);
       document.removeEventListener("visibilitychange", onVisibility);
       stopInterval();
       triggersMounted.current = false;

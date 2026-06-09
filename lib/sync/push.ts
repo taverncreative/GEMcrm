@@ -138,6 +138,18 @@ export async function drainOutbox(): Promise<PushResult> {
         next_attempt_at: nextAttemptAt(newAttempts),
       });
     }
+
+    // Offline guard: a NETWORK failure means the transport is down right
+    // now — every remaining eligible entry in this pass would fail the
+    // same way. Stop the pass instead of firing a doomed POST per entry.
+    // This entry (and the rest) keep their exponential backoff and retry
+    // on a later tick; combined with the engine's serverReachable gate it
+    // bounds offline traffic to at most one request per drain pass,
+    // structurally — independent of how serverReachable behaves under the
+    // service worker.
+    if (outcome.kind === "network") {
+      break;
+    }
   }
 
   return result;

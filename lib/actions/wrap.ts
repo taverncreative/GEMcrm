@@ -51,6 +51,7 @@
 
 import { useCallback, useState, useTransition } from "react";
 import { enqueueAction, type EntityType } from "@/lib/db/outbox";
+import { getSyncStatus } from "@/lib/sync/status";
 
 export interface WrapMeta<TInput> {
   /** Server-action export name. Must match exactly — step 6 uses this
@@ -276,39 +277,56 @@ export function useLocalFirstAction<TState, TInput>(
         }
       }
 
-      // 3a. Online → call the server action directly, await it, store
-      //     the result via setState. The whole thing is wrapped in
-      //     startTransition so isPending stays true until the server
-      //     responds. Detached from the outer form-action lifecycle.
+      // 3. Two paths, chosen by whether the caller supplied a
+      //    `localSuccessState`:
       //
-      //     When `replay` is present, invoke with a FormData rebuilt
-      //     from the SAME id-enriched args we enqueued — otherwise the
-      //     online insert would mint fresh ids that don't match the
-      //     rows applyLocal just wrote.
-      if (isOnline()) {
-        const serverFormData = replay ? objectToFormData(replay) : formData;
-        startTransition(async () => {
-          try {
-            const result = await serverAction(state, serverFormData);
-            setState(result);
-          } catch (err) {
-            console.error(
-              `[useLocalFirstAction] server call failed for ${meta.actionName}:`,
-              err
-            );
-            // Leave state unchanged — the outbox entry survives so the
-            // sync engine will retry. The operator can also retry by
-            // resubmitting; the (entity_type, entity_id) compaction in
-            // the outbox folds duplicate attempts.
-          }
-        });
-      } else if (input !== null && opts?.localSuccessState) {
-        // 3b. Offline → there's no server result to flip state. If the
-        //     caller provided a local-success state (e.g. a modal that
-        //     closes on state.success), set it now that the local write
-        //     + enqueue have landed. Online callers and callers without
-        //     this option are unaffected.
+      //    OPTIMISTIC (localSuccessState present — e.g. the booking modal):
+      //      The operation is "done" the instant the local write + outbox
+      //      entry land. Flip to the success state immediately (close the
+      //      modal) REGARDLESS of connectivity, and NEVER call the server
+      //      action here. All server sync is owned by the engine's
+      //      drainOutbox (background). This removes navigator.onLine from the
+      //      UX entirely, and — because no server action runs at submit —
+      //      removes the offline server-action revalidation/remount/loop that
+      //      navigator.onLine-lying-true caused under the service worker. A
+      //      `gemcrm:request-sync` event kicks the engine so an ONLINE write
+      //      reaches the server right away (drainOutbox replays the enqueued,
+      //      id-enriched args); offline it no-ops / backs off. Dispatched as
+      //      an event (sync-boot listens) to avoid a wrap→engine import cycle.
+      //
+      //    LEGACY (no localSuccessState — service sheet complete, agreement /
+      //      task / job-status toggles): unchanged. Call the server when the
+      //      empirical online signal is positive and reflect its result into
+      //      state (these flows depend on the server result, e.g. the
+      //      service-sheet approval modal opens on it). The outbox entry is
+      //      already enqueued, so a network failure just syncs later. When
+      //      `replay` is present the server call uses the id-enriched FormData
+      //      so the online insert matches the rows applyLocal wrote.
+      if (input !== null && opts?.localSuccessState) {
         setState(opts.localSuccessState(input));
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("gemcrm:request-sync"));
+        }
+      } else {
+        const attemptServer =
+          isOnline() && getSyncStatus().serverReachable !== false;
+        if (attemptServer) {
+          const serverFormData = replay ? objectToFormData(replay) : formData;
+          startTransition(async () => {
+            try {
+              const result = await serverAction(state, serverFormData);
+              setState(result);
+            } catch (err) {
+              console.error(
+                `[useLocalFirstAction] server call failed for ${meta.actionName}:`,
+                err
+              );
+              // Network/server failure — the outbox entry survives and the
+              // engine retries with backoff. State is left unchanged (these
+              // legacy callers have no localSuccessState to flip).
+            }
+          });
+        }
       }
     },
     // `state` is in deps because we pass it as `prev` to the server

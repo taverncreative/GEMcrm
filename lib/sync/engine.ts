@@ -111,24 +111,36 @@ export async function runSync(reason: SyncReason): Promise<SyncRunResult> {
   syncStarted(reason);
 
   // 1. Push. Halt if auth-expired.
-  let push: PushResult;
-  try {
-    push = await drainOutbox();
-  } catch (err) {
-    // The drain shouldn't really throw — push wraps each entry in its
-    // own try/catch. Defensive: any thrown error halts as 'other'.
-    const message =
-      err instanceof Error ? err.message : "Unknown push error";
-    syncFailed(message, "other");
-    return {
-      ran: true,
-      reason,
-      duration_ms: Date.now() - startMs,
-    };
-  }
-  if (push.halted) {
-    syncFailed(push.halt_reason ?? "Auth expired during push", "auth");
-    return { ran: true, reason, push, duration_ms: Date.now() - startMs };
+  //
+  //    Skip the outbox drain when the LAST attempt couldn't reach the
+  //    server (serverReachable === false). navigator.onLine can read `true`
+  //    while actually offline (service worker active), so without this the
+  //    drain fires a burst of doomed POSTs on every tick. We deliberately
+  //    do NOT skip the whole run — the pull below still runs as the
+  //    reachability probe; a successful pull flips serverReachable back to
+  //    true (syncFinished) and the NEXT tick drains normally. That's the
+  //    recovery path, so this can't deadlock. On a cold boot serverReachable
+  //    is null (≠ false) so the first drain runs as before.
+  let push: PushResult | undefined;
+  if (getSyncStatus().serverReachable !== false) {
+    try {
+      push = await drainOutbox();
+    } catch (err) {
+      // The drain shouldn't really throw — push wraps each entry in its
+      // own try/catch. Defensive: any thrown error halts as 'other'.
+      const message =
+        err instanceof Error ? err.message : "Unknown push error";
+      syncFailed(message, "other");
+      return {
+        ran: true,
+        reason,
+        duration_ms: Date.now() - startMs,
+      };
+    }
+    if (push.halted) {
+      syncFailed(push.halt_reason ?? "Auth expired during push", "auth");
+      return { ran: true, reason, push, duration_ms: Date.now() - startMs };
+    }
   }
 
   // 2. Pull. Halt if auth-expired.
