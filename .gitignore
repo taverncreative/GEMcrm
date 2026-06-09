@@ -38,6 +38,9 @@ yarn-error.log*
 # Claude Code project metadata (local IDE prefs, not for the repo)
 .claude/
 
+# supabase CLI local state (created by `supabase link`)
+supabase/.temp/
+
 # vercel
 .vercel
 

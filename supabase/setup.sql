@@ -604,6 +604,37 @@ end $$;
 
 
 -- ============================================================
+-- 031: invoice_jobs join table (multi-job → one invoice)
+-- ============================================================
+-- N jobs per invoice; a job appears on at most one invoice
+-- (unique job_id). invoices.job_id is deprecated but kept as the
+-- legacy read path. See supabase/migrations/031_invoice_jobs.sql
+-- for full rationale.
+
+create table if not exists invoice_jobs (
+  invoice_id uuid not null references invoices (id) on delete cascade,
+  job_id uuid not null references jobs (id) on delete restrict,
+  created_at timestamptz not null default now(),
+  primary key (invoice_id, job_id),
+  constraint invoice_jobs_job_id_unique unique (job_id)
+);
+
+alter table invoice_jobs enable row level security;
+drop policy if exists "Authenticated users can manage invoice_jobs" on invoice_jobs;
+create policy "Authenticated users can manage invoice_jobs"
+  on invoice_jobs for all
+  to authenticated
+  using (true)
+  with check (true);
+
+insert into invoice_jobs (invoice_id, job_id)
+select id, job_id
+from invoices
+where job_id is not null
+on conflict do nothing;
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)
