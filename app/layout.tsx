@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { BUSINESS } from "@/lib/constants/branding";
+import { ServiceWorkerRegister } from "@/components/sync/service-worker-register";
 
 export const viewport: Viewport = {
   // Fit the layout to the device width so phones don't render at a default
@@ -35,6 +36,9 @@ export const metadata: Metadata = {
   // Tells Next.js to use the GEM logo for favicons + apple touch icons.
   // The actual asset is /app/icon.png (Next conventional location).
   icons: { icon: "/icon.png", apple: "/icon.png" },
+  // iOS add-to-homescreen: run standalone (no Safari chrome) when launched
+  // from the home screen. Android/Chrome use the web app manifest instead.
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "GEM CRM" },
   // Internal CRM — robots.txt also disallows; metadata is belt-and-braces.
   robots: { index: false, follow: false },
 };
@@ -66,6 +70,8 @@ export default function RootLayout({
         )}
       </head>
       <body className="h-full bg-gray-50 text-gray-900 antialiased">
+        {/* Prod-only: registers public/sw.js for offline navigation. */}
+        <ServiceWorkerRegister />
         {children}
       </body>
     </html>

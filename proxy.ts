@@ -82,11 +82,18 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // Excludes:
-  //   _next/static, _next/image   — Next.js build assets
-  //   favicon.ico, icon.png        — favicons
-  //   logo/.*                      — brand assets in /public/logo
-  //   auth/callback                — Supabase auth redirect
+  //   _next/static, _next/image    — Next.js build assets
+  //   favicon.ico, icon.png         — favicons
+  //   logo/.*                       — brand assets in /public/logo
+  //   auth/callback                 — Supabase auth redirect
+  //   sw.js                         — service worker script (must serve as
+  //                                   JS, never a /login redirect, or
+  //                                   registration fails)
+  //   manifest.webmanifest, icons/  — PWA manifest + its icons (fetched by
+  //                                   the browser without app auth)
+  //   offline                       — public offline fallback shell the SW
+  //                                   precaches + serves with no session
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|logo/|auth/callback).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|logo/|auth/callback|sw\\.js|manifest\\.webmanifest|icons/|offline).*)",
   ],
 };

@@ -20,6 +20,23 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Service worker headers. `no-cache` (must-revalidate) on /sw.js so the
+  // browser always revalidates the SW script itself — a new deploy's SW is
+  // picked up promptly instead of being served stale (the classic PWA
+  // stale-SW footgun). `Service-Worker-Allowed: /` lets it claim root scope.
+  // Header rules are served by the Next runtime, independent of the bundler,
+  // so this works under Turbopack.
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
