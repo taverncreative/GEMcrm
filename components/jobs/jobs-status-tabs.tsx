@@ -4,12 +4,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 
 /**
- * Status filter tabs for the Jobs page. Drops the `in_progress` state per
- * product decision — we don't surface that midpoint to the operator.
+ * Status segmentation for the Jobs page — two segments:
+ *
+ *   - Open      → job_status in {scheduled, in_progress} (the active queue)
+ *   - Completed → job_status === completed (the done/archive view)
+ *
+ * These are the only three job statuses (types/database.ts JobStatus + the
+ * DB check constraint), so the two segments partition them exhaustively.
+ * Open is the default — a field tech lands on their active work, not the
+ * archive. "Open" omits the `status` param (clean default URL); "Completed"
+ * sets ?status=completed.
  */
 const TABS = [
-  { value: "all", label: "All" },
-  { value: "scheduled", label: "Scheduled" },
+  { value: "open", label: "Open" },
   { value: "completed", label: "Completed" },
 ] as const;
 
@@ -17,12 +24,12 @@ export function JobsStatusTabs() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
-  const active = searchParams.get("status") ?? "all";
+  const active = searchParams.get("status") === "completed" ? "completed" : "open";
 
   function setTab(value: string) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value === "all") params.delete("status");
-    else params.set("status", value);
+    if (value === "completed") params.set("status", value);
+    else params.delete("status");
     const qs = params.toString();
     startTransition(() => {
       router.push(qs ? `/jobs?${qs}` : "/jobs");

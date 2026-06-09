@@ -16,6 +16,7 @@
  *   (g) StartJobButton disabled offline
  */
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 let searchParamsMock: URLSearchParams = new URLSearchParams();
@@ -255,6 +256,86 @@ describe("JobsPage — status filter via ?status=", () => {
       expect(screen.getByText("DONE")).toBeInTheDocument();
     });
     expect(screen.queryByText("SCHED")).toBeNull();
+  });
+
+  it("?status=open shows scheduled AND in_progress, hides completed", async () => {
+    await db.customers.put(makeCustomer());
+    await db.sites.put(makeSite());
+    await db.jobs.put(
+      makeJob({ id: "j-s", reference_number: "SCHED", job_status: "scheduled" })
+    );
+    await db.jobs.put(
+      makeJob({
+        id: "j-p",
+        reference_number: "INPROG",
+        job_status: "in_progress",
+      })
+    );
+    await db.jobs.put(
+      makeJob({ id: "j-d", reference_number: "DONE", job_status: "completed" })
+    );
+
+    searchParamsMock = new URLSearchParams({ status: "open" });
+    render(<JobsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("SCHED")).toBeInTheDocument();
+    });
+    expect(screen.getByText("INPROG")).toBeInTheDocument();
+    expect(screen.queryByText("DONE")).toBeNull();
+  });
+
+  it("defaults to Open when no status param (completed hidden)", async () => {
+    await db.customers.put(makeCustomer());
+    await db.sites.put(makeSite());
+    await db.jobs.put(
+      makeJob({ id: "j-s", reference_number: "SCHED", job_status: "scheduled" })
+    );
+    await db.jobs.put(
+      makeJob({ id: "j-d", reference_number: "DONE", job_status: "completed" })
+    );
+
+    // no status param
+    render(<JobsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("SCHED")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("DONE")).toBeNull();
+  });
+});
+
+// ─── (c2) date sort toggle (Date column header) ───────────────────
+
+describe("JobsPage — date sort toggle", () => {
+  it("defaults to soonest-first and flips to latest-first on header click", async () => {
+    await db.customers.put(makeCustomer());
+    await db.sites.put(makeSite());
+    await db.jobs.put(
+      makeJob({ id: "j-e", reference_number: "EARLY", job_date: "2026-01-01" })
+    );
+    await db.jobs.put(
+      makeJob({ id: "j-l", reference_number: "LATE", job_date: "2026-12-31" })
+    );
+
+    render(<JobsPage />);
+
+    // Default asc (soonest first): EARLY appears before LATE in the table.
+    await waitFor(() => {
+      expect(screen.getByText("EARLY")).toBeInTheDocument();
+    });
+    const before = screen.getByRole("table").textContent ?? "";
+    expect(before.indexOf("EARLY")).toBeLessThan(before.indexOf("LATE"));
+
+    // Toggle via the Date column header → desc (latest first).
+    await userEvent.click(
+      screen.getByRole("button", { name: /sort.*latest first/i })
+    );
+
+    await waitFor(() => {
+      const after = screen.getByRole("table").textContent ?? "";
+      expect(after.indexOf("LATE")).toBeLessThan(after.indexOf("EARLY"));
+    });
   });
 });
 

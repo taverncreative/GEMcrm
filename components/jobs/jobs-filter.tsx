@@ -2,17 +2,21 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useRef, useState, useTransition } from "react";
-import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
-import type { CallType } from "@/types/database";
 
+/**
+ * Jobs search box. The date + call-type dropdowns were removed — date is now
+ * a sort (toggle on the Date column header) and status lives in the Open /
+ * Completed tabs, so the only control left here is the cross-field search
+ * (customer name / company / site address / postcode). The page still honours
+ * ?filter=today|upcoming from the dashboard deep-links; there's just no manual
+ * dropdown for it.
+ */
 export function JobsFilter() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const currentFilter = searchParams.get("filter") ?? "all";
-  const currentCallType = searchParams.get("callType") ?? "";
   const currentSearch = searchParams.get("q") ?? "";
   const [searchValue, setSearchValue] = useState(currentSearch);
 
@@ -67,31 +71,6 @@ export function JobsFilter() {
           Search
         </button>
       </div>
-
-      <select
-        value={currentFilter}
-        onChange={(e) => updateParams({ filter: e.target.value })}
-        className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:border-gray-300 focus:outline-none"
-      >
-        <option value="all">All dates</option>
-        <option value="today">Today</option>
-        <option value="upcoming">Upcoming</option>
-      </select>
-
-      <select
-        value={currentCallType}
-        onChange={(e) => updateParams({ callType: e.target.value })}
-        className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:border-gray-300 focus:outline-none"
-      >
-        <option value="">All types</option>
-        {(Object.entries(CALL_TYPE_LABELS) as [CallType, string][]).map(
-          ([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          )
-        )}
-      </select>
 
       {isPending && (
         <span className="text-xs text-gray-400">Loading...</span>

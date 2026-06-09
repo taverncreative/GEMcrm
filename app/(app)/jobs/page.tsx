@@ -24,14 +24,20 @@
  * Filter / sort / search applied in JS — small volumes (the server
  * version capped at 100 rows; we match):
  *
- *   - ?filter=today    → j.job_date === today
- *   - ?filter=upcoming → j.job_date >= today
- *   - ?status=         → eq(job_status, x)
- *   - ?callType=       → eq(call_type, x)
+ *   - ?filter=today    → j.job_date === today   (dashboard deep-link only —
+ *   - ?filter=upcoming → j.job_date >= today     no manual dropdown anymore)
+ *   - status segment   → Open (scheduled + in_progress, default) vs
+ *                        Completed (?status=completed) — the JobsStatusTabs
  *   - ?q=              → ilike on site.address_line_1 | site.postcode
  *                        | customer.name | customer.company_name
- *   - sort             → job_date DESC, then created_at DESC
+ *   - sort             → job_date, soonest-first default; Date column header
+ *                        toggles asc/desc (local state). created_at tie-break.
  *   - limit            → 100
+ *
+ * Controls were decluttered (deferred quick win): the date + call-type
+ * dropdowns are gone — date is now a column-header sort toggle and status is
+ * the Open/Completed segmentation. Search is unchanged. Presentational only;
+ * the Dexie/offline data layer (incl. the is_archived exclusion) is untouched.
  *
  * The search predicate matches the server's "find sites + customers
  * whose attributes match, then filter jobs to those sites" logic, but
@@ -48,7 +54,7 @@
  */
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -128,18 +134,24 @@ function buildRows(args: {
 export default function JobsPage() {
   const params = useSearchParams();
   const filterParam = params.get("filter") ?? "all";
-  const callTypeParam = params.get("callType") ?? undefined;
-  const statusParam = params.get("status") ?? "all";
   const searchParam = params.get("q") ?? "";
 
+  // Date filter (today/upcoming) no longer has a manual control — it's kept
+  // only so the dashboard deep-links still scope the list (jobs-today →
+  // ?filter=today, service-sheets-to-fill → ?filter=upcoming).
   const filter: "today" | "upcoming" | "all" =
     filterParam === "today" || filterParam === "upcoming" ? filterParam : "all";
-  const status: "scheduled" | "in_progress" | "completed" | "all" =
-    statusParam === "scheduled" ||
-    statusParam === "completed" ||
-    statusParam === "in_progress"
-      ? statusParam
-      : "all";
+
+  // Two-segment status: Open (scheduled + in_progress) is the default; the
+  // Completed tab sets ?status=completed. Together they exhaust JobStatus.
+  const status: "open" | "completed" =
+    params.get("status") === "completed" ? "completed" : "open";
+
+  // Date sort direction — presentational, local state (no need to deep-link
+  // it). Default "asc" = soonest first, so the next/overdue job sits at the
+  // top of the Open work queue. The Date column header toggles it to "desc"
+  // (latest first), natural for browsing the Completed archive.
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   // ─── Chained Dexie reads ──────────────────────────────────────────
 
@@ -163,12 +175,14 @@ export default function JobsPage() {
       list = list.filter((j) => j.job_date >= today);
     }
 
-    if (status !== "all") {
-      list = list.filter((j) => j.job_status === status);
-    }
-
-    if (callTypeParam) {
-      list = list.filter((j) => j.call_type === callTypeParam);
+    // Status segment: Completed = job_status completed; Open = the rest
+    // (scheduled + in_progress).
+    if (status === "completed") {
+      list = list.filter((j) => j.job_status === "completed");
+    } else {
+      list = list.filter(
+        (j) => j.job_status === "scheduled" || j.job_status === "in_progress"
+      );
     }
 
     const q = searchParam.trim().toLowerCase();
@@ -189,14 +203,17 @@ export default function JobsPage() {
       });
     }
 
+    // Sort by job_date in the chosen direction; created_at breaks ties the
+    // same way so ordering is stable.
     list.sort((a, b) => {
-      const byDate = b.job_date.localeCompare(a.job_date);
-      if (byDate !== 0) return byDate;
-      return b.created_at.localeCompare(a.created_at);
+      const byDate = a.job_date.localeCompare(b.job_date);
+      if (byDate !== 0) return sortDir === "asc" ? byDate : -byDate;
+      const byCreated = a.created_at.localeCompare(b.created_at);
+      return sortDir === "asc" ? byCreated : -byCreated;
     });
 
     return list.slice(0, JOBS_LIMIT);
-  }, [jobs, sites, customers, filter, status, callTypeParam, searchParam, today]);
+  }, [jobs, sites, customers, filter, status, searchParam, today, sortDir]);
 
   return (
     <div>
@@ -232,7 +249,25 @@ export default function JobsPage() {
                 <thead>
                   <tr className="border-b border-gray-100 text-xs font-medium uppercase tracking-wider text-gray-500">
                     <th className="px-4 py-3">Ref</th>
-                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+                        }
+                        className="inline-flex cursor-pointer items-center gap-1 uppercase tracking-wider hover:text-gray-700"
+                        aria-label={
+                          sortDir === "asc"
+                            ? "Sorted by date, soonest first. Activate to sort latest first."
+                            : "Sorted by date, latest first. Activate to sort soonest first."
+                        }
+                      >
+                        Date
+                        <span aria-hidden="true" className="text-[10px] leading-none">
+                          {sortDir === "asc" ? "▲" : "▼"}
+                        </span>
+                      </button>
+                    </th>
                     <th className="px-4 py-3">Customer</th>
                     <th className="px-4 py-3 hidden sm:table-cell">Site</th>
                     <th className="px-4 py-3 hidden md:table-cell">Type</th>
