@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CustomerSidePanel } from "@/components/customers/customer-side-panel";
 import { formatAddress } from "@/lib/utils/format-address";
@@ -44,7 +45,14 @@ function formatDate(value: string | null): string {
 }
 
 export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Auto-open the panel for ?customer=id — used by the retired full-page
+  // /customers/[id] route (now a redirect) so Recent-Activity links land on
+  // the offline-capable panel. The panel loads the customer by id from Dexie,
+  // so this works even if the row isn't in the current (filtered) list.
+  const searchParams = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => searchParams.get("customer")
+  );
 
   if (rows.length === 0) {
     const filtered = !!query || typeFilter !== "all";

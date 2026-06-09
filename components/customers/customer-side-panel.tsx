@@ -59,6 +59,7 @@ const wrappedSetCustomerType = wrapAction(setCustomerTypeAction, {
   },
 });
 import { BookingModal } from "@/components/bookings/booking-modal";
+import { AddSiteForm } from "@/components/sites/add-site-form";
 import { InvoiceCreatorModal } from "@/components/invoices/invoice-creator-modal";
 import { DeleteCustomerConfirm } from "@/components/customers/delete-customer-confirm";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
@@ -120,6 +121,7 @@ export function CustomerSidePanel({
   const [bookingOpen, setBookingOpen] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [addSiteOpen, setAddSiteOpen] = useState(false);
   const [, startTransition] = useTransition();
 
   // ─── Chained Dexie reads ──────────────────────────────────────────
@@ -667,9 +669,17 @@ export function CustomerSidePanel({
                 </dl>
               </Section>
 
-              {/* Sites */}
-              {(sites ?? []).length > 0 && (
-                <Section title={`Sites (${(sites ?? []).length})`}>
+              {/* Sites — always rendered now (so "Add site" is reachable
+                  even for a customer with no sites yet). "Add site" carries
+                  over from the retired full-page customer profile; it's
+                  online-only (the underlying createSiteAction isn't wrapped
+                  local-first), guarded like Invoice/Delete. A newly added
+                  site appears here on the next sync pull. Offline, add a site
+                  via New Booking → new-site mode (that path IS local-first). */}
+              <Section title={`Sites (${(sites ?? []).length})`}>
+                {(sites ?? []).length === 0 ? (
+                  <p className="text-sm text-gray-400">No sites yet.</p>
+                ) : (
                   <ul className="space-y-1.5 text-sm">
                     {(sites ?? []).map((s) => (
                       <li key={s.id}>
@@ -687,8 +697,30 @@ export function CustomerSidePanel({
                       </li>
                     ))}
                   </ul>
-                </Section>
-              )}
+                )}
+                {addSiteOpen ? (
+                  <div className="mt-3 rounded-lg border border-gray-100 p-3">
+                    <AddSiteForm customerId={detail.id} />
+                    <button
+                      type="button"
+                      onClick={() => setAddSiteOpen(false)}
+                      className="mt-2 text-xs font-medium text-gray-500 hover:text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setAddSiteOpen(true)}
+                    disabled={!online}
+                    title={online ? undefined : "Online required to add a site"}
+                    className="mt-2 text-xs font-medium text-brand-darker hover:text-brand-darker disabled:cursor-not-allowed disabled:text-gray-300"
+                  >
+                    + Add site
+                  </button>
+                )}
+              </Section>
 
               {/* Upcoming jobs */}
               <Section title={`Upcoming visits (${upcomingJobs.length})`}>
