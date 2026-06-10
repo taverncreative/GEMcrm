@@ -480,6 +480,33 @@ async function writeServiceSheet(
     }
   }
 
+  // Status guard (offline-pwa pass 0): drainOutbox replays
+  // completeServiceSheetAction even after the approval step has moved
+  // the job to completed — the submit-time outbox entry is deliberately
+  // left queued as crash recovery, and the engine clears entries BY
+  // replaying them. An unconditional `job_status: "in_progress"` here
+  // regressed completed jobs back to in_progress on the next drain
+  // (30s tick / focus / any runSync). Guard: in_progress is written via
+  // a separate conditional UPDATE whose `neq` filter makes the
+  // no-downgrade rule atomic server-side (no fetch-then-write race).
+  // Other statuses ("completed" via the legacy completeServiceSheet
+  // alias) still write through the main update — upgrades are fine.
+  if (newStatus === "in_progress") {
+    const { error: statusErr } = await supabase
+      .from("jobs")
+      .update({ job_status: "in_progress" as JobStatus })
+      .eq("id", jobId)
+      .neq("job_status", "completed");
+    if (statusErr) {
+      console.error(
+        "[writeServiceSheet] status:",
+        statusErr.code,
+        statusErr.message
+      );
+      throw new Error(`Failed to save service sheet: ${statusErr.message}`);
+    }
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .update({
@@ -498,7 +525,9 @@ async function writeServiceSheet(
       client_name: emptyToNull(input.client_name),
       technician_signature_url: techSigUrl,
       client_signature_url: clientSigUrl,
-      job_status: newStatus,
+      // in_progress went through the guarded write above; only
+      // non-downgrading statuses are written unconditionally.
+      ...(newStatus !== "in_progress" ? { job_status: newStatus } : {}),
     })
     .eq("id", jobId)
     .select()
