@@ -58,10 +58,15 @@
  *     a runSync('manual') pulls the flipped is_invoiced flags back
  *     into Dexie so the checkboxes disappear without waiting for the
  *     30s interval tick.
+ *   - Invoiced rows show a status chip instead of the checkbox
+ *     (pass E): Paid from the synced is_paid flag (offline-capable);
+ *     Draft/Sent via one batched online read of the invoices table;
+ *     neutral "Invoiced" offline / pre-resolve. Read-only — no Dexie
+ *     or sync-pull changes.
  */
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -77,10 +82,12 @@ import { JobsStatusTabs } from "@/components/jobs/jobs-status-tabs";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { StartJobButton } from "@/components/jobs/start-job-button";
 import { InvoiceCreatorModal } from "@/components/invoices/invoice-creator-modal";
+import { getInvoiceStatusesForJobsAction } from "@/app/(app)/invoices/actions";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import type {
   CallType,
   Customer,
+  InvoiceStatus,
   Job,
   JobStatus,
   Site,
@@ -107,6 +114,47 @@ function JobsTableSkeleton() {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * Invoice state for an invoiced row, in the slot the checkbox occupies
+ * on uninvoiced rows.
+ *
+ * Paid derives from the SYNCED job row (is_paid) — works offline.
+ * Draft vs Sent needs the invoices table, which isn't in Dexie; those
+ * arrive via one batched online lookup. Until it resolves — or while
+ * offline — an invoiced-but-unpaid row shows a neutral "Invoiced".
+ * Colour only where it earns it: Paid green, Draft amber (needs
+ * action), Sent/Invoiced muted.
+ */
+function InvoiceStatusChip({
+  paid,
+  status,
+}: {
+  paid: boolean;
+  status: InvoiceStatus | null;
+}) {
+  const label =
+    paid || status === "paid"
+      ? "Paid"
+      : status === "sent"
+        ? "Sent"
+        : status === "draft"
+          ? "Draft"
+          : "Invoiced";
+  const cls =
+    label === "Paid"
+      ? "bg-brand-soft text-brand-darker"
+      : label === "Draft"
+        ? "bg-amber-100 text-amber-700"
+        : "bg-gray-100 text-gray-500";
+  return (
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -331,6 +379,43 @@ export default function JobsPage() {
 
   const selectable = status === "completed";
 
+  // ─── Invoice status chips (Pass E) ────────────────────────────────
+  // Draft/Sent live only on the invoices table (not synced to Dexie),
+  // so fetch them in ONE batched read for the visible invoiced rows
+  // when online. Keyed on the sorted id list so the effect re-runs
+  // only when the visible invoiced set actually changes. Offline or
+  // pre-resolve, the chip falls back to neutral "Invoiced" (Paid still
+  // works offline via the synced is_paid flag).
+  const [invoiceStatuses, setInvoiceStatuses] = useState<
+    Record<string, InvoiceStatus>
+  >({});
+  const invoicedIdsKey = useMemo(() => {
+    if (!selectable || !rows) return "";
+    return rows
+      .filter((j) => j.is_invoiced)
+      .map((j) => j.id)
+      .sort()
+      .join(",");
+  }, [selectable, rows]);
+
+  useEffect(() => {
+    if (!online || invoicedIdsKey === "") return;
+    let live = true;
+    getInvoiceStatusesForJobsAction(invoicedIdsKey.split(",")).then(
+      (statuses) => {
+        // Merge rather than replace: a narrower search shouldn't wipe
+        // statuses already fetched for rows it filtered out.
+        if (live) setInvoiceStatuses((prev) => ({ ...prev, ...statuses }));
+      },
+      () => {
+        // Transport failure (offline mid-flight) — fallback chip stands.
+      }
+    );
+    return () => {
+      live = false;
+    };
+  }, [invoicedIdsKey, online]);
+
   return (
     // Bottom padding keeps the fixed mobile selection bar from covering
     // the table's last rows while a selection is active.
@@ -415,8 +500,10 @@ export default function JobsPage() {
                 <thead>
                   <tr className="border-b border-gray-100 text-xs font-medium uppercase tracking-wider text-gray-500">
                     {selectable && (
-                      <th className="w-10 px-4 py-3">
-                        <span className="sr-only">Select for invoicing</span>
+                      <th className="px-4 py-3">
+                        <span className="sr-only">
+                          Select for invoicing / invoice status
+                        </span>
                       </th>
                     )}
                     <th className="px-4 py-3">Ref</th>
@@ -464,8 +551,8 @@ export default function JobsPage() {
                       }`}
                     >
                       {selectable && (
-                        <td className="px-4 py-3">
-                          {!job.is_invoiced && (
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {!job.is_invoiced ? (
                             <input
                               type="checkbox"
                               checked={selected.has(job.id)}
@@ -480,6 +567,11 @@ export default function JobsPage() {
                                 job.reference_number ?? job.id.slice(0, 6)
                               } for invoicing`}
                               className="h-4 w-4 cursor-pointer rounded border-gray-300 accent-brand disabled:cursor-not-allowed"
+                            />
+                          ) : (
+                            <InvoiceStatusChip
+                              paid={job.is_paid}
+                              status={invoiceStatuses[job.id] ?? null}
                             />
                           )}
                         </td>

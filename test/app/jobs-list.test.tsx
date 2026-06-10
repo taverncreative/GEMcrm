@@ -44,6 +44,13 @@ vi.mock("@/components/invoices/invoice-creator-modal", () => ({
   InvoiceCreatorModal: () => <div data-testid="mock-invoice-modal" />,
 }));
 
+// The page batch-fetches invoice statuses for the chips through this
+// server action; the real module drags in next/headers + the PDF stack,
+// neither of which exists under vitest.
+vi.mock("@/app/(app)/invoices/actions", () => ({
+  getInvoiceStatusesForJobsAction: vi.fn(async () => ({})),
+}));
+
 // JobsStatusTabs + JobsFilter are router-pushers; they don't need
 // their inner logic exercised here.
 vi.mock("@/components/jobs/jobs-status-tabs", () => ({

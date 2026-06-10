@@ -6,6 +6,7 @@ import {
   createStandaloneInvoice,
   setInvoicePdfUrl,
   getInvoiceWithCustomer,
+  getInvoiceStatusByJobIds,
   markInvoiceSent,
   markInvoicePaid,
 } from "@/lib/data/invoices";
@@ -16,6 +17,29 @@ import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import { BUSINESS } from "@/lib/constants/branding";
 import type { ActionState } from "@/types/actions";
+import type { InvoiceStatus } from "@/types/database";
+
+/**
+ * Batched job → invoice-status lookup for the Jobs list chips.
+ * Read-only; errors collapse to {} so the caller's neutral "Invoiced"
+ * fallback chip stands. Capped at the list's render limit.
+ */
+export async function getInvoiceStatusesForJobsAction(
+  jobIds: string[]
+): Promise<Record<string, InvoiceStatus>> {
+  await requireUser();
+  if (!Array.isArray(jobIds)) return {};
+  const ids = jobIds
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+    .slice(0, 100);
+  if (ids.length === 0) return {};
+  try {
+    return await getInvoiceStatusByJobIds(ids);
+  } catch (err) {
+    console.error("[getInvoiceStatusesForJobsAction]", err);
+    return {};
+  }
+}
 
 // ─── Step 1: Create as draft + generate PDF ──────────────────────────────
 

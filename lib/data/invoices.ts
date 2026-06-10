@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { newId } from "@/lib/utils/id";
-import type { Invoice, Customer } from "@/types/database";
+import type { Invoice, InvoiceStatus, Customer } from "@/types/database";
 
 /**
  * Generate a human-readable invoice number.
@@ -165,6 +165,53 @@ export async function getInvoiceByJobId(
   }
 
   return data;
+}
+
+/**
+ * Batched job → invoice-status lookup for the Jobs list chips.
+ *
+ * Sources, canonical first:
+ *   1. invoice_jobs join rows (031) — every invoice created since the
+ *      multi-job pass, including multi-job ones.
+ *   2. legacy invoices.job_id — rows that pre-date the join table.
+ *
+ * Jobs with no invoice simply aren't in the returned map. unique(job_id)
+ * means a job can't sit on two invoices, so there's no merge ambiguity —
+ * where both sources have the job they describe the same invoice, and
+ * the join row wins only by overwrite order.
+ */
+export async function getInvoiceStatusByJobIds(
+  jobIds: string[]
+): Promise<Record<string, InvoiceStatus>> {
+  const out: Record<string, InvoiceStatus> = {};
+  if (jobIds.length === 0) return out;
+  const supabase = await createClient();
+
+  const [legacy, links] = await Promise.all([
+    supabase.from("invoices").select("job_id, status").in("job_id", jobIds),
+    supabase
+      .from("invoice_jobs")
+      .select("job_id, invoice:invoices!inner(status)")
+      .in("job_id", jobIds),
+  ]);
+
+  if (legacy.error) {
+    console.error("[getInvoiceStatusByJobIds] legacy:", legacy.error.message);
+  }
+  for (const row of legacy.data ?? []) {
+    if (row.job_id) out[row.job_id] = row.status as InvoiceStatus;
+  }
+
+  if (links.error) {
+    console.error("[getInvoiceStatusByJobIds] links:", links.error.message);
+  }
+  for (const row of links.data ?? []) {
+    // PostgREST may embed the 1:1 relation as an object or 1-element array.
+    const inv = Array.isArray(row.invoice) ? row.invoice[0] : row.invoice;
+    if (inv) out[row.job_id] = inv.status as InvoiceStatus;
+  }
+
+  return out;
 }
 
 /**
