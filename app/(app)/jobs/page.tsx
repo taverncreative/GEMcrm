@@ -51,13 +51,23 @@
  *                       wrapping it. Now gets the useIsOnline guard
  *                       (the existing button had none).
  *   - CreateInvoiceButton → already uses useIsOnline.
+ *   - Multi-select → Create Invoice (invoice_jobs pass C): checkbox
+ *     column on the Completed tab over uninvoiced rows only, with a
+ *     same-customer lock (one invoice covers one customer). The
+ *     selection bar's button carries the same useIsOnline gate; the
+ *     created invoice goes through the online-only server action, then
+ *     a runSync('manual') pulls the flipped is_invoiced flags back
+ *     into Dexie so the checkboxes disappear without waiting for the
+ *     30s interval tick.
  */
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
+import { runSync } from "@/lib/sync/engine";
+import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { formatAddress } from "@/lib/utils/format-address";
 import { formatJobTime } from "@/lib/utils/format-time";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
@@ -68,6 +78,7 @@ import { JobsStatusTabs } from "@/components/jobs/jobs-status-tabs";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { StartJobButton } from "@/components/jobs/start-job-button";
 import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
+import { InvoiceCreatorModal } from "@/components/invoices/invoice-creator-modal";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import type {
   CallType,
@@ -99,6 +110,35 @@ function JobsTableSkeleton() {
       </div>
     </div>
   );
+}
+
+/**
+ * One description line per selected job, matching the single-job preset
+ * built on the job detail page ("Pest control — wasps · 12 Jun 2026
+ * (ref 00037-BSK)") with the call-type label standing in for the generic
+ * "Pest control" when the job has one.
+ */
+function jobSummaryLine(job: JobWithContext): string {
+  const parts: string[] = [];
+  parts.push(
+    job.call_type
+      ? (CALL_TYPE_LABELS[job.call_type as CallType] ?? "Pest control")
+      : "Pest control"
+  );
+  if (job.pest_species.length > 0) {
+    parts.push(`— ${job.pest_species.join(", ")}`);
+  }
+  parts.push(
+    `· ${new Date(job.job_date).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    })}`
+  );
+  if (job.reference_number) {
+    parts.push(`(ref ${job.reference_number})`);
+  }
+  return parts.join(" ");
 }
 
 function buildRows(args: {
@@ -152,6 +192,21 @@ export default function JobsPage() {
   // top of the Open work queue. The Date column header toggles it to "desc"
   // (latest first), natural for browsing the Completed archive.
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // ─── Multi-select → one invoice (Pass C) ──────────────────────────
+  // Selection lives only on the Completed tab and only over uninvoiced
+  // rows. Local state — nothing about it is worth deep-linking.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  // Presets are captured at modal-open time so clearing the selection
+  // (onCreated) can't unmount or reshape the modal mid-flight.
+  const [invoicePresets, setInvoicePresets] = useState<{
+    customer: Customer;
+    jobIds: string[];
+    amount: number | null;
+    description: string;
+  } | null>(null);
+  const online = useIsOnline();
 
   // ─── Chained Dexie reads ──────────────────────────────────────────
 
@@ -215,8 +270,73 @@ export default function JobsPage() {
     return list.slice(0, JOBS_LIMIT);
   }, [jobs, sites, customers, filter, status, searchParam, today, sortDir]);
 
+  // Selection only exists on the Completed tab — drop it when the tab
+  // switches away. Render-time adjustment (the documented alternative
+  // to a setState-in-effect, which the compiler lint rejects).
+  const [prevStatus, setPrevStatus] = useState(status);
+  if (prevStatus !== status) {
+    setPrevStatus(status);
+    if (status !== "completed") setSelected(new Set());
+  }
+
+  // Selected rows with their site+customer context, independent of the
+  // current search filter (a selected row hidden by a narrower search
+  // stays selected — it's still going on the invoice). Validity is part
+  // of the derivation rather than pruned into state: an id whose job
+  // got invoiced/archived/un-completed under us (sync) simply stops
+  // counting — it can't render a checkbox, join the bar's total, or
+  // reach the modal presets.
+  const selectionInfo = useMemo(() => {
+    if (!jobs || !sites || !customers || selected.size === 0) return null;
+    const all = buildRows({ jobs, sites, customers });
+    const sel = all.filter(
+      (j) =>
+        selected.has(j.id) && j.job_status === "completed" && !j.is_invoiced
+    );
+    if (sel.length === 0) return null;
+    sel.sort((a, b) => a.job_date.localeCompare(b.job_date));
+    const total = sel.reduce((s, j) => s + Number(j.value ?? 0), 0);
+    return { jobs: sel, customer: sel[0].site.customer, total };
+  }, [jobs, sites, customers, selected]);
+
+  // While ≥1 row is selected, rows of OTHER customers can't be added —
+  // one invoice covers exactly one customer.
+  const lockedCustomerId = selectionInfo?.customer.id ?? null;
+
+  const toggleSelect = useCallback((jobId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }, []);
+
+  const openInvoiceModal = useCallback(() => {
+    if (!selectionInfo) return;
+    setInvoicePresets({
+      customer: selectionInfo.customer,
+      jobIds: selectionInfo.jobs.map((j) => j.id),
+      amount: selectionInfo.total > 0 ? selectionInfo.total : null,
+      description: selectionInfo.jobs.map(jobSummaryLine).join("\n"),
+    });
+    setInvoiceOpen(true);
+  }, [selectionInfo]);
+
+  const handleInvoiceCreated = useCallback(() => {
+    setSelected(new Set());
+    // The action flipped is_invoiced on the server; pull it back into
+    // Dexie now rather than waiting for the 30s interval tick. Same
+    // manual-reason call the conflicts inbox uses.
+    void runSync("manual");
+  }, []);
+
+  const selectable = status === "completed";
+
   return (
-    <div>
+    // Bottom padding keeps the fixed mobile selection bar from covering
+    // the table's last rows while a selection is active.
+    <div className={selectionInfo ? "pb-28 md:pb-0" : undefined}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -235,6 +355,55 @@ export default function JobsPage() {
         <JobsFilter />
       </div>
 
+      {/* Selection bar — appears at ≥1 selected row. In flow under the
+          tabs on md+; fixed above the bottom nav (3.5rem + safe-area)
+          on mobile. */}
+      {selectable && selectionInfo && (
+        <div className="fixed inset-x-3 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.75rem)] z-40 md:static md:inset-x-auto md:z-auto md:mt-3">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-brand bg-white px-4 py-3 shadow-lg md:shadow-sm">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-gray-900">
+                {selectionInfo.jobs.length} job
+                {selectionInfo.jobs.length === 1 ? "" : "s"} ·{" "}
+                {selectionInfo.customer.name}
+              </p>
+              {selectionInfo.total > 0 && (
+                <p className="text-xs text-gray-500">
+                  £
+                  {selectionInfo.total.toLocaleString("en-GB", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  total
+                </p>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="min-h-[44px] rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 sm:min-h-0"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => online && openInvoiceModal()}
+                disabled={!online}
+                title={
+                  !online
+                    ? "Needs internet — invoicing is online-only"
+                    : undefined
+                }
+                className="min-h-[44px] rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-75 hover:bg-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0"
+              >
+                Create Invoice
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mt-4">
         {rows === null ? (
           <JobsTableSkeleton />
@@ -248,6 +417,11 @@ export default function JobsPage() {
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-xs font-medium uppercase tracking-wider text-gray-500">
+                    {selectable && (
+                      <th className="w-10 px-4 py-3">
+                        <span className="sr-only">Select for invoicing</span>
+                      </th>
+                    )}
                     <th className="px-4 py-3">Ref</th>
                     <th className="px-4 py-3">
                       <button
@@ -278,8 +452,41 @@ export default function JobsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {rows.map((job) => (
-                    <tr key={job.id} className="hover:bg-gray-50">
+                  {rows.map((job) => {
+                    // With a selection going, rows of other customers
+                    // can't join this invoice — dim + disable them.
+                    const crossCustomer =
+                      selectable &&
+                      lockedCustomerId !== null &&
+                      job.site.customer.id !== lockedCustomerId;
+                    return (
+                    <tr
+                      key={job.id}
+                      className={`hover:bg-gray-50 ${
+                        crossCustomer ? "opacity-50" : ""
+                      }`}
+                    >
+                      {selectable && (
+                        <td className="px-4 py-3">
+                          {!job.is_invoiced && (
+                            <input
+                              type="checkbox"
+                              checked={selected.has(job.id)}
+                              disabled={crossCustomer}
+                              onChange={() => toggleSelect(job.id)}
+                              title={
+                                crossCustomer
+                                  ? `Different customer — this invoice covers ${selectionInfo?.customer.name}`
+                                  : undefined
+                              }
+                              aria-label={`Select job ${
+                                job.reference_number ?? job.id.slice(0, 6)
+                              } for invoicing`}
+                              className="h-4 w-4 cursor-pointer rounded border-gray-300 accent-brand disabled:cursor-not-allowed"
+                            />
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <Link
                           href={ROUTES.jobDetail(job.id)}
@@ -351,13 +558,29 @@ export default function JobsPage() {
                           : "—"}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         )}
       </div>
+
+      {/* Multi-job invoice modal. Presets are the modal-open snapshot
+          (invoicePresets), NOT live selection state — clearing the
+          selection on create must not unmount the open modal. */}
+      {invoicePresets && (
+        <InvoiceCreatorModal
+          open={invoiceOpen}
+          onClose={() => setInvoiceOpen(false)}
+          presetCustomer={invoicePresets.customer}
+          presetJobIds={invoicePresets.jobIds}
+          presetAmount={invoicePresets.amount}
+          presetDescription={invoicePresets.description}
+          onCreated={handleInvoiceCreated}
+        />
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import {
   useActionState,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -42,9 +43,16 @@ interface InvoiceCreatorModalProps {
   open: boolean;
   onClose: () => void;
   presetCustomer?: Customer | null;
+  /** DEPRECATED — single-job preset; use presetJobIds. */
   presetJobId?: string | null;
+  /** Jobs this invoice covers (multi-select flow). Wins over
+   *  presetJobId when both are set. */
+  presetJobIds?: string[] | null;
   presetAmount?: number | null;
   presetDescription?: string | null;
+  /** Fires once per created draft (step 1 → 2 transition). The Jobs
+   *  list uses it to clear its row selection. */
+  onCreated?: (invoiceId: string) => void;
 }
 
 interface AmountBreakdown {
@@ -103,11 +111,27 @@ export function InvoiceCreatorModal({
   onClose,
   presetCustomer = null,
   presetJobId = null,
+  presetJobIds = null,
   presetAmount = null,
   presetDescription = null,
+  onCreated,
 }: InvoiceCreatorModalProps) {
   const router = useRouter();
   const lastOpenRef = useRef(false);
+
+  // Normalise the two job-preset shapes into one list. Memoised so the
+  // draft-success effect below doesn't re-fire on parent re-renders.
+  const presetJobList = useMemo(
+    () =>
+      presetJobIds && presetJobIds.length > 0
+        ? presetJobIds
+        : presetJobId
+          ? [presetJobId]
+          : [],
+    [presetJobIds, presetJobId]
+  );
+  // Guards onCreated against firing more than once per draft.
+  const createdNotifiedRef = useRef<string | null>(null);
 
   const [step, setStep] = useState<"edit" | "preview">("edit");
 
@@ -183,12 +207,19 @@ export function InvoiceCreatorModal({
       setStep("preview");
       router.refresh();
 
+      if (onCreated && createdNotifiedRef.current !== draftState.invoiceId) {
+        createdNotifiedRef.current = draftState.invoiceId;
+        onCreated(draftState.invoiceId);
+      }
+
       if (selectedCustomer) {
         const breakdown = computeBreakdown(Number(amount), vatMode);
         const draftSummary = buildInvoiceEmailDraft(selectedCustomer, {
           id: draftState.invoiceId,
           customer_id: selectedCustomer.id,
-          job_id: presetJobId ?? null,
+          // Mirrors the server's legacy dual-write: single job → that
+          // job; multiple → null (invoice_jobs is the real link).
+          job_id: presetJobList.length === 1 ? presetJobList[0] : null,
           amount: breakdown.total,
           subtotal_amount: breakdown.subtotal,
           vat_amount: breakdown.vat,
@@ -214,7 +245,8 @@ export function InvoiceCreatorModal({
     vatMode,
     description,
     dueDate,
-    presetJobId,
+    presetJobList,
+    onCreated,
     router,
   ]);
 
@@ -306,9 +338,9 @@ export function InvoiceCreatorModal({
               name="customer_id"
               value={selectedCustomer?.id ?? ""}
             />
-            {presetJobId && (
-              <input type="hidden" name="job_id" value={presetJobId} />
-            )}
+            {presetJobList.map((id) => (
+              <input key={id} type="hidden" name="job_ids" value={id} />
+            ))}
             <input type="hidden" name="subtotal" value={breakdown.subtotal} />
             <input type="hidden" name="vat_amount" value={breakdown.vat} />
             <input type="hidden" name="total" value={breakdown.total} />
