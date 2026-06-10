@@ -19,10 +19,6 @@ vi.mock("@/components/bookings/booking-modal", () => ({
   BookingModal: ({ open }: { open: boolean }) =>
     open ? <div data-testid="booking-modal" /> : null,
 }));
-vi.mock("@/components/invoices/invoice-creator-modal", () => ({
-  InvoiceCreatorModal: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="invoice-modal" /> : null,
-}));
 
 import { BottomNav } from "@/components/bottom-nav";
 
@@ -136,7 +132,7 @@ describe("BottomNav — sheets", () => {
     );
   });
 
-  it("+ New opens the create menu (Booking / Invoice / Add Customer)", async () => {
+  it("+ New opens the create menu (Booking / Add Customer — no Invoice)", async () => {
     setPath("/jobs");
     const user = userEvent.setup();
     render(<BottomNav />);
@@ -148,11 +144,13 @@ describe("BottomNav — sheets", () => {
       ).toBeInTheDocument();
     });
     expect(
-      screen.getByRole("button", { name: /New Invoice/i })
-    ).toBeInTheDocument();
-    expect(
       screen.getByRole("link", { name: /Add Customer/i })
     ).toHaveAttribute("href", "/customers/new");
+    // Invoicing is job-driven (Jobs list multi-select) — the blank-modal
+    // entry was retired in the invoice_jobs Pass D.
+    expect(
+      screen.queryByRole("button", { name: /New Invoice/i })
+    ).not.toBeInTheDocument();
   });
 
   it("choosing New Booking from the create menu opens the booking modal", async () => {

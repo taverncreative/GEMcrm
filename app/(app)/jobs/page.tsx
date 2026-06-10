@@ -50,7 +50,6 @@
  *                       entity_ids[] guard is the prereq for ever
  *                       wrapping it. Now gets the useIsOnline guard
  *                       (the existing button had none).
- *   - CreateInvoiceButton → already uses useIsOnline.
  *   - Multi-select → Create Invoice (invoice_jobs pass C): checkbox
  *     column on the Completed tab over uninvoiced rows only, with a
  *     same-customer lock (one invoice covers one customer). The
@@ -77,7 +76,6 @@ import { JobsFilter } from "@/components/jobs/jobs-filter";
 import { JobsStatusTabs } from "@/components/jobs/jobs-status-tabs";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { StartJobButton } from "@/components/jobs/start-job-button";
-import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
 import { InvoiceCreatorModal } from "@/components/invoices/invoice-creator-modal";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import type {
@@ -345,7 +343,6 @@ export default function JobsPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <CreateInvoiceButton />
           <StartJobButton />
         </div>
       </div>

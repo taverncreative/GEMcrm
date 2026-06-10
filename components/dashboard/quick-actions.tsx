@@ -4,23 +4,25 @@ import { useState } from "react";
 import Link from "next/link";
 import { ROUTES } from "@/lib/constants/routes";
 import { BookingModal } from "@/components/bookings/booking-modal";
-import { InvoiceCreatorModal } from "@/components/invoices/invoice-creator-modal";
 
 /**
- * Persistent header actions: New Booking · New Invoice · Add Customer.
+ * Persistent header actions: New Booking · Add Customer.
  *
- * Desktop (≥ sm): three inline buttons. Familiar, scannable.
+ * Desktop (≥ sm): inline buttons. Familiar, scannable.
  * Mobile (< sm): a single brand-coloured "+" button (≥44×44px) that
  * opens a bottom slide-up sheet. The sheet rows are full-width and ≥48px
  * tall — every action is a thumb-friendly tap, and the header stays
  * uncluttered so the customer/page name has room to breathe.
  *
- * Booking + Invoice modals are reused unchanged; the sheet just triggers
- * the same state setters.
+ * No invoice entry here: invoicing is job-driven (multi-select on the
+ * Jobs list → Completed tab), with the customer side panel keeping the
+ * ad-hoc escape hatch.
+ *
+ * The Booking modal is reused unchanged; the sheet just triggers the
+ * same state setter.
  */
 export function QuickActions() {
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // Open a modal from the mobile sheet: close the sheet at the same time
@@ -30,10 +32,6 @@ export function QuickActions() {
   function openBookingFromSheet() {
     setSheetOpen(false);
     setBookingOpen(true);
-  }
-  function openInvoiceFromSheet() {
-    setSheetOpen(false);
-    setInvoiceOpen(true);
   }
 
   return (
@@ -47,14 +45,6 @@ export function QuickActions() {
         >
           <PlusIcon />
           New Booking
-        </button>
-        <button
-          type="button"
-          onClick={() => setInvoiceOpen(true)}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-        >
-          <InvoiceIcon />
-          New Invoice
         </button>
         <Link
           href={ROUTES.CUSTOMERS_NEW}
@@ -110,16 +100,6 @@ export function QuickActions() {
                 </span>
                 New Booking
               </button>
-              <button
-                type="button"
-                onClick={openInvoiceFromSheet}
-                className="flex min-h-12 items-center gap-3 px-5 py-3 text-left text-base font-medium text-gray-900 active:bg-gray-50"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500">
-                  <InvoiceIcon />
-                </span>
-                New Invoice
-              </button>
               <Link
                 href={ROUTES.CUSTOMERS_NEW}
                 onClick={() => setSheetOpen(false)}
@@ -136,7 +116,6 @@ export function QuickActions() {
       )}
 
       <BookingModal open={bookingOpen} onClose={() => setBookingOpen(false)} />
-      <InvoiceCreatorModal open={invoiceOpen} onClose={() => setInvoiceOpen(false)} />
     </>
   );
 }
@@ -145,14 +124,6 @@ function PlusIcon() {
   return (
     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-    </svg>
-  );
-}
-
-function InvoiceIcon() {
-  return (
-    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
     </svg>
   );
 }
