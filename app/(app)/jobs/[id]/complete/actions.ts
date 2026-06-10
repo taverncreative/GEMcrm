@@ -37,6 +37,8 @@ function parseJsonArray(raw: string | null): string[] {
 export interface SaveServiceSheetResult extends ActionState {
   pdfUrl?: string | null;
   jobId?: string;
+  /** True when the combined path (finalize="true") completed the job. */
+  finalized?: boolean;
 }
 
 /**
@@ -47,6 +49,15 @@ export interface SaveServiceSheetResult extends ActionState {
  * If the PDF generation fails (e.g. storage bucket missing) we still
  * return success with a null pdfUrl — the user can still approve, the
  * approval action will retry the PDF.
+ *
+ * Combined path (offline-pwa pass A): when FormData carries
+ * finalize="true" (plus optional send_email / schedule_follow_up /
+ * follow_up_date), the same invocation also runs the approval sequence
+ * (finalizeServiceSheet + onJobCompleted + email + follow-up) via
+ * {@link approveServiceSheetAction}. One action means ONE outbox entry,
+ * so an offline completion replays save + side effects exactly once —
+ * no compaction trap, no ordering dependency between two queued
+ * entries. Without `finalize`, behaviour is unchanged.
  */
 export async function completeServiceSheetAction(
   _prev: SaveServiceSheetResult,
@@ -147,6 +158,44 @@ export async function completeServiceSheetAction(
     console.error("[completeServiceSheetAction] PDF gen failed:", pdfErr);
   }
 
+  // ─── Optional in-action finalize (offline-pwa pass A) ──────────────
+  let finalized = false;
+  if (str("finalize") === "true") {
+    if (existing.job_status === "completed") {
+      // Re-drain of an already-finalized completion (the outbox entry
+      // is crash recovery and may replay after the first run landed).
+      // Pass 0's guard protects job_status; skipping the sequence here
+      // keeps the side effects single-fire — finalizeServiceSheet would
+      // be harmless, but onJobCompleted's review task + report email,
+      // the send_email dispatch, and the follow-up booking would all
+      // repeat. `existing` was captured before saveServiceSheet, so
+      // "completed" can only mean a previous invocation finished the
+      // job — no legitimate flow re-submits a completed sheet (the UI
+      // renders them view-only).
+      finalized = true;
+    } else {
+      const approveRes = await approveServiceSheetAction(jobId, {
+        sendEmail: str("send_email") === "true",
+        scheduleFollowUp: str("schedule_follow_up") === "true",
+        followUpDate: str("follow_up_date") || null,
+      });
+      if (!approveRes.success) {
+        // Sheet data is saved; finalize failed. Returning failure keeps
+        // the outbox entry alive — the retry re-runs save (idempotent,
+        // Pass 0 guards status) and attempts finalize again.
+        return {
+          success: false,
+          errors: {},
+          message:
+            approveRes.message ?? "Failed to finalise service sheet",
+          pdfUrl,
+          jobId,
+        };
+      }
+      finalized = true;
+    }
+  }
+
   revalidatePath(ROUTES.jobDetail(jobId));
   revalidatePath(ROUTES.JOBS);
   revalidatePath(ROUTES.DASHBOARD);
@@ -157,6 +206,7 @@ export async function completeServiceSheetAction(
     message: pdfUrl ? null : "Service sheet saved. PDF generation failed — bucket missing?",
     pdfUrl,
     jobId,
+    finalized,
   };
 }
 
