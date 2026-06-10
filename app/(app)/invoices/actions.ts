@@ -20,8 +20,14 @@ import type { ActionState } from "@/types/actions";
 // ─── Step 1: Create as draft + generate PDF ──────────────────────────────
 
 const DraftPayloadSchema = z.object({
-  customer_id: z.string().min(1, "Customer is required"),
+  // Required only for the no-job path — with jobs the customer is
+  // derived server-side in createStandaloneInvoice (job → site →
+  // customer); the post-parse check below enforces the conditional.
+  customer_id: z.string().optional().default(""),
+  // DEPRECATED single-job field, kept for the job-detail caller.
   job_id: z.string().optional().default(""),
+  // Multi-job path (031): repeated `job_ids` form fields.
+  job_ids: z.array(z.string().min(1)).optional().default([]),
   subtotal: z.coerce.number().min(0.01, "Amount must be greater than zero"),
   vat_amount: z.coerce.number().min(0),
   total: z.coerce.number().min(0.01),
@@ -43,6 +49,10 @@ export async function createInvoiceDraftAction(
   const raw = {
     customer_id: (formData.get("customer_id") as string) ?? "",
     job_id: (formData.get("job_id") as string) ?? "",
+    job_ids: formData
+      .getAll("job_ids")
+      .map((v) => String(v))
+      .filter((v) => v.length > 0),
     subtotal: (formData.get("subtotal") as string) ?? "",
     vat_amount: (formData.get("vat_amount") as string) ?? "",
     total: (formData.get("total") as string) ?? "",
@@ -63,13 +73,28 @@ export async function createInvoiceDraftAction(
 
   const data = parsed.data;
 
+  // Fold the deprecated single-job field into the list form.
+  const jobIds =
+    data.job_ids.length > 0 ? data.job_ids : data.job_id ? [data.job_id] : [];
+
+  // No jobs → the customer must come from the form. With jobs, the data
+  // layer derives (and validates) the customer from the jobs themselves.
+  if (jobIds.length === 0 && !data.customer_id) {
+    return {
+      success: false,
+      errors: { customer_id: "Customer is required" },
+      message: null,
+    };
+  }
+
   let invoiceId: string;
+  let invoiceCustomerId: string;
   let pdfUrl: string | null = null;
 
   try {
     const inv = await createStandaloneInvoice({
-      customer_id: data.customer_id,
-      job_id: data.job_id || null,
+      customer_id: data.customer_id || undefined,
+      job_ids: jobIds,
       subtotal: data.subtotal,
       vat_amount: data.vat_amount,
       total: data.total,
@@ -79,6 +104,7 @@ export async function createInvoiceDraftAction(
       status: "draft",
     });
     invoiceId = inv.id;
+    invoiceCustomerId = inv.customer_id;
 
     try {
       const detail = await getInvoiceWithCustomer(invoiceId);
@@ -106,7 +132,9 @@ export async function createInvoiceDraftAction(
   revalidatePath(ROUTES.DASHBOARD);
   revalidatePath(ROUTES.JOBS);
   revalidatePath(ROUTES.CUSTOMERS);
-  revalidatePath(ROUTES.customerDetail(data.customer_id));
+  // Derived from the created invoice — with jobs supplied, the form's
+  // customer_id may be empty (or overridden by the server-side derivation).
+  revalidatePath(ROUTES.customerDetail(invoiceCustomerId));
   revalidatePath(ROUTES.REPORTS);
 
   return {

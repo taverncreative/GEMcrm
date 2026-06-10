@@ -55,6 +55,15 @@ export async function createInvoiceForJob(
     throw new Error(`Failed to create invoice: ${error.message}`);
   }
 
+  // Canonical job link (031). Best-effort like the flag update below —
+  // the legacy job_id column on the row above keeps old readers working.
+  const { error: linkErr } = await supabase
+    .from("invoice_jobs")
+    .insert({ invoice_id: data.id, job_id: jobId });
+  if (linkErr) {
+    console.error("[createInvoiceForJob] link failed:", linkErr.message);
+  }
+
   // Mark job as invoiced
   const { error: jobErr } = await supabase
     .from("jobs")
@@ -107,12 +116,26 @@ export async function markInvoicePaid(invoiceId: string): Promise<Invoice> {
     throw new Error(`Failed to mark invoice paid: ${error.message}`);
   }
 
-  // Mark linked job as paid
-  if (data.job_id) {
+  // Fan is_paid out over the invoice's jobs. invoice_jobs is the
+  // canonical link (031); the legacy invoices.job_id covers rows that
+  // pre-date it.
+  const { data: links, error: linkErr } = await supabase
+    .from("invoice_jobs")
+    .select("job_id")
+    .eq("invoice_id", invoiceId);
+  if (linkErr) {
+    console.error("[markInvoicePaid] link lookup failed:", linkErr.message);
+  }
+  const jobIds = (links ?? []).map((l) => l.job_id);
+  if (jobIds.length === 0 && data.job_id) {
+    jobIds.push(data.job_id);
+  }
+
+  if (jobIds.length > 0) {
     const { error: jobErr } = await supabase
       .from("jobs")
       .update({ is_paid: true })
-      .eq("id", data.job_id);
+      .in("id", jobIds);
 
     if (jobErr) {
       console.error("[markInvoicePaid] job update failed:", jobErr.message);
@@ -145,18 +168,29 @@ export async function getInvoiceByJobId(
 }
 
 /**
- * Standalone invoice creation — does not require a job.
+ * Standalone invoice creation — covers zero, one, or MANY jobs.
  *
  * Stores VAT broken out (subtotal / vat / total) so the PDF can render a
  * proper breakdown and reports can sum either net or gross figures.
  *
- * Invoice number: when invoicing a job, the invoice adopts the job's
- * reference_number (e.g. 00037-BSK). Standalone invoices fall back to
+ * Jobs: `job_ids` is the canonical input (031); `job_id` is the deprecated
+ * single-job path, still honoured for legacy callers. When jobs are
+ * supplied the invoice's customer is DERIVED server-side (job → site →
+ * customer) and a mixed-customer selection is rejected — the
+ * client-supplied `customer_id` is only used for the no-job path.
+ *
+ * Invoice number: exactly one job → the invoice adopts the job's
+ * reference_number (e.g. 00037-BSK). Zero or several jobs fall back to
  * INV-YYYY-NNNN.
  */
 export interface StandaloneInvoiceInput {
-  customer_id: string;
+  /** Required when no jobs are supplied; ignored (derived) otherwise. */
+  customer_id?: string;
+  /** DEPRECATED — single-job path kept for legacy callers. `job_ids`
+   *  wins when both are set. */
   job_id?: string | null;
+  /** Jobs this invoice covers. All must belong to the same customer. */
+  job_ids?: string[];
   subtotal: number;
   vat_amount: number;
   total: number;
@@ -166,26 +200,96 @@ export interface StandaloneInvoiceInput {
   status?: "draft" | "sent";
 }
 
+/** PostgREST returns an embedded 1:1 relation as an object or a
+ *  1-element array depending on version — normalise to the id. */
+function embeddedSiteCustomerId(row: {
+  site: { customer_id: string } | { customer_id: string }[] | null;
+}): string {
+  const site = Array.isArray(row.site) ? row.site[0] : row.site;
+  if (!site) throw new Error("Job has no site — cannot derive its customer");
+  return site.customer_id;
+}
+
 export async function createStandaloneInvoice(
   input: StandaloneInvoiceInput
 ): Promise<Invoice> {
   const supabase = await createClient();
 
-  // Reuse the job's reference as the invoice number when invoicing a job.
-  // If the job pre-dates migration 021 and is still missing a reference,
-  // generate one now via the same scheme used for new bookings, save it
-  // back to the job row, and use it. This guarantees we never fall through
-  // to a raw UUID stub like "77500CEF".
-  let invoiceNumber: string | null = null;
-  if (input.job_id) {
-    const { data: job } = await supabase
+  // Normalise the two job inputs into one de-duplicated list.
+  const jobIds = Array.from(
+    new Set(
+      input.job_ids && input.job_ids.length > 0
+        ? input.job_ids
+        : input.job_id
+          ? [input.job_id]
+          : []
+    )
+  );
+
+  interface JobRow {
+    id: string;
+    reference_number: string | null;
+    site_id: string;
+    is_invoiced: boolean;
+    site: { customer_id: string } | { customer_id: string }[] | null;
+  }
+  let jobRows: JobRow[] = [];
+  let customerId = input.customer_id || null;
+
+  if (jobIds.length > 0) {
+    const { data, error } = await supabase
       .from("jobs")
-      .select("reference_number, site_id")
-      .eq("id", input.job_id)
-      .maybeSingle();
-    if (job?.reference_number) {
+      .select(
+        "id, reference_number, site_id, is_invoiced, site:sites!inner(customer_id)"
+      )
+      .in("id", jobIds);
+    if (error) {
+      console.error(
+        "[createStandaloneInvoice] job lookup:",
+        error.code,
+        error.message
+      );
+      throw new Error(`Failed to look up selected jobs: ${error.message}`);
+    }
+    jobRows = (data ?? []) as unknown as JobRow[];
+    if (jobRows.length !== jobIds.length) {
+      throw new Error("One or more selected jobs could not be found.");
+    }
+
+    const alreadyInvoiced = jobRows.filter((j) => j.is_invoiced);
+    if (alreadyInvoiced.length > 0) {
+      const refs = alreadyInvoiced
+        .map((j) => j.reference_number ?? j.id.slice(0, 8).toUpperCase())
+        .join(", ");
+      throw new Error(`Already invoiced: ${refs}. Deselect and try again.`);
+    }
+
+    const customerIds = new Set(jobRows.map(embeddedSiteCustomerId));
+    if (customerIds.size > 1) {
+      throw new Error(
+        "Selected jobs belong to different customers — one invoice covers exactly one customer."
+      );
+    }
+    // Derived customer wins over anything the client sent.
+    customerId = [...customerIds][0];
+  }
+
+  if (!customerId) {
+    throw new Error("Customer is required");
+  }
+
+  // Reuse the job's reference as the invoice number when invoicing exactly
+  // one job. If the job pre-dates migration 021 and is still missing a
+  // reference, generate one now via the same scheme used for new bookings,
+  // save it back to the job row, and use it. This guarantees we never fall
+  // through to a raw UUID stub like "77500CEF". Multi-job invoices skip
+  // this — no single job owns the invoice — and use INV-YYYY-NNNN.
+  let invoiceNumber: string | null = null;
+  if (jobIds.length === 1) {
+    const job = jobRows[0];
+    if (job.reference_number) {
       invoiceNumber = job.reference_number;
-    } else if (job) {
+    } else {
       // Look up the customer via the site so generateJobReference can pick
       // the right format (domestic vs commercial with company suffix).
       const { data: siteRow } = await supabase
@@ -210,7 +314,7 @@ export async function createStandaloneInvoice(
         await supabase
           .from("jobs")
           .update({ reference_number: newRef })
-          .eq("id", input.job_id);
+          .eq("id", job.id);
         invoiceNumber = newRef;
       }
     }
@@ -226,8 +330,12 @@ export async function createStandaloneInvoice(
     .from("invoices")
     .insert({
       id: newId(),
-      customer_id: input.customer_id,
-      job_id: input.job_id ?? null,
+      customer_id: customerId,
+      // Legacy column (deprecated, 031): dual-written for single-job
+      // invoices so pre-031 readers (getInvoiceByJobId, the paid
+      // fallback) keep working. Multi-job invoices have no single
+      // owner — null; invoice_jobs is the canonical link either way.
+      job_id: jobIds.length === 1 ? jobIds[0] : null,
       amount: input.total,
       subtotal_amount: input.subtotal,
       vat_amount: input.vat_amount,
@@ -246,11 +354,39 @@ export async function createStandaloneInvoice(
     throw new Error(`Failed to create invoice: ${error.message}`);
   }
 
-  if (input.job_id) {
-    await supabase
+  if (jobIds.length > 0) {
+    const { error: linkErr } = await supabase
+      .from("invoice_jobs")
+      .insert(jobIds.map((job_id) => ({ invoice_id: data.id, job_id })));
+    if (linkErr) {
+      // No transactions over PostgREST — compensate by deleting the
+      // invoice (cascade clears any links that did land) so a failed
+      // create never leaves a half-linked invoice behind.
+      console.error(
+        "[createStandaloneInvoice] links:",
+        linkErr.code,
+        linkErr.message
+      );
+      await supabase.from("invoices").delete().eq("id", data.id);
+      throw new Error(
+        linkErr.code === "23505"
+          ? "A selected job is already on another invoice."
+          : `Failed to link jobs to invoice: ${linkErr.message}`
+      );
+    }
+
+    const { error: jobErr } = await supabase
       .from("jobs")
       .update({ is_invoiced: true })
-      .eq("id", input.job_id);
+      .in("id", jobIds);
+    if (jobErr) {
+      // Best-effort, as before: the invoice + links exist; is_invoiced
+      // is derived state and can be repaired.
+      console.error(
+        "[createStandaloneInvoice] job update failed:",
+        jobErr.message
+      );
+    }
   }
 
   return data;

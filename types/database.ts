@@ -119,6 +119,8 @@ export type InvoiceStatus = "draft" | "sent" | "paid";
 
 export interface Invoice {
   id: string;
+  /** DEPRECATED (migration 031): legacy single-job link, dual-written
+   *  only for single-job invoices. invoice_jobs is the canonical link. */
   job_id: string | null;
   customer_id: string;
   amount: number;
@@ -134,6 +136,15 @@ export interface Invoice {
   subtotal_amount: number | null;
   vat_amount: number | null;
   vat_rate: number;
+}
+
+/** Join row linking an invoice to a job it covers (migration 031).
+ *  N jobs per invoice; a job appears on at most one invoice
+ *  (unique job_id). Supersedes the deprecated `invoices.job_id`. */
+export interface InvoiceJob {
+  invoice_id: string;
+  job_id: string;
+  created_at: string;
 }
 
 export type AgreementStatus = "active" | "paused" | "cancelled";
