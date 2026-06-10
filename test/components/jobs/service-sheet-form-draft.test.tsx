@@ -195,10 +195,10 @@ describe("ServiceSheetForm — draft restoration", () => {
   });
 });
 
-// ─── (2) Draft cleared on approve ──────────────────────────────────
+// ─── (2) Draft cleared on completion ────────────────────────────────
 
-describe("ServiceSheetForm — draft cleared on approve", () => {
-  it("removes the draft row after a successful approve", async () => {
+describe("ServiceSheetForm — draft cleared on completion", () => {
+  it("removes the draft row after confirming Complete in the review step", async () => {
     // Pre-seed a draft so we can prove the clear happened.
     await saveDraft({
       job_id: "test-job-id",
@@ -224,15 +224,6 @@ describe("ServiceSheetForm — draft cleared on approve", () => {
     // Sanity-check it's there.
     expect(await loadDraft("test-job-id")).toBeDefined();
 
-    completeFn.mockResolvedValue({
-      success: true,
-      errors: {},
-      message: null,
-      jobId: "test-job-id",
-      pdfUrl: "https://example.com/test.pdf",
-    });
-    approveFn.mockResolvedValue({ success: true });
-
     const user = userEvent.setup();
     render(<ServiceSheetForm jobId="test-job-id" />);
 
@@ -247,22 +238,21 @@ describe("ServiceSheetForm — draft cleared on approve", () => {
     await user.click(screen.getByRole("button", { name: "5" }));
     // Tech signature
     await user.click(screen.getByTestId("sigpad-tech"));
-    // Submit
+    // Review (client-validates, opens the local review modal — the
+    // server action is never called in the optimistic flow).
     await user.click(
-      screen.getByRole("button", { name: /Complete Service Sheet/ })
+      screen.getByRole("button", { name: /Review & Complete/ })
     );
-
-    // Approval modal appears
     await waitFor(() => {
-      expect(screen.getByText(/Approve Service Sheet/i)).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: /Review & Complete/ })
+      ).toBeInTheDocument();
     });
 
-    // Click "Save" (without email) — triggers approveServiceSheetAction.
-    const saveBtn = screen.getByRole("button", { name: /^Save$/ });
-    await user.click(saveBtn);
+    // Confirm without email — local write + outbox enqueue, then the
+    // success effect clears the draft and navigates.
+    await user.click(screen.getByRole("button", { name: /^Complete$/ }));
 
-    // After the approve succeeds the form calls clearDraft. Wait for
-    // the IDB delete to flush before asserting.
     await waitFor(
       async () => {
         const draft = await loadDraft("test-job-id");
@@ -270,5 +260,6 @@ describe("ServiceSheetForm — draft cleared on approve", () => {
       },
       { timeout: 2000 }
     );
+    expect(completeFn).not.toHaveBeenCalled();
   });
 });

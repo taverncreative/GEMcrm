@@ -55,11 +55,20 @@ export async function onJobCreated(
 
 /**
  * Side effects triggered after a job is marked completed.
+ *
+ * `sendReportEmail` (default true) controls the automatic service-report
+ * email. The sheet-approval path passes false — there the operator's
+ * explicit "email customer" choice is the single owner of dispatch
+ * (sending here as well double-emailed the customer whenever a PDF
+ * existed). The status-dropdown path (updateJobStatusAction) keeps the
+ * default auto-send.
  */
 export async function onJobCompleted(
   job: Job,
-  context: JobContext
+  context: JobContext,
+  opts: { sendReportEmail?: boolean } = {}
 ): Promise<void> {
+  const { sendReportEmail = true } = opts;
   try {
     const exists = await hasPendingTaskOfType(job.id, "review_request");
     if (exists) return;
@@ -76,11 +85,14 @@ export async function onJobCompleted(
       site_id: context.siteId,
     });
 
-    // Send service report email if report exists
-    const customer = await getCustomerById(context.customerId);
-    const report = await getReportByJobId(job.id);
-    if (customer && report?.pdf_url) {
-      await sendServiceReport(customer, report.pdf_url);
+    // Send service report email if report exists (suppressed when the
+    // caller owns email dispatch — see doc comment).
+    if (sendReportEmail) {
+      const customer = await getCustomerById(context.customerId);
+      const report = await getReportByJobId(job.id);
+      if (customer && report?.pdf_url) {
+        await sendServiceReport(customer, report.pdf_url);
+      }
     }
 
     // Auto-create invoice if job has a value and isn't already invoiced

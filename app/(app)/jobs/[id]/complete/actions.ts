@@ -235,10 +235,19 @@ export async function approveServiceSheetAction(
 
     const site = await getSiteById(updated.site_id);
     if (site) {
-      await onJobCompleted(updated, {
-        customerId: site.customer_id,
-        siteId: updated.site_id,
-      });
+      // sendReportEmail: false — the operator's explicit sendEmail
+      // choice below is the single owner of report dispatch. Without
+      // this, onJobCompleted's auto-send double-emailed the customer
+      // whenever a PDF existed (and emailed once even with the option
+      // off). sendEmail: true ⇒ exactly one email; false ⇒ none.
+      await onJobCompleted(
+        updated,
+        {
+          customerId: site.customer_id,
+          siteId: updated.site_id,
+        },
+        { sendReportEmail: false }
+      );
     }
 
     if (options.sendEmail && site) {

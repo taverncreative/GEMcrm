@@ -1,17 +1,8 @@
 "use client";
 
-import {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useTransition,
-} from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import {
-  completeServiceSheetAction,
-  approveServiceSheetAction,
-} from "@/app/(app)/jobs/[id]/complete/actions";
+import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
 import { ROUTES } from "@/lib/constants/routes";
 import {
   RISK_LEVELS,
@@ -39,14 +30,14 @@ import {
 } from "@/lib/db/drafts";
 import { useLiveQuery } from "dexie-react-hooks";
 
-// Re-parse the form fields the action expects, mirroring the server-side
-// completeServiceSheetAction shape. Returning null skips the local write
-// (the wrapper still dispatches server-side when online); we use this
-// when required fields are missing — the server-side Zod will produce
-// the proper error response.
-function parseServiceSheetFormData(
-  formData: FormData
-): ServiceSheetInput | null {
+/** Sheet input + the combined-finalize flag (offline-pwa pass B). The
+ *  flag rides along so applyLocal knows whether this submission also
+ *  completes the job locally. */
+export interface CompleteSheetInput extends ServiceSheetInput {
+  finalize: boolean;
+}
+
+function buildRawSheetInput(formData: FormData) {
   function parseJsonArray(raw: string | null): string[] {
     if (!raw) return [];
     try {
@@ -59,7 +50,7 @@ function parseServiceSheetFormData(
       return [];
     }
   }
-  const raw = {
+  return {
     job_id: (formData.get("job_id") as string) ?? "",
     call_type: (formData.get("call_type") as string) ?? "",
     pest_species: parseJsonArray(formData.get("pest_species") as string | null),
@@ -78,8 +69,39 @@ function parseServiceSheetFormData(
     client_signature: (formData.get("client_signature") as string) ?? "",
     client_name: (formData.get("client_name") as string) ?? "",
   };
-  const result = ServiceSheetSchema.safeParse(raw);
-  return result.success ? result.data : null;
+}
+
+// Re-parse the form fields the action expects, mirroring the server-side
+// completeServiceSheetAction shape. Returning null skips the local write
+// (and the enqueue). The review step validates BEFORE submission, so a
+// null here is belt-and-braces, not a UX path. Exported for the
+// combined-entry tests.
+export function parseServiceSheetFormData(
+  formData: FormData
+): CompleteSheetInput | null {
+  const result = ServiceSheetSchema.safeParse(buildRawSheetInput(formData));
+  if (!result.success) return null;
+  return {
+    ...result.data,
+    finalize: (formData.get("finalize") as string) === "true",
+  };
+}
+
+/** Client-side validation for the optimistic submit: the server is
+ *  never called at submit (pass B), so its Zod bounce can no longer
+ *  supply field errors — run the SAME schema locally. Returns the
+ *  field→message map, or null when valid. */
+export function validateServiceSheetFormData(
+  formData: FormData
+): Record<string, string> | null {
+  const result = ServiceSheetSchema.safeParse(buildRawSheetInput(formData));
+  if (result.success) return null;
+  const errors: Record<string, string> = {};
+  for (const issue of result.error.issues) {
+    const key = issue.path[0];
+    if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
+  }
+  return errors;
 }
 
 // WrapMeta for completeServiceSheetAction — wraps the field operator's
@@ -89,7 +111,8 @@ function parseServiceSheetFormData(
 // replay via the legacy `data:image/...` path in writeServiceSheet);
 // photos go through `photos_pending` and arrive here as client-UUID
 // strings (the new path in writeServiceSheet computes URLs from those).
-const completeServiceSheetMeta: WrapMeta<ServiceSheetInput> = {
+// Exported for the combined-entry tests.
+export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
   actionName: "completeServiceSheetAction",
   entityType: "job",
   entityId: (input) => input.job_id,
@@ -121,10 +144,41 @@ const completeServiceSheetMeta: WrapMeta<ServiceSheetInput> = {
       photo_urls: localPhotoUrls,
       client_present: input.client_present,
       client_name: input.client_name || null,
-      job_status: "in_progress",
+      // Combined entry (finalize) completes the job locally — the
+      // optimistic mirror of the server's finalizeServiceSheet. The
+      // non-finalize shape keeps today's in_progress semantics.
+      job_status: input.finalize ? "completed" : "in_progress",
       updated_at: now,
     });
+    // The draft is obsolete the moment the completion is committed
+    // locally — and clearing it HERE matters: flipping job_status above
+    // makes the /complete page swap to the view-only sheet via
+    // useLiveQuery, unmounting the form before its success effect (the
+    // other clearDraft site) gets to run. Caught live in the pass-B
+    // preview run: outbox drained, draft still haunting. Best-effort —
+    // a draft-clear hiccup must not abort the completion itself.
+    if (input.finalize) {
+      try {
+        await clearDraft(input.job_id);
+      } catch (err) {
+        console.warn("[serviceSheet] applyLocal clearDraft failed:", err);
+      }
+    }
   },
+};
+
+/** Optimistic-path options (the 2c6d434 booking treatment): the local
+ *  write + ONE combined outbox entry ARE the operation; the server is
+ *  never called at submit. Module-level so the reference is stable. */
+const completeServiceSheetOpts = {
+  localSuccessState: (input: CompleteSheetInput) => ({
+    success: true,
+    errors: {},
+    message: null,
+    jobId: input.job_id,
+    pdfUrl: null,
+    finalized: input.finalize,
+  }),
 };
 
 const STEP_LABELS = ["Visit", "Service", "Risk", "Photos", "Sign off"] as const;
@@ -269,102 +323,91 @@ function ServiceSheetFormBody({
   const prevErrorsRef = useRef<Record<string, string>>({});
   const router = useRouter();
 
-  // Wrapped: local-first Dexie update + outbox enqueue + offline-tolerant.
-  // The field operator's most important offline action — service sheet
-  // submission while in the van without signal must work end-to-end.
+  // Wrapped: local-first Dexie update + outbox enqueue. With
+  // localSuccessState supplied (the 2c6d434 booking treatment) the
+  // OPTIMISTIC path runs: applyLocal + ONE combined outbox entry, state
+  // flips to success immediately, and the server is NEVER called at
+  // submit — the engine's drainOutbox owns all server sync (a
+  // gemcrm:request-sync event kicks it right away when online).
   const [state, formAction, isPending] = useLocalFirstAction(
     completeServiceSheetAction,
     { success: false, errors: {}, message: null },
-    completeServiceSheetMeta
+    completeServiceSheetMeta,
+    completeServiceSheetOpts
   );
 
-  // Approval modal state (driven by a successful save).
-  const [approvalOpen, setApprovalOpen] = useState(false);
-  const [approvalError, setApprovalError] = useState<string | null>(null);
-  const [isApproving, startApproveTransition] = useTransition();
+  // ── Review step (replaces the old server-PDF approval modal) ──
+  // Renders the sheet data the client already holds — uniform for
+  // online and offline (no connectivity branch). The email/follow-up
+  // choices live here; confirm enqueues the combined entry.
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  const formRef = useRef<HTMLFormElement | null>(null);
 
+  // Server-fallback errors can still arrive (edge: parseInput returned
+  // null and the legacy online path ran) — merge both sources for
+  // display; client validation is the primary one now.
+  const errors = { ...state.errors, ...clientErrors };
+
+  // Local success → the completion is committed (Dexie + outbox).
+  // Clear the draft and leave; sync happens in the background.
   useEffect(() => {
-    if (state.success) {
-      setApprovalOpen(true);
-    }
-    // Depend on the full state OBJECT, not state.success. useActionState
-    // returns a fresh state reference each dispatch — depending on the
-    // boolean meant the effect was a no-op for a second successful
-    // submit (true → true). Result: after Edit + tweak + resubmit the
-    // modal never reopened, and the button looked dead.
-  }, [state]);
-
-  function handleApprove(opts: { sendEmail: boolean }) {
-    if (!state.jobId) return;
-    setApprovalError(null);
-    startApproveTransition(async () => {
-      const res = await approveServiceSheetAction(state.jobId!, {
-        sendEmail: opts.sendEmail,
-        scheduleFollowUp,
-        followUpDate: scheduleFollowUp ? followUpDate : null,
-      });
-      if (res.success) {
-        // Mirror the server-side completion to Dexie immediately so
-        // surface 1's "Fill Service Sheet" entry point hides via
-        // useLiveQuery the moment the operator lands there — was
-        // waiting up to 30s for the next pull tick to bring
-        // job_status="completed" down. The server already has the
-        // change (we just confirmed res.success); no outbox entry
-        // needed.
-        try {
-          await db.jobs.update(state.jobId!, {
-            job_status: "completed",
-            updated_at: new Date().toISOString(),
-          });
-        } catch (err) {
-          // Non-fatal — the pull will catch up at worst case 30s
-          // later. Log and continue with the navigation.
-          console.warn(
-            "[approveServiceSheet] local mirror failed:",
-            err
-          );
-        }
+    if (state.success && state.jobId) {
+      const jobId = state.jobId;
+      void (async () => {
         // Drop the draft now that the sheet is finalised. If this
         // throws (IDB closed, table missing on schema mismatch), the
-        // draft would re-seed on next mount and the operator would
-        // see their old in-progress values "haunting" the completed
-        // sheet — log but don't block navigation; a stale draft
-        // beats blocking the happy path.
+        // draft would re-seed on next mount and the operator would see
+        // their old in-progress values "haunting" the completed sheet —
+        // log but don't block navigation; a stale draft beats blocking
+        // the happy path.
         try {
-          await clearDraft(state.jobId!);
+          await clearDraft(jobId);
         } catch (err) {
-          console.warn("[approveServiceSheet] clearDraft failed:", err);
+          console.warn("[serviceSheet] clearDraft failed:", err);
         }
-        router.push(ROUTES.jobDetail(state.jobId!));
-      } else {
-        setApprovalError(res.message ?? "Failed to finalise");
-      }
-    });
+        router.push(ROUTES.jobDetail(jobId));
+      })();
+    }
+    // Depend on the full state OBJECT, not state.success — the wrapper
+    // returns a fresh state reference per dispatch.
+  }, [state, router]);
+
+  function handleReview() {
+    if (!formRef.current) return;
+    const fd = new FormData(formRef.current);
+    const validationErrors = validateServiceSheetFormData(fd);
+    if (validationErrors) {
+      setClientErrors(validationErrors);
+      const errorStep = getErrorStep(validationErrors);
+      if (errorStep) setStep(errorStep);
+      return;
+    }
+    setClientErrors({});
+    setReviewOpen(true);
   }
 
-  function handleCancelApproval() {
-    // "Cancel" leaves the data saved (status stays in_progress). User can
-    // come back to the job detail and complete later.
-    setApprovalOpen(false);
-    if (state.jobId) router.push(ROUTES.jobDetail(state.jobId));
-  }
-
-  function handleEditApproval() {
-    // Re-open editor on the same page. Data is already saved as
-    // in_progress; resubmitting overwrites.
-    setApprovalOpen(false);
+  function handleConfirmComplete(opts: { sendEmail: boolean }) {
+    if (!formRef.current) return;
+    const fd = new FormData(formRef.current);
+    fd.set("finalize", "true");
+    fd.set("send_email", opts.sendEmail ? "true" : "");
+    // schedule_follow_up / follow_up_date ride along as hidden inputs.
+    void formAction(fd);
+    // The modal stays open with a pending label; the success effect
+    // above navigates away the moment the local write + enqueue land.
   }
 
   useEffect(() => {
     const prev = prevErrorsRef.current;
-    const curr = state.errors;
+    const curr = errors;
     const changed = Object.keys(curr).some((k) => curr[k] !== prev[k]);
     if (changed) {
       const errorStep = getErrorStep(curr);
       if (errorStep) setStep(errorStep);
       prevErrorsRef.current = curr;
     }
-  }, [state.errors]);
+  });
 
   // ── Draft auto-save ──
   //
@@ -479,10 +522,22 @@ function ServiceSheetFormBody({
         with `hidden` rather than unmounted). The browser's HTML5 validator
         scans all of them on submit; when a hidden one is empty it tries
         to focus an invisible input and most browsers silently swallow the
-        click. Server-side Zod is the source of truth — the useEffect on
-        state.errors below navigates to the failing step and the field's
-        inline error renders, so the operator always sees what's missing. */}
-    <form action={formAction} noValidate>
+        click. Client-side Zod (validateServiceSheetFormData) is the source
+        of truth now — the errors effect navigates to the failing step and
+        the field's inline error renders.
+
+        No `action` prop: submission is two-phase (review → confirm) and
+        the confirm handler calls formAction with a FormData it builds
+        from this form + the finalize fields. onSubmit traps Enter-key
+        submits and routes them through the same review gate. */}
+    <form
+      ref={formRef}
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleReview();
+      }}
+      noValidate
+    >
       <input type="hidden" name="job_id" value={jobId} />
       <input type="hidden" name="call_type" value={callType} />
       <input type="hidden" name="pest_species" value={JSON.stringify(selectedPests)} />
@@ -617,8 +672,8 @@ function ServiceSheetFormBody({
               </label>
             ))}
           </div>
-          {state.errors.call_type && (
-            <p className="mt-1 text-sm text-red-500">{state.errors.call_type}</p>
+          {errors.call_type && (
+            <p className="mt-1 text-sm text-red-500">{errors.call_type}</p>
           )}
         </div>
 
@@ -655,8 +710,8 @@ function ServiceSheetFormBody({
               </button>
             ))}
           </div>
-          {state.errors.pest_species && (
-            <p className="mt-1 text-sm text-red-500">{state.errors.pest_species}</p>
+          {errors.pest_species && (
+            <p className="mt-1 text-sm text-red-500">{errors.pest_species}</p>
           )}
         </div>
 
@@ -674,7 +729,7 @@ function ServiceSheetFormBody({
             placeholder="What did you find on site?"
             className={inputClass}
           />
-          {state.errors.findings && <p className="mt-1 text-sm text-red-500">{state.errors.findings}</p>}
+          {errors.findings && <p className="mt-1 text-sm text-red-500">{errors.findings}</p>}
         </div>
 
         <div>
@@ -691,7 +746,7 @@ function ServiceSheetFormBody({
             placeholder="Recommendations for the customer"
             className={inputClass}
           />
-          {state.errors.recommendations && <p className="mt-1 text-sm text-red-500">{state.errors.recommendations}</p>}
+          {errors.recommendations && <p className="mt-1 text-sm text-red-500">{errors.recommendations}</p>}
         </div>
 
         <div>
@@ -715,8 +770,8 @@ function ServiceSheetFormBody({
               </button>
             ))}
           </div>
-          {state.errors.method_used && (
-            <p className="mt-1 text-sm text-red-500">{state.errors.method_used}</p>
+          {errors.method_used && (
+            <p className="mt-1 text-sm text-red-500">{errors.method_used}</p>
           )}
         </div>
 
@@ -734,8 +789,8 @@ function ServiceSheetFormBody({
             placeholder="Products and quantities used"
             className={inputClass}
           />
-          {state.errors.pesticides_used && (
-            <p className="mt-1 text-sm text-red-500">{state.errors.pesticides_used}</p>
+          {errors.pesticides_used && (
+            <p className="mt-1 text-sm text-red-500">{errors.pesticides_used}</p>
           )}
         </div>
 
@@ -795,8 +850,8 @@ function ServiceSheetFormBody({
               </label>
             ))}
           </div>
-          {state.errors.risk_level && (
-            <p className="mt-1 text-sm text-red-500">{state.errors.risk_level}</p>
+          {errors.risk_level && (
+            <p className="mt-1 text-sm text-red-500">{errors.risk_level}</p>
           )}
         </div>
 
@@ -814,8 +869,8 @@ function ServiceSheetFormBody({
             className={inputClass}
             placeholder="Describe the risks identified and any mitigations"
           />
-          {state.errors.risk_comments && (
-            <p className="mt-1 text-sm text-red-500">{state.errors.risk_comments}</p>
+          {errors.risk_comments && (
+            <p className="mt-1 text-sm text-red-500">{errors.risk_comments}</p>
           )}
         </div>
 
@@ -856,8 +911,8 @@ function ServiceSheetFormBody({
             onClear={() => setTechSig("")}
           />
         </div>
-        {state.errors.technician_signature && (
-          <p className="-mt-4 text-sm text-red-500">{state.errors.technician_signature}</p>
+        {errors.technician_signature && (
+          <p className="-mt-4 text-sm text-red-500">{errors.technician_signature}</p>
         )}
 
         <div>
@@ -944,38 +999,45 @@ function ServiceSheetFormBody({
         <div className="flex justify-between pt-4">
           <button type="button" onClick={() => setStep(4)} className="rounded-xl px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">Back</button>
           <button
-            type="submit"
+            type="button"
+            onClick={handleReview}
             disabled={isPending}
             className="rounded-xl bg-brand px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
           >
-            {isPending ? "Saving..." : "Complete Service Sheet"}
+            Review &amp; Complete
           </button>
         </div>
       </div>
     </form>
 
-    {/* ── Approval modal ── */}
-    {approvalOpen && (
+    {/* ── Review & complete modal (local — no server PDF preview) ──
+        Renders the data the form already holds, identically online and
+        offline. Confirm enqueues ONE combined entry (sheet + finalize +
+        email/follow-up choices); the report PDF generates when the
+        entry syncs. */}
+    {reviewOpen && (
       <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto py-8">
         <div
           className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-          onClick={handleCancelApproval}
+          onClick={() => !isPending && setReviewOpen(false)}
           aria-hidden="true"
         />
         <div className="relative mx-4 w-full max-w-3xl rounded-2xl bg-white shadow-xl">
           <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
             <div>
               <h2 className="text-base font-semibold text-gray-900">
-                Approve Service Sheet
+                Review &amp; Complete
               </h2>
               <p className="text-xs text-gray-500">
-                Review the generated PDF then save, save &amp; email, or go back to edit.
+                Check the sheet, then complete the job — with or without
+                emailing the customer.
               </p>
             </div>
             <button
               type="button"
-              onClick={handleCancelApproval}
-              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              onClick={() => setReviewOpen(false)}
+              disabled={isPending}
+              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
               aria-label="Close"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -984,69 +1046,80 @@ function ServiceSheetFormBody({
             </button>
           </div>
 
-          <div className="space-y-4 p-5">
-            {state.pdfUrl ? (
-              <iframe
-                src={state.pdfUrl}
-                title="Service sheet preview"
-                className="h-96 w-full rounded-lg border border-gray-200 bg-gray-50"
-              />
-            ) : (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                <p className="font-medium">PDF couldn&apos;t be generated.</p>
-                <p className="mt-1 text-xs">
-                  Most likely the <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px]">reports</code> storage
-                  bucket isn&apos;t set up. Run <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px]">supabase/bucket-only.sql</code> in
-                  the Supabase SQL editor, then re-open this job and re-submit. Your data is already saved.
-                </p>
-              </div>
-            )}
-            {state.message && !state.success === false && (
-              <p className="text-xs text-gray-500">{state.message}</p>
-            )}
-            {approvalError && (
-              <p className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-600">
-                {approvalError}
-              </p>
-            )}
+          <div className="max-h-[55vh] space-y-3 overflow-y-auto p-5">
+            <dl className="space-y-3 text-sm">
+              <ReviewRow label="Call type">
+                {CALL_TYPE_LABELS[callType as keyof typeof CALL_TYPE_LABELS] ??
+                  callType}
+              </ReviewRow>
+              <ReviewRow label="Pests">
+                {selectedPests.length > 0 ? selectedPests.join(", ") : "—"}
+              </ReviewRow>
+              <ReviewRow label="Findings">{findings}</ReviewRow>
+              <ReviewRow label="Recommendations">{recommendations}</ReviewRow>
+              <ReviewRow label="Methods">
+                {selectedMethods.join(", ")}
+              </ReviewRow>
+              <ReviewRow label="Pesticides">{pesticidesUsed}</ReviewRow>
+              <ReviewRow label="Risk">
+                {`${RISK_LEVEL_LABELS[riskLevel as keyof typeof RISK_LEVEL_LABELS] ?? riskLevel} — ${riskComments}`}
+              </ReviewRow>
+              {reportNotes && (
+                <ReviewRow label="Report notes">{reportNotes}</ReviewRow>
+              )}
+              <ReviewRow label="Photos">
+                {photoDataUrls.length > 0
+                  ? `${photoDataUrls.length} attached`
+                  : "None"}
+              </ReviewRow>
+              <ReviewRow label="Signatures">
+                {`Technician ✓${
+                  clientPresent
+                    ? clientSig
+                      ? ` · ${clientName || "Client"} ✓`
+                      : ` · ${clientName || "Client"} — not signed`
+                    : ""
+                }`}
+              </ReviewRow>
+              {scheduleFollowUp && (
+                <ReviewRow label="Follow-up">
+                  {`Booking on ${followUpDate}`}
+                </ReviewRow>
+              )}
+            </dl>
+            <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500">
+              The report PDF is generated when the sheet syncs — completing
+              works with no signal, and everything sends itself once
+              you&apos;re back online.
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-5 py-4">
+            <button
+              type="button"
+              onClick={() => setReviewOpen(false)}
+              disabled={isPending}
+              className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Back to edit
+            </button>
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={handleCancelApproval}
-                disabled={isApproving}
-                className="rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleEditApproval}
-                disabled={isApproving}
+                onClick={() => handleConfirmComplete({ sendEmail: false })}
+                disabled={isPending}
                 className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               >
-                Edit
-              </button>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => handleApprove({ sendEmail: false })}
-                disabled={isApproving}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {isApproving ? "Saving…" : "Save"}
+                {isPending ? "Completing…" : "Complete"}
               </button>
               <button
                 type="button"
-                onClick={() => handleApprove({ sendEmail: true })}
-                disabled={isApproving || !customerEmail}
+                onClick={() => handleConfirmComplete({ sendEmail: true })}
+                disabled={isPending || !customerEmail}
                 title={!customerEmail ? "Customer has no email on file" : ""}
                 className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
               >
-                {isApproving ? "Sending…" : "Save & Email"}
+                {isPending ? "Completing…" : "Complete & Email"}
               </button>
             </div>
           </div>
@@ -1054,5 +1127,24 @@ function ServiceSheetFormBody({
       </div>
     )}
     </>
+  );
+}
+
+function ReviewRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-3 border-b border-gray-50 pb-2 last:border-b-0">
+      <dt className="w-28 shrink-0 text-xs font-medium uppercase tracking-wide text-gray-400">
+        {label}
+      </dt>
+      <dd className="min-w-0 flex-1 whitespace-pre-wrap text-gray-800">
+        {children}
+      </dd>
+    </div>
   );
 }
