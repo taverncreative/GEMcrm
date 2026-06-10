@@ -169,6 +169,29 @@ export async function runSync(reason: SyncReason): Promise<SyncRunResult> {
     };
   }
 
+  // A pass where EVERY pull entity died with a network error never
+  // reached the server at all — the offline-under-the-service-worker
+  // shape (navigator.onLine lies `true`, every fetch rejects). Before
+  // this guard the fall-through hit syncFinished(), stamping a fresh
+  // lastSyncAt and flipping serverReachable back to true on a fully
+  // dead pass — which made the sync pills claim "Synced" while the
+  // completion entry was still queued (operator-caught, pass B). One
+  // entity succeeding means the server WAS reachable; only the
+  // all-network case is a failed pass.
+  const allPullsNetworkFailed =
+    pull.entities.length > 0 &&
+    pull.entities.every((e) => e.error?.kind === "network");
+  if (allPullsNetworkFailed) {
+    syncFailed("Server unreachable", "other");
+    return {
+      ran: true,
+      reason,
+      push,
+      pull,
+      duration_ms: Date.now() - startMs,
+    };
+  }
+
   // 3. Photos — fire-and-forget. Photos may take a while on slow
   //    connections; we don't block the engine on them. They run in
   //    parallel with the next user action. Static import of the

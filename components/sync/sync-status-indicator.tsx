@@ -3,14 +3,23 @@
 /**
  * Header chip showing the current sync state at a glance.
  *
- * Five visual states, in priority order (first match wins):
+ * Truthfulness rule (operator-caught in the pass-B offline run): never
+ * claim Synced while outbox entries are pending. State derives from
+ * the PENDING COUNT; run-completion data (lastSyncAt) is only trusted
+ * at zero pending. Until the counts resolve, the chip renders nothing
+ * (a freshly-mounted chip used to default the count to 0 and flash
+ * "Synced" with work still queued).
  *
- *   1. authExpired  → amber dot, "Session expired"      (panel: re-login link)
- *   2. !online      → grey dot,  "Offline · N pending"  (panel: pending list)
- *   3. stuck > 0    → red dot,   "N stuck — tap"        (panel: conflicts link)
- *   4. syncing      → blue spin, "Syncing…"             (panel: in-flight info)
- *   5. pending > 0  → yellow,    "N pending"            (panel: pending list)
- *   6. else         → green dot, "Synced X min ago"     (panel: idle info)
+ * Visual states, in priority order (first match wins):
+ *
+ *   1. counts unresolved → (nothing)
+ *   2. authExpired  → amber dot, "Session expired"        (panel: re-login link)
+ *   3. !online      → amber/grey,"Waiting to sync · N"
+ *                                / "Offline"              (panel: pending list)
+ *   4. stuck > 0    → red dot,   "N stuck — tap"          (panel: conflicts link)
+ *   5. pending OR
+ *      syncing      → blue spin, "Syncing…"               (panel: pending list)
+ *   6. else         → green dot, "Synced X min ago"       (panel: idle info)
  *
  * Tap the chip → bottom-anchored popover with details. Popover dismisses
  * on outside click, Escape, or after a Sync-now action completes.
@@ -50,15 +59,14 @@ function relative(iso: string | null): string {
 export function SyncStatusIndicator() {
   const status = useSyncStatus();
   const online = useIsOnline();
-  const pendingCount = useLiveQuery(
-    () => db.outbox.filter((e) => !e.stuck).count(),
-    [],
-    0
+  // No default values: `undefined` means "not yet known" and the chip
+  // renders nothing. Defaulting to 0 let a freshly-mounted chip claim
+  // "Synced" before the IDB count resolved.
+  const pendingCount = useLiveQuery(() =>
+    db.outbox.filter((e) => !e.stuck).count()
   );
-  const stuckCount = useLiveQuery(
-    () => db.outbox.filter((e) => e.stuck).count(),
-    [],
-    0
+  const stuckCount = useLiveQuery(() =>
+    db.outbox.filter((e) => e.stuck).count()
   );
   const photosPending = useLiveQuery(
     () => db.photos_pending.filter((p) => !p.uploaded).count(),
@@ -96,6 +104,10 @@ export function SyncStatusIndicator() {
     };
   }, [open]);
 
+  // After every hook has run: until the counts resolve, render nothing
+  // rather than a possibly-false state.
+  if (pendingCount === undefined || stuckCount === undefined) return null;
+
   const visual: Visual = (() => {
     if (status.authExpired) {
       return { kind: "auth", dotClass: "bg-amber-400", label: "Session expired" };
@@ -103,10 +115,10 @@ export function SyncStatusIndicator() {
     if (!online) {
       return {
         kind: "offline",
-        dotClass: "bg-gray-400",
+        dotClass: pendingCount > 0 ? "bg-amber-400" : "bg-gray-400",
         label:
           pendingCount > 0
-            ? `Offline · ${pendingCount} pending`
+            ? `Waiting to sync · ${pendingCount}`
             : "Offline",
       };
     }
@@ -117,15 +129,11 @@ export function SyncStatusIndicator() {
         label: `${stuckCount} stuck — tap`,
       };
     }
-    if (status.syncing) {
+    // Anything still queued means we are NOT synced — mid-run or
+    // between backoff attempts alike. The live count flips this the
+    // moment the drain lands.
+    if (pendingCount > 0 || status.syncing) {
       return { kind: "syncing", dotClass: "bg-blue-400 animate-pulse", label: "Syncing…" };
-    }
-    if (pendingCount > 0) {
-      return {
-        kind: "pending",
-        dotClass: "bg-yellow-400",
-        label: `${pendingCount} pending`,
-      };
     }
     if (status.lastSyncAt) {
       return {

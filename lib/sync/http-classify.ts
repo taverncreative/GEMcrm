@@ -54,6 +54,11 @@ export function classifyError(
 
   if (
     lower.includes("failed to fetch") ||
+    // Node/undici (and Next's server-action transport) throws the bare
+    // "fetch failed" — is-network-error.ts always covered it; this list
+    // missed it, so a dead-network pull classified as server-error and
+    // slipped past the engine's all-network failed-pass guard.
+    lower.includes("fetch failed") ||
     lower.includes("networkerror") ||
     lower.includes("network request failed") ||
     lower.includes("err_internet_disconnected") ||

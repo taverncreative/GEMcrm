@@ -12,13 +12,21 @@
  *   - This pill sits *near the button you're about to tap*. Same data
  *     source, presented inline for proximity.
  *
+ * Truthfulness rule (operator-caught in the pass-B offline run): the
+ * pill must NEVER claim Synced while outbox entries are pending. State
+ * derives from the PENDING COUNT first; run-completion data
+ * (lastSyncAt) is only trusted at zero pending. The count's first
+ * paint is `undefined` (not 0) — a freshly-mounted pill renders
+ * nothing rather than flashing "Synced" before the IDB count resolves
+ * (the completion flow remounts this pill at exactly that moment).
+ *
  * Variants (priority order):
- *   - offline + pending  →  amber  "Offline · N pending"
+ *   - count unresolved   →  null   (no pill until we know)
+ *   - offline + pending  →  amber  "Waiting to sync · N"
  *   - offline + no queue →  grey   "Offline"
- *   - syncing            →  blue   "Syncing…"
- *   - pending only       →  amber  "N pending"
+ *   - pending OR syncing →  blue   "Syncing…"
  *   - synced (lastSyncAt)→  green  "Synced"
- *   - first paint        →  null   (no pill until we know something)
+ *   - first paint        →  null
  */
 
 import { useLiveQuery } from "dexie-react-hooks";
@@ -36,17 +44,19 @@ interface Variant {
 export function SyncStatePill() {
   const status = useSyncStatus();
   const online = useIsOnline();
-  const pending = useLiveQuery(
-    () => db.outbox.filter((e) => !e.stuck).count(),
-    [],
-    0
+  // No default value: `undefined` means "count not yet known" and
+  // renders nothing. A default of 0 let a freshly-mounted pill claim
+  // "Synced" for the tick before the IDB query resolved.
+  const pending = useLiveQuery(() =>
+    db.outbox.filter((e) => !e.stuck).count()
   );
 
   const variant: Variant | null = (() => {
+    if (pending === undefined) return null;
     if (!online) {
       if (pending > 0) {
         return {
-          label: `Offline · ${pending} pending`,
+          label: `Waiting to sync · ${pending}`,
           classes: "bg-amber-50 text-amber-800 border-amber-200",
           dot: "bg-amber-500",
         };
@@ -57,19 +67,15 @@ export function SyncStatePill() {
         dot: "bg-gray-400",
       };
     }
-    if (status.syncing) {
+    // Anything still queued means we are NOT synced — whether the
+    // engine is mid-run or between backoff attempts. One calm state
+    // covers both; the live count flips it the moment the drain lands.
+    if (pending > 0 || status.syncing) {
       return {
         label: "Syncing…",
         classes: "bg-blue-50 text-blue-700 border-blue-200",
         dot: "bg-blue-500",
         pulse: true,
-      };
-    }
-    if (pending > 0) {
-      return {
-        label: `${pending} pending`,
-        classes: "bg-amber-50 text-amber-800 border-amber-200",
-        dot: "bg-amber-500",
       };
     }
     if (status.lastSyncAt) {
