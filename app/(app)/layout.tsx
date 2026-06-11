@@ -3,6 +3,14 @@ import { AppShell } from "@/components/app-shell";
 
 export const dynamic = "force-dynamic";
 
+// PDF generation (service report / invoice / agreement) runs headless
+// Chromium inside server actions — cold extract + launch + render can
+// exceed the platform's default function timeout. Set at the layout so
+// it covers every (app) page: the PDF actions execute under whichever
+// page hosts the form, and outbox replays run them from any route the
+// app happens to be on when sync drains.
+export const maxDuration = 30;
+
 export default async function AppLayout({
   children,
 }: {
