@@ -65,6 +65,10 @@ export async function getCustomerById(id: string): Promise<Customer | null> {
  * is responsible for deciding which rows are "filled enough" to insert.
  */
 export interface SiteInputLoose {
+  /** Client-generated id from the offline-first path — applyLocal wrote
+   *  this UUID locally; the replay passes it so server == local. Plain
+   *  online callers omit it. */
+  id?: string;
   address_line_1?: string;
   address_line_2?: string;
   town?: string;
@@ -85,7 +89,7 @@ function hasUsableSiteAddress(input: SiteInputLoose): boolean {
 /** Row shape for inserting a site — used after we've decided to insert. */
 function siteRow(customerId: string, input: SiteInputLoose) {
   return {
-    id: newId(),
+    id: input.id ?? newId(),
     customer_id: customerId,
     address_line_1: emptyToNull(input.address_line_1),
     address_line_2: emptyToNull(input.address_line_2),
@@ -98,7 +102,13 @@ function siteRow(customerId: string, input: SiteInputLoose) {
 export async function createCustomer(
   input: CustomerInput,
   additionalSites: SiteInputLoose[] = [],
-  opts?: { id?: string }
+  opts?: {
+    id?: string;
+    /** Client id for the site auto-created from the customer's own
+     *  address block (the primary candidate below). Same offline-first
+     *  contract as `id`. `additionalSites` entries carry their own. */
+    primarySiteId?: string;
+  }
 ): Promise<Customer> {
   const supabase = await createClient();
   // `opts.id` from the offline-first path (applyLocal wrote this client
@@ -150,6 +160,7 @@ export async function createCustomer(
   // the operator can add sites later from the customer page).
   const candidates: SiteInputLoose[] = [
     {
+      id: opts?.primarySiteId,
       address_line_1: input.address_line_1,
       address_line_2: input.address_line_2,
       town: input.town,
@@ -160,9 +171,12 @@ export async function createCustomer(
   ].filter(hasUsableSiteAddress);
 
   if (candidates.length > 0) {
+    // upsert for the same reason as the customer above: a lost-ack
+    // replay re-runs with the SAME client site ids — idempotent
+    // overwrite instead of a duplicate-key error.
     const { error: sitesError } = await supabase
       .from("sites")
-      .insert(candidates.map((s) => siteRow(data.id, s)));
+      .upsert(candidates.map((s) => siteRow(data.id, s)));
     if (sitesError) {
       console.error(
         "[createCustomer] auto-site insert failed (customer was created):",

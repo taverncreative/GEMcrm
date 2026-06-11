@@ -34,6 +34,7 @@ import { updateAgreementStatusAction } from "@/app/(app)/agreements/[id]/actions
 import {
   setReviewReceivedAction,
   setCustomerTypeAction,
+  createCustomerAction,
 } from "@/app/(app)/customers/actions";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
 import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
@@ -98,7 +99,15 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       ),
   },
 
-  // ─── customer (direct-call) ──────────────────────────────────
+  // ─── customer ────────────────────────────────────────────────
+  // Multi-entity create (customer + auto-created sites). The enqueued
+  // args carry the client-generated ids (id / primary_site_id /
+  // additional_sites[].id), so the replay upserts the SAME rows the
+  // optimistic applyLocal wrote — see add-customer-form's meta.
+  createCustomerAction: {
+    kind: "form",
+    invoke: (fd) => createCustomerAction(INITIAL_FORM_STATE, fd),
+  },
   setReviewReceivedAction: {
     kind: "direct",
     invoke: (...args) =>

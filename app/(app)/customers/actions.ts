@@ -1,6 +1,6 @@
 "use server";
 
-import { redirect } from "next/navigation";
+
 import { revalidatePath } from "next/cache";
 import { CustomerSchema } from "@/lib/validation/customer";
 import {
@@ -88,6 +88,7 @@ export async function createCustomerAction(
   // the same five address fields; we keep only the ones with enough
   // address to be a useful site (line 1 + town + postcode at minimum).
   const additionalSites: Array<{
+    id?: string;
     address_line_1: string;
     address_line_2: string;
     town: string;
@@ -104,6 +105,9 @@ export async function createCustomerAction(
           if (entry && typeof entry === "object") {
             const e = entry as Record<string, unknown>;
             const site = {
+              // Client site id from the offline-first path (replay must
+              // create the SAME row applyLocal wrote). Absent online-legacy.
+              ...(typeof e.id === "string" && e.id ? { id: e.id } : {}),
               address_line_1: typeof e.address_line_1 === "string" ? e.address_line_1 : "",
               address_line_2: typeof e.address_line_2 === "string" ? e.address_line_2 : "",
               town: typeof e.town === "string" ? e.town : "",
@@ -125,7 +129,15 @@ export async function createCustomerAction(
   }
 
   try {
-    await createCustomer(result.data, additionalSites);
+    // Client-generated ids from the offline-first wrapper (empty for
+    // any legacy direct submit) — replay creates the SAME rows that
+    // applyLocal wrote to Dexie.
+    const clientId = str("id");
+    const primarySiteId = str("primary_site_id");
+    await createCustomer(result.data, additionalSites, {
+      id: clientId || undefined,
+      primarySiteId: primarySiteId || undefined,
+    });
   } catch (err) {
     console.error("[createCustomerAction] createCustomer threw:", err);
     return {
@@ -135,10 +147,13 @@ export async function createCustomerAction(
     };
   }
 
-  // Invalidate the customers list cache so the new row appears
-  // immediately after the redirect lands on /customers.
+  // Invalidate the RSC caches that show customers. NO redirect here any
+  // more: a thrown NEXT_REDIRECT inside an outbox replay classifies as a
+  // retryable error and would wedge the queue — and the optimistic form
+  // navigates client-side on its localSuccessState now.
   revalidatePath(ROUTES.CUSTOMERS);
-  redirect(ROUTES.CUSTOMERS);
+  revalidatePath(ROUTES.DASHBOARD);
+  return { success: true, errors: {}, message: null };
 }
 
 // ─── Side-panel data fetch ───────────────────────────────────────────────
