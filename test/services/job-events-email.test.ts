@@ -64,7 +64,21 @@ vi.mock("@/lib/data/jobs", () => ({
     pest_species: [],
   })),
   saveServiceSheet: vi.fn(),
-  getJobById: vi.fn(),
+  // Filled sheet — these tests pin EMAIL behaviour; the L0 invariant
+  // (approve rejects unfilled sheets) is pinned separately in
+  // approve-sheet-guard.test.ts, so here the guard must pass.
+  getJobById: vi.fn(async (id: string) => ({
+    id,
+    site_id: "site1",
+    job_status: "in_progress",
+    findings: "f",
+    recommendations: "r",
+    pesticides_used: "None",
+    risk_level: "low",
+    risk_comments: "none",
+    pest_species: ["Rat"],
+    method_used: ["Inspection"],
+  })),
   createBooking: vi.fn(async () => ({})),
 }));
 vi.mock("@/lib/supabase/server", () => ({

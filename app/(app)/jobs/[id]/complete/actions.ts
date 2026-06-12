@@ -1,7 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { ServiceSheetSchema } from "@/lib/validation/service-sheet";
+import {
+  ServiceSheetSchema,
+  isServiceSheetFilled,
+} from "@/lib/validation/service-sheet";
 import {
   saveServiceSheet,
   finalizeServiceSheet,
@@ -229,6 +232,22 @@ export async function approveServiceSheetAction(
 ): Promise<ApproveResult> {
   await requireUser();
   if (!jobId) return { success: false, message: "Missing job ID" };
+
+  // L0 server invariant: a job can only become completed with a filled
+  // sheet. This is THE choke point — every completion route funnels
+  // through here (combined path validates via Zod first, but standalone
+  // calls and replays of stale entries don't), so completed × unfilled
+  // is unreachable no matter who calls. Same predicate as the client
+  // gates — single source, Dexie-checkable offline.
+  const job = await getJobById(jobId);
+  if (!job) return { success: false, message: "Job not found" };
+  if (!isServiceSheetFilled(job)) {
+    return {
+      success: false,
+      message:
+        "Service sheet not filled in — complete the sheet before finalising the job.",
+    };
+  }
 
   try {
     const updated = await finalizeServiceSheet(jobId);
