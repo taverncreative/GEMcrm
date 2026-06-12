@@ -184,6 +184,28 @@ export async function hasPendingTaskOfType(
   return (count ?? 0) > 0;
 }
 
+/** L3: dedupe for the "no email on file" follow-up created at
+ *  completion. Title-prefix match because the booking flow already
+ *  creates a generic follow_up task per job — matching on type alone
+ *  would collide with it in both directions. */
+export async function hasPendingEmailReportTask(
+  jobId: string
+): Promise<boolean> {
+  const supabase = await createClient();
+  const { count, error } = await supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("related_job_id", jobId)
+    .eq("status", "pending")
+    .like("title", "Email service report%");
+
+  if (error) {
+    console.error("[hasPendingEmailReportTask]", error.code, error.message);
+    return false;
+  }
+  return (count ?? 0) > 0;
+}
+
 /**
  * Check if a pending task of a given type exists for an agreement.
  */

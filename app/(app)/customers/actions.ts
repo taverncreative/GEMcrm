@@ -7,6 +7,7 @@ import {
   createCustomer,
   setGoogleReviewReceived,
   updateCustomerType,
+  updateCustomerEmail,
   getCustomerDetail,
   deleteCustomer,
   getDeleteImpact,
@@ -275,6 +276,33 @@ export async function deleteCustomerAction(
     return {
       success: false,
       message: err instanceof Error ? err.message : "Failed to delete",
+    };
+  }
+}
+
+/**
+ * L3: inline "Add email" on the service-sheet flow. Wrapped client-side
+ * (applyLocal + outbox), so it must stay a (customerId, email) direct
+ * action — the registry replays it with the same args.
+ */
+export async function setCustomerEmailAction(
+  customerId: string,
+  email: string
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!customerId) return { success: false, message: "Missing customer id" };
+  const trimmed = (email ?? "").trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    return { success: false, message: "Enter a valid email address" };
+  }
+  try {
+    await updateCustomerEmail(customerId, trimmed);
+    revalidatePath(ROUTES.CUSTOMERS);
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to save email",
     };
   }
 }

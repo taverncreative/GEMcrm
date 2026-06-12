@@ -61,6 +61,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { ServiceSheetForm } from "@/components/jobs/service-sheet-form";
 import { ServiceSheetViewOnly } from "@/components/jobs/service-sheet-view-only";
+import { AddCustomerEmailInline } from "@/components/customers/add-email-inline";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { SmartBackButton } from "@/components/smart-back-button";
 import { ROUTES } from "@/lib/constants/routes";
@@ -262,6 +263,21 @@ export default function CompleteServiceSheetPage() {
         </div>
       </div>
 
+      {customer && !customer.email && (
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-medium text-amber-900">
+            No email on file for {customer.name}
+          </p>
+          <p className="mt-0.5 text-xs text-amber-800">
+            The report can&apos;t be emailed until an address is added.
+            You can still fill in and complete the sheet.
+          </p>
+          <div className="mt-3 max-w-sm">
+            <AddCustomerEmailInline customerId={customer.id} />
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
         <ServiceSheetForm
           jobId={job.id}
@@ -286,6 +302,7 @@ export default function CompleteServiceSheetPage() {
               : undefined
           }
           mode={amendMode ? "amend" : "fill"}
+          customerId={customer?.id}
         />
       </div>
     </div>

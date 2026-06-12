@@ -146,6 +146,8 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     value: null,
     is_invoiced: false,
     is_paid: false,
+    report_emailed_to: null,
+    report_emailed_at: null,
     reference_number: null,
     parent_job_id: null,
     is_archived: false,

@@ -10,7 +10,10 @@ import {
   finalizeServiceSheet,
   createBooking,
   getJobById,
+  markReportEmailed,
 } from "@/lib/data/jobs";
+import { hasPendingEmailReportTask, createTask } from "@/lib/data/tasks";
+import { todayUk } from "@/lib/utils/today-uk";
 import { getSiteById } from "@/lib/data/sites";
 import { getCustomerById } from "@/lib/data/customers";
 import { getReportByJobId, createReport } from "@/lib/data/reports";
@@ -175,8 +178,12 @@ export async function completeServiceSheetAction(
       const site = await getSiteById(updated.site_id);
       const customer = site ? await getCustomerById(site.customer_id) : null;
       const report = await getReportByJobId(jobId);
-      if (customer && report?.pdf_url) {
-        await sendServiceReport(customer, report.pdf_url);
+      if (customer?.email && report?.pdf_url) {
+        const sendRes = await sendServiceReport(customer, report.pdf_url);
+        // L3 truth: record only an ACTUAL send — never intent.
+        if (sendRes.success) {
+          await markReportEmailed(jobId, customer.email);
+        }
       }
     }
 
@@ -249,6 +256,8 @@ export async function completeServiceSheetAction(
 export interface ApproveResult {
   success: boolean;
   message?: string;
+  /** L3: set iff the report email actually sent (recorded on the job). */
+  emailedTo?: string | null;
 }
 
 interface ApproveOptions {
@@ -280,10 +289,12 @@ export async function approveServiceSheetAction(
     };
   }
 
+  let emailedTo: string | null = null;
   try {
     const updated = await finalizeServiceSheet(jobId);
 
     const site = await getSiteById(updated.site_id);
+    const customer = site ? await getCustomerById(site.customer_id) : null;
     if (site) {
       // sendReportEmail: false — the operator's explicit sendEmail
       // choice below is the single owner of report dispatch. Without
@@ -300,11 +311,43 @@ export async function approveServiceSheetAction(
       );
     }
 
-    if (options.sendEmail && site) {
-      const customer = await getCustomerById(site.customer_id);
+    // ─── L3 email truthfulness ──────────────────────────────────────
+    // Nothing here may fail the completion: sends return result
+    // objects (never throw), and the task block is fenced — an offline
+    // replay must not strand on email problems.
+    if (options.sendEmail && customer?.email) {
       const report = await getReportByJobId(jobId);
-      if (customer && report?.pdf_url) {
-        await sendServiceReport(customer, report.pdf_url);
+      if (report?.pdf_url) {
+        const sendRes = await sendServiceReport(customer, report.pdf_url);
+        if (sendRes.success) {
+          await markReportEmailed(jobId, customer.email);
+          emailedTo = customer.email;
+        }
+      }
+    }
+
+    // No address on file → the report can't be emailed at all. Surface
+    // it in the operator's task queue instead of vanishing silently —
+    // exactly once per job (title-prefix dedupe; the booking flow's
+    // generic follow_up task is unrelated).
+    if (customer && !customer.email) {
+      try {
+        if (!(await hasPendingEmailReportTask(jobId))) {
+          await createTask({
+            title: `Email service report to ${customer.name} — no email address on file`,
+            due_date: todayUk(),
+            task_type: "follow_up",
+            priority: "medium",
+            related_job_id: jobId,
+            related_customer_id: customer.id,
+            site_id: updated.site_id,
+          });
+        }
+      } catch (taskErr) {
+        console.error(
+          "[approveServiceSheetAction] no-address task failed:",
+          taskErr
+        );
       }
     }
 
@@ -330,7 +373,7 @@ export async function approveServiceSheetAction(
     revalidatePath(ROUTES.JOBS);
     revalidatePath(ROUTES.CALENDAR);
     revalidatePath(ROUTES.DASHBOARD);
-    return { success: true };
+    return { success: true, emailedTo };
   } catch (err) {
     return {
       success: false,

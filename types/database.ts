@@ -88,6 +88,10 @@ export interface Job {
   is_invoiced: boolean;
   is_paid: boolean;
   reference_number: string | null;
+  /** L3 email truth (migration 033): set server-side ONLY when a report
+   *  email actually sends. Null = never emailed. */
+  report_emailed_to: string | null;
+  report_emailed_at: string | null;
   parent_job_id: string | null;
   /**
    * Server-side "hide from normal views without deleting" flag added

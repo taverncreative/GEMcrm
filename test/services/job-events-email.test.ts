@@ -30,6 +30,7 @@ vi.mock("@/lib/services/email", () => ({
 }));
 vi.mock("@/lib/data/tasks", () => ({
   hasPendingTaskOfType: vi.fn(async () => false),
+  hasPendingEmailReportTask: vi.fn(async () => false),
   createTask: vi.fn(async () => ({})),
 }));
 vi.mock("@/lib/data/customers", () => ({
@@ -80,6 +81,7 @@ vi.mock("@/lib/data/jobs", () => ({
     method_used: ["Inspection"],
   })),
   createBooking: vi.fn(async () => ({})),
+  markReportEmailed: vi.fn(async () => undefined),
 }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => ({})),

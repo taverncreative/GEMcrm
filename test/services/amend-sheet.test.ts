@@ -34,6 +34,7 @@ vi.mock("@/lib/data/jobs", () => ({
       ...args
     ),
   createBooking: vi.fn(async () => ({})),
+  markReportEmailed: vi.fn(async () => undefined),
 }));
 vi.mock("@/lib/data/sites", () => ({
   getSiteById: vi.fn(async () => ({
@@ -59,6 +60,7 @@ vi.mock("@/lib/data/reports", () => ({
 }));
 vi.mock("@/lib/data/tasks", () => ({
   hasPendingTaskOfType: vi.fn(async () => true),
+  hasPendingEmailReportTask: vi.fn(async () => false),
   createTask: vi.fn(async () => ({})),
 }));
 vi.mock("@/lib/services/email", () => ({

@@ -304,6 +304,27 @@ export async function getDeleteImpact(
 }
 
 /**
+ * L3: set a customer's email address (the inline "Add email" affordance
+ * on the service-sheet flow). Normalised lowercase/trimmed; format is
+ * validated in the action layer.
+ */
+export async function updateCustomerEmail(
+  customerId: string,
+  email: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("customers")
+    .update({ email: email.trim().toLowerCase() })
+    .eq("id", customerId);
+
+  if (error) {
+    console.error("[updateCustomerEmail]", error.code, error.message);
+    throw new Error(`Failed to update customer email: ${error.message}`);
+  }
+}
+
+/**
  * Update a customer's commercial/domestic classification.
  */
 export async function updateCustomerType(

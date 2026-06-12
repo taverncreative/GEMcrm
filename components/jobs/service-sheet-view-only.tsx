@@ -34,6 +34,12 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { useState, useTransition } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "@/lib/db";
+import { useIsOnline } from "@/lib/hooks/use-is-online";
+import { sendReportNowAction } from "@/app/(app)/jobs/[id]/report/actions";
+import { AddCustomerEmailInline } from "@/components/customers/add-email-inline";
 import type { Job, Site, Customer, CallType, RiskLevel } from "@/types/database";
 import {
   CALL_TYPE_LABELS,
@@ -229,6 +235,11 @@ export function ServiceSheetViewOnly({
         </Link>
       </div>
 
+      {/* ── L3 email truth: state plainly what happened, never imply ── */}
+      {job.job_status === "completed" && (
+        <ReportEmailStatus job={job} customer={customer} />
+      )}
+
       {/* ── Header summary: who/where/when ── */}
       <Section title="Visit">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -329,6 +340,134 @@ export function ServiceSheetViewOnly({
 
         Leaving the comment so the next agent has the breadcrumb.
       */}
+    </div>
+  );
+}
+
+
+/**
+ * L3 email truth line. Four states, in priority order:
+ *   1. report_emailed_to set      → "Report emailed to …" (server-
+ *      recorded fact — written only on an actual successful send)
+ *   2. a queued completion entry carrying send_email
+ *                                 → "Email queued — sends when synced"
+ *   3. customer has no address    → "Not emailed — no address on file"
+ *      + inline add-email (unlocks state 4 live via Dexie)
+ *   4. address exists, never sent → "Not emailed" + Send report now
+ *      (online-only; single-fire — the action checks report_emailed_to
+ *      before sending)
+ */
+function ReportEmailStatus({
+  job,
+  customer,
+}: {
+  job: Job;
+  customer: Customer | null | undefined;
+}) {
+  const online = useIsOnline();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  // A pending outbox completion/amend entry that carries the email
+  // choice — the send happens when it replays, so say so.
+  const emailQueued = useLiveQuery(
+    async () => {
+      const entries = await db.outbox
+        .filter((e) => e.entity_id === job.id)
+        .toArray();
+      return entries.some((e) => {
+        const args = e.args as Record<string, unknown> | unknown[] | null;
+        return (
+          !!args &&
+          !Array.isArray(args) &&
+          (args as Record<string, unknown>).send_email === "true"
+        );
+      });
+    },
+    [job.id]
+  );
+
+  function sendNow() {
+    setError(null);
+    startTransition(async () => {
+      try {
+        const res = await sendReportNowAction(job.id);
+        if (res.success && res.emailedTo) {
+          // Server confirmed the send — mirror the truth locally so the
+          // line flips without waiting for the next pull.
+          await db.jobs.update(job.id, {
+            report_emailed_to: res.emailedTo,
+            report_emailed_at: new Date().toISOString(),
+          });
+        } else if (!res.success) {
+          setError(res.message ?? "Failed to send");
+        }
+      } catch {
+        setError("Couldn't reach the server — try again online");
+      }
+    });
+  }
+
+  if (job.report_emailed_to) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        Report emailed to{" "}
+        <span className="font-medium">{job.report_emailed_to}</span>
+        {job.report_emailed_at
+          ? ` on ${new Date(job.report_emailed_at).toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })}`
+          : ""}
+        .
+      </div>
+    );
+  }
+
+  if (emailQueued) {
+    return (
+      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+        Report email queued — it sends when this completion syncs.
+      </div>
+    );
+  }
+
+  if (!customer?.email) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+        <p className="text-sm font-medium text-amber-900">
+          Report not emailed — no email address on file.
+        </p>
+        {customer && (
+          <div className="mt-2 max-w-sm">
+            <AddCustomerEmailInline customerId={customer.id} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+      <p className="text-sm text-gray-600">
+        Report not emailed to the customer yet.
+      </p>
+      <div className="text-right">
+        <button
+          type="button"
+          onClick={sendNow}
+          disabled={isPending || !online}
+          title={!online ? "Needs internet" : undefined}
+          className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isPending ? "Sending…" : `Send report now to ${customer.email}`}
+        </button>
+        {!online && (
+          <p className="mt-1 text-xs text-gray-400">Needs internet.</p>
+        )}
+        {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+      </div>
     </div>
   );
 }

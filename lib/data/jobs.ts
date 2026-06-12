@@ -398,6 +398,32 @@ export async function completeServiceSheet(
 }
 
 /**
+ * L3 email truth: record that the job's report email actually SENT.
+ * Called only after a successful sendServiceReport — never on intent.
+ * The view-only sheet renders "Report emailed to …" from these columns
+ * and "Send report now" single-fires by checking them first.
+ */
+export async function markReportEmailed(
+  jobId: string,
+  email: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("jobs")
+    .update({
+      report_emailed_to: email,
+      report_emailed_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+  if (error) {
+    // Best-effort: the email DID send — a failed mark must not fail the
+    // completion. Log and move on; "Send report now" stays visible and
+    // its pre-send check makes a re-send an explicit operator choice.
+    console.error("[markReportEmailed]", error.code, error.message);
+  }
+}
+
+/**
  * Move a saved Service Sheet from in_progress → completed. Runs the
  * post-completion side-effects (review task, invoice auto-create, etc.)
  * are still wired up by the action layer.

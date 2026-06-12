@@ -94,6 +94,8 @@ function seedJob(job_status: Job["job_status"]): Job {
     value: null,
     is_invoiced: false,
     is_paid: false,
+    report_emailed_to: null,
+    report_emailed_at: null,
     reference_number: null,
     parent_job_id: null,
   };

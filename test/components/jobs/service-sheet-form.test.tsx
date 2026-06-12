@@ -191,17 +191,27 @@ describe("ServiceSheetForm — optimistic confirm", () => {
     expect(completeFn).not.toHaveBeenCalled();
   });
 
-  it("'Complete & Email' is disabled when the customer has no email", async () => {
+  // L3: with no address on file the modal no longer offers a disabled
+  // mystery button — "Complete & Email" is replaced by the inline
+  // "Add email & send" capture (when the customer id is known), and the
+  // consequence of plain Complete is stated outright.
+  it("no customer email → no Complete & Email; inline Add-email-and-send + consequence line instead", async () => {
     const user = userEvent.setup();
-    render(<ServiceSheetForm jobId="test-job-id" />);
+    render(<ServiceSheetForm jobId="test-job-id" customerId="cust-1" />);
 
     await fillAllSteps(user);
     await user.click(reviewButton());
     await waitFor(() => expect(reviewHeading()).toBeInTheDocument());
 
     expect(
-      screen.getByRole("button", { name: /Complete & Email/ })
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: /Complete & Email/ })
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /Add email & send/ })
+    ).toBeEnabled();
+    expect(
+      screen.getByText(/without emailing it \(no address on file\)/i)
+    ).toBeTruthy();
   });
 });
 

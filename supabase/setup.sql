@@ -668,6 +668,18 @@ grant execute on function public.soft_delete_customer(uuid) to authenticated;
 
 
 -- ============================================================
+-- 033: report-email truth on jobs (L3)
+-- ============================================================
+-- Written server-side only when a report email actually SENDS
+-- (approve / amend Save & Email / Send report now). Null = not
+-- emailed. See supabase/migrations/033_report_email_truth.sql.
+
+alter table jobs
+  add column if not exists report_emailed_to text,
+  add column if not exists report_emailed_at timestamptz;
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)

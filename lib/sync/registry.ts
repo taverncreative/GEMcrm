@@ -34,6 +34,7 @@ import { updateAgreementStatusAction } from "@/app/(app)/agreements/[id]/actions
 import {
   setReviewReceivedAction,
   setCustomerTypeAction,
+  setCustomerEmailAction,
   createCustomerAction,
 } from "@/app/(app)/customers/actions";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
@@ -120,6 +121,11 @@ export const REGISTRY: Record<string, RegistryEntry> = {
         args[0] as string,
         args[1] as "commercial" | "domestic"
       ),
+  },
+  setCustomerEmailAction: {
+    kind: "direct",
+    invoke: (...args) =>
+      setCustomerEmailAction(args[0] as string, args[1] as string),
   },
 
   // ─── agreement ──────────────────────────────────────────────
