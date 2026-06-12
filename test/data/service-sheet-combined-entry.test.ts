@@ -137,6 +137,20 @@ describe("applyLocal — finalize-aware status", () => {
     await completeServiceSheetMeta.applyLocal(input);
     expect((await db.jobs.get(JOB_ID))?.job_status).toBe("in_progress");
   });
+
+  // L2 amend: editing a COMPLETED sheet must update fields locally but
+  // NEVER touch job_status — the local row must not lie about a
+  // downgrade the server will refuse.
+  it("amend → fields update, job_status stays completed", async () => {
+    await db.jobs.put(seedJob("completed"));
+    const input = parseServiceSheetFormData(sheetFormData({ amend: "true" }))!;
+    expect(input.amend).toBe(true);
+    expect(input.finalize).toBe(false);
+    await completeServiceSheetMeta.applyLocal(input);
+    const row = await db.jobs.get(JOB_ID);
+    expect(row?.job_status).toBe("completed");
+    expect(row?.findings).toBe("Combined-entry findings");
+  });
 });
 
 describe("combined outbox entry — shape + compaction", () => {

@@ -30,11 +30,14 @@ import {
 } from "@/lib/db/drafts";
 import { useLiveQuery } from "dexie-react-hooks";
 
-/** Sheet input + the combined-finalize flag (offline-pwa pass B). The
- *  flag rides along so applyLocal knows whether this submission also
- *  completes the job locally. */
+/** Sheet input + the combined-finalize flag (offline-pwa pass B) and
+ *  the amend flag (L2). The flags ride along so applyLocal knows
+ *  whether this submission also completes the job locally (finalize)
+ *  or is editing an already-completed sheet (amend — job_status is
+ *  never touched). */
 export interface CompleteSheetInput extends ServiceSheetInput {
   finalize: boolean;
+  amend: boolean;
 }
 
 function buildRawSheetInput(formData: FormData) {
@@ -84,6 +87,7 @@ export function parseServiceSheetFormData(
   return {
     ...result.data,
     finalize: (formData.get("finalize") as string) === "true",
+    amend: (formData.get("amend") as string) === "true",
   };
 }
 
@@ -146,8 +150,13 @@ export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
       client_name: input.client_name || null,
       // Combined entry (finalize) completes the job locally — the
       // optimistic mirror of the server's finalizeServiceSheet. The
-      // non-finalize shape keeps today's in_progress semantics.
-      job_status: input.finalize ? "completed" : "in_progress",
+      // non-finalize shape keeps today's in_progress semantics. Amend
+      // (L2) edits an already-completed sheet: job_status is NEVER
+      // written — the local row must not lie about a downgrade the
+      // server will refuse.
+      ...(input.amend
+        ? {}
+        : { job_status: input.finalize ? "completed" : "in_progress" }),
       updated_at: now,
     });
     // The draft is obsolete the moment the completion is committed
@@ -157,7 +166,8 @@ export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
     // other clearDraft site) gets to run. Caught live in the pass-B
     // preview run: outbox drained, draft still haunting. Best-effort —
     // a draft-clear hiccup must not abort the completion itself.
-    if (input.finalize) {
+    // Amend saves are final the same way — clear their draft too.
+    if (input.finalize || input.amend) {
       try {
         await clearDraft(input.job_id);
       } catch (err) {
@@ -208,12 +218,17 @@ interface ServiceSheetFormProps {
   defaultRecommendations?: string;
   defaultPesticides?: string;
   defaultReportNotes?: string;
+  defaultRiskComments?: string;
   /** Pre-filled customer context shown in the header strip. */
   customerName?: string;
   customerCompany?: string | null;
   customerEmail?: string | null;
   customerPhone?: string | null;
   siteAddress?: string;
+  /** L2: "amend" edits an already-completed sheet — job_status is never
+   *  touched, the review modal reads Save instead of Complete, and the
+   *  email send is an explicit choice defaulting OFF. Default: "fill". */
+  mode?: "fill" | "amend";
 }
 
 /**
@@ -263,13 +278,16 @@ function ServiceSheetFormBody({
   defaultRecommendations = "",
   defaultPesticides = "",
   defaultReportNotes = "",
+  defaultRiskComments = "",
   customerName,
   customerCompany,
   customerEmail,
   customerPhone,
   siteAddress,
+  mode = "fill",
   draft,
 }: ServiceSheetFormBodyProps) {
+  const amend = mode === "amend";
   // Initial values: prefer draft if one exists, otherwise the job's
   // saved values / defaults. `draft` is null on confirmed no-draft (the
   // outer wrapper gated render until the IDB query resolved), so the
@@ -304,7 +322,9 @@ function ServiceSheetFormBody({
     draft?.report_notes ?? defaultReportNotes
   );
   const [riskLevel, setRiskLevel] = useState(draft?.risk_level ?? defaultRiskLevel);
-  const [riskComments, setRiskComments] = useState(draft?.risk_comments ?? "");
+  const [riskComments, setRiskComments] = useState(
+    draft?.risk_comments ?? defaultRiskComments
+  );
   const [clientName, setClientName] = useState(draft?.client_name ?? "");
   const [techSig, setTechSig] = useState(draft?.tech_sig ?? "");
   const [clientSig, setClientSig] = useState(draft?.client_sig ?? "");
@@ -390,7 +410,15 @@ function ServiceSheetFormBody({
   function handleConfirmComplete(opts: { sendEmail: boolean }) {
     if (!formRef.current) return;
     const fd = new FormData(formRef.current);
-    fd.set("finalize", "true");
+    if (amend) {
+      // L2 amend: edits an already-completed sheet. NO finalize — the
+      // server's finalize/side-effect sequence must not re-run; the
+      // sheet fields update, the PDF regenerates, and the email goes
+      // out only on this explicit choice (default off).
+      fd.set("amend", "true");
+    } else {
+      fd.set("finalize", "true");
+    }
     fd.set("send_email", opts.sendEmail ? "true" : "");
     // schedule_follow_up / follow_up_date ride along as hidden inputs.
     void formAction(fd);
@@ -1004,7 +1032,7 @@ function ServiceSheetFormBody({
             disabled={isPending}
             className="rounded-xl bg-brand px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
           >
-            Review &amp; Complete
+            {amend ? "Review changes" : "Review & Complete"}
           </button>
         </div>
       </div>
@@ -1026,11 +1054,12 @@ function ServiceSheetFormBody({
           <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
             <div>
               <h2 className="text-base font-semibold text-gray-900">
-                Review &amp; Complete
+                {amend ? "Review amendments" : "Review & Complete"}
               </h2>
               <p className="text-xs text-gray-500">
-                Check the sheet, then complete the job — with or without
-                emailing the customer.
+                {amend
+                  ? "Check the changes, then save — the report PDF regenerates; nothing is emailed unless you choose to."
+                  : "Check the sheet, then complete the job — with or without emailing the customer."}
               </p>
             </div>
             <button
@@ -1108,18 +1137,30 @@ function ServiceSheetFormBody({
                 type="button"
                 onClick={() => handleConfirmComplete({ sendEmail: false })}
                 disabled={isPending}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                className={`rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 ${
+                  amend
+                    ? "bg-brand px-5 font-semibold text-white shadow-sm hover:bg-brand-dark"
+                    : "border border-gray-200 text-gray-700 hover:bg-gray-50"
+                }`}
               >
-                {isPending ? "Completing…" : "Complete"}
+                {isPending
+                  ? amend ? "Saving…" : "Completing…"
+                  : amend ? "Save changes" : "Complete"}
               </button>
               <button
                 type="button"
                 onClick={() => handleConfirmComplete({ sendEmail: true })}
                 disabled={isPending || !customerEmail}
                 title={!customerEmail ? "Customer has no email on file" : ""}
-                className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
+                className={`rounded-lg px-5 py-2 text-sm font-semibold shadow-sm disabled:opacity-50 ${
+                  amend
+                    ? "border border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-50"
+                    : "bg-brand text-white hover:bg-brand-dark"
+                }`}
               >
-                {isPending ? "Completing…" : "Complete & Email"}
+                {isPending
+                  ? amend ? "Saving…" : "Completing…"
+                  : amend ? "Save & Email" : "Complete & Email"}
               </button>
             </div>
           </div>

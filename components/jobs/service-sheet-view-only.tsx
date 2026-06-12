@@ -49,6 +49,10 @@ interface ServiceSheetViewOnlyProps {
    *  accept undefined here and render the same em-dash fallback. */
   site: Site | null | undefined;
   customer: Customer | null | undefined;
+  /** L2 amend flow: when provided, the banner offers "Amend sheet" —
+   *  the host swaps in the editable form in amend mode (job_status is
+   *  never touched; the full schema still applies on save). */
+  onAmend?: () => void;
 }
 
 function formatDate(value: string): string {
@@ -164,6 +168,7 @@ export function ServiceSheetViewOnly({
   job,
   site,
   customer,
+  onAmend,
 }: ServiceSheetViewOnlyProps) {
   const callTypeLabel = job.call_type
     ? CALL_TYPE_LABELS[job.call_type as CallType] ?? job.call_type
@@ -201,11 +206,21 @@ export function ServiceSheetViewOnly({
             Service sheet completed
           </p>
           <p className="mt-0.5 text-xs text-emerald-800">
-            This sheet has been signed off. It can&apos;t be edited
-            directly — corrections will need to go through a separate
-            correction record (not yet built).
+            This sheet has been signed off.
+            {onAmend
+              ? " Spotted a mistake or need to fill it in properly? Amend it — the report regenerates and nothing is emailed unless you choose to."
+              : ""}
           </p>
         </div>
+        {onAmend && (
+          <button
+            type="button"
+            onClick={onAmend}
+            className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100"
+          >
+            Amend sheet
+          </button>
+        )}
         <Link
           href={ROUTES.jobDetail(job.id)}
           className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100"

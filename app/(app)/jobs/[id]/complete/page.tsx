@@ -54,6 +54,7 @@
  * draft auto-save effect against a possibly-completed job.
  */
 
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -128,6 +129,14 @@ export default function CompleteServiceSheetPage() {
   const params = useParams<{ id: string }>();
   const id = typeof params.id === "string" ? params.id : "";
 
+  // L2 amend flow: an explicit operator choice ("Amend sheet" on the
+  // view-only banner) swaps in the editable form for a COMPLETED job.
+  // Defaults false, so the whitelist gate below still renders completed
+  // sheets view-only — including during the post-approve race window
+  // the gate tests pin. Amend never touches job_status; the form
+  // submits with amend="true" instead of finalize.
+  const [amending, setAmending] = useState(false);
+
   const job = useLiveQuery(
     async () => {
       if (!id) return null;
@@ -183,7 +192,11 @@ export default function CompleteServiceSheetPage() {
   const customerLoading = !!site?.customer_id && customer === undefined;
   if (siteLoading || customerLoading) return <PageSkeleton />;
 
-  if (!FILLABLE_STATUSES.has(job.job_status)) {
+  // Amend applies ONLY to completed jobs (an unknown/locked status must
+  // not become editable through the amend door either).
+  const amendMode = job.job_status === "completed" && amending;
+
+  if (!FILLABLE_STATUSES.has(job.job_status) && !amendMode) {
     return (
       <div>
         <div className="flex items-start gap-3">
@@ -208,7 +221,16 @@ export default function CompleteServiceSheetPage() {
         </div>
 
         <div className="mt-6">
-          <ServiceSheetViewOnly job={job} site={site} customer={customer} />
+          <ServiceSheetViewOnly
+            job={job}
+            site={site}
+            customer={customer}
+            onAmend={
+              job.job_status === "completed"
+                ? () => setAmending(true)
+                : undefined
+            }
+          />
         </div>
       </div>
     );
@@ -251,6 +273,7 @@ export default function CompleteServiceSheetPage() {
           defaultRecommendations={job.recommendations ?? ""}
           defaultPesticides={job.pesticides_used ?? ""}
           defaultReportNotes={job.report_notes ?? ""}
+          defaultRiskComments={job.risk_comments ?? ""}
           customerName={customer?.name}
           customerCompany={customer?.company_name ?? null}
           customerEmail={customer?.email ?? null}
@@ -262,6 +285,7 @@ export default function CompleteServiceSheetPage() {
                   .join(", ")
               : undefined
           }
+          mode={amendMode ? "amend" : "fill"}
         />
       </div>
     </div>

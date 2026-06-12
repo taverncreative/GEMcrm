@@ -161,6 +161,37 @@ export async function completeServiceSheetAction(
     console.error("[completeServiceSheetAction] PDF gen failed:", pdfErr);
   }
 
+  // ─── Amend (L2): edit an already-completed sheet ────────────────────
+  // The field save above already ran (writeServiceSheet's guarded
+  // in_progress write no-ops on completed jobs, so job_status is
+  // untouched) and the PDF block regenerated service-sheet.pdf in
+  // place. NO finalize sequence — onJobCompleted's side effects fired
+  // at the original completion and must stay single-fire. Email goes
+  // out only on the explicit "Save & Email" choice (default off). It
+  // runs LAST, so a failed-then-retried amend entry can't have sent
+  // before the failure — replays don't double-send.
+  if (str("amend") === "true") {
+    if (str("send_email") === "true") {
+      const site = await getSiteById(updated.site_id);
+      const customer = site ? await getCustomerById(site.customer_id) : null;
+      const report = await getReportByJobId(jobId);
+      if (customer && report?.pdf_url) {
+        await sendServiceReport(customer, report.pdf_url);
+      }
+    }
+
+    revalidatePath(ROUTES.jobDetail(jobId));
+    revalidatePath(ROUTES.JOBS);
+    return {
+      success: true,
+      errors: {},
+      message: null,
+      pdfUrl,
+      jobId,
+      finalized: false,
+    };
+  }
+
   // ─── Optional in-action finalize (offline-pwa pass A) ──────────────
   let finalized = false;
   if (str("finalize") === "true") {
