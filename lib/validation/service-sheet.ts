@@ -63,3 +63,34 @@ export const ServiceSheetSchema = z.object({
 
 export type ServiceSheetInput = z.infer<typeof ServiceSheetSchema>;
 export { RISK_LEVELS, CALL_TYPES };
+
+/**
+ * True once the sheet's required CONTENT fields are present on the job
+ * row — the same fields ServiceSheetSchema requires, minus the
+ * signature (a completion artifact, not report content). Any sheet
+ * completed through the app's flow passes; a dropdown-completed job
+ * with an untouched sheet does not.
+ *
+ * Gates report generation (button + server action) so a PDF can never
+ * be produced from an unfilled sheet — generating one used to yield a
+ * placeholder report that the old completion auto-send could mail.
+ */
+export function isServiceSheetFilled(job: {
+  findings: string | null;
+  recommendations: string | null;
+  pesticides_used: string | null;
+  risk_level: string | null;
+  risk_comments: string | null;
+  pest_species: string[];
+  method_used: string[];
+}): boolean {
+  return Boolean(
+    job.findings?.trim() &&
+      job.recommendations?.trim() &&
+      job.pesticides_used?.trim() &&
+      job.risk_level &&
+      job.risk_comments?.trim() &&
+      job.pest_species.length > 0 &&
+      job.method_used.length > 0
+  );
+}

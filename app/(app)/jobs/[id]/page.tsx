@@ -36,6 +36,7 @@ import {
   RISK_COLORS,
 } from "@/lib/constants/job-labels";
 import { ReportActions } from "@/components/jobs/report-actions";
+import { isServiceSheetFilled } from "@/lib/validation/service-sheet";
 import { JobStatusActions } from "@/components/jobs/job-status-actions";
 import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
@@ -441,6 +442,7 @@ export default function JobDetailPage() {
             <ReportActions
               jobId={job.id}
               existingPdfUrl={report?.pdf_url ?? null}
+              sheetFilled={isServiceSheetFilled(job)}
             />
           </SectionCard>
 

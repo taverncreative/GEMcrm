@@ -8,6 +8,8 @@ import { INITIAL_ACTION_STATE } from "@/types/actions";
 interface ReportActionsProps {
   jobId: string;
   existingPdfUrl: string | null;
+  /** isServiceSheetFilled(job) — the unfilled-sheet gate. */
+  sheetFilled: boolean;
 }
 
 // `generateReportAction` is skip-classified (server-side puppeteer +
@@ -15,10 +17,20 @@ interface ReportActionsProps {
 // the button stays disabled and a small inline note explains why
 // rather than letting them tap into a confusing spinner that fails.
 //
+// "Regenerate Report" is a RECOVERY tool — for sheets whose auto-
+// generated PDF didn't land — not a routine step, hence the label even
+// when no PDF exists yet. It is gated on a filled sheet so it can
+// never produce a placeholder PDF from an empty one; the server action
+// enforces the same check.
+//
 // The "Download PDF" link is also gated on a real URL existing. If
 // step 7 starts on a job whose report hasn't been pulled into the
 // (online-only) read yet, the link is simply hidden.
-export function ReportActions({ jobId, existingPdfUrl }: ReportActionsProps) {
+export function ReportActions({
+  jobId,
+  existingPdfUrl,
+  sheetFilled,
+}: ReportActionsProps) {
   const [state, formAction, isPending] = useActionState(
     generateReportAction,
     INITIAL_ACTION_STATE
@@ -26,7 +38,7 @@ export function ReportActions({ jobId, existingPdfUrl }: ReportActionsProps) {
   const online = useIsOnline();
 
   const pdfUrl = state.success && state.message ? state.message : existingPdfUrl;
-  const buttonDisabled = isPending || !online;
+  const buttonDisabled = isPending || !online || !sheetFilled;
 
   return (
     <div className="space-y-3">
@@ -35,23 +47,34 @@ export function ReportActions({ jobId, existingPdfUrl }: ReportActionsProps) {
         <button
           type="submit"
           disabled={buttonDisabled}
-          title={!online ? "Needs internet — try again when back online" : undefined}
+          title={
+            !sheetFilled
+              ? "Service sheet not filled in"
+              : !online
+                ? "Needs internet — try again when back online"
+                : undefined
+          }
           className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-all duration-75 hover:bg-gray-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isPending ? (
             <>
               <Spinner />
-              <span>Generating…</span>
+              <span>Regenerating…</span>
             </>
-          ) : pdfUrl ? (
-            "Regenerate Report"
           ) : (
-            "Generate Report"
+            "Regenerate Report"
           )}
         </button>
       </form>
 
-      {!online && (
+      {!sheetFilled && (
+        <p className="text-xs text-amber-600">
+          Service sheet not filled in — a report can only be generated
+          from a completed sheet.
+        </p>
+      )}
+
+      {sheetFilled && !online && (
         <p className="text-xs text-gray-500">
           PDF generation needs internet. Reconnect and tap to generate.
         </p>
@@ -68,9 +91,9 @@ export function ReportActions({ jobId, existingPdfUrl }: ReportActionsProps) {
         </a>
       )}
 
-      {!pdfUrl && online && (
+      {!pdfUrl && online && sheetFilled && (
         <p className="text-xs text-gray-400">
-          No PDF yet — tap above to generate one.
+          No PDF yet — tap above to regenerate it from the sheet.
         </p>
       )}
 

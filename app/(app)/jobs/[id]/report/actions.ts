@@ -9,6 +9,7 @@ import { generateJobReport } from "@/lib/pdf/generate-job-report";
 import { uploadPdf } from "@/lib/storage/upload";
 import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
+import { isServiceSheetFilled } from "@/lib/validation/service-sheet";
 import type { ActionState } from "@/types/actions";
 
 export async function generateReportAction(
@@ -25,6 +26,17 @@ export async function generateReportAction(
   const job = await getJobById(jobId);
   if (!job) {
     return { success: false, errors: {}, message: "Job not found" };
+  }
+
+  // Same gate as the button's disabled state — a report must never be
+  // generated from an unfilled sheet (it renders as a placeholder PDF).
+  // Server-side too so a stale page can't slip one through.
+  if (!isServiceSheetFilled(job)) {
+    return {
+      success: false,
+      errors: {},
+      message: "Service sheet not filled in — complete it before generating a report.",
+    };
   }
 
   const site = await getSiteById(job.site_id);
