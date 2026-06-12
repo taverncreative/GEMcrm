@@ -2,16 +2,21 @@
 
 import { revalidatePath } from "next/cache";
 import { updateJobStatus } from "@/lib/data/jobs";
-import { onJobCompleted } from "@/lib/services/job-events";
 import { getJobById } from "@/lib/data/jobs";
-import { getSiteById } from "@/lib/data/sites";
 import { getReportByJobId } from "@/lib/data/reports";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
-import type { JobStatus, Report } from "@/types/database";
+import type { Report } from "@/types/database";
 
-const VALID_STATUSES: JobStatus[] = ["scheduled", "in_progress", "completed"];
-
+/**
+ * L1 single-completion-route rule: the ONLY status this action moves a
+ * job to is `in_progress` (Start Job / Start). Completion happens
+ * exclusively through the service sheet (completeServiceSheetAction →
+ * approveServiceSheetAction), whose L0 invariant requires a filled
+ * sheet — so a one-tap empty completion is unreachable, online or via
+ * outbox replay (a stale completed entry from an old client replays
+ * here and is rejected into the conflicts inbox).
+ */
 export async function updateJobStatusAction(
   _prev: ActionState,
   formData: FormData
@@ -24,31 +29,20 @@ export async function updateJobStatusAction(
     return { success: false, errors: {}, message: "Missing job ID" };
   }
 
-  if (!VALID_STATUSES.includes(status as JobStatus)) {
+  if (status === "completed") {
+    return {
+      success: false,
+      errors: {},
+      message: "Complete this job via its service sheet.",
+    };
+  }
+
+  if (status !== "in_progress") {
     return { success: false, errors: {}, message: "Invalid status" };
   }
 
   try {
-    const job = await updateJobStatus(jobId, status as JobStatus);
-
-    if (status === "completed") {
-      const site = await getSiteById(job.site_id);
-      if (site) {
-        // sendReportEmail: false — completing via the status dropdown
-        // must never email the customer. The auto-send here once mailed
-        // the NEWEST report row, which can be a placeholder PDF from
-        // the Generate Report button on an unfilled sheet. The sheet's
-        // explicit "Complete & Email" is the only sender.
-        await onJobCompleted(
-          job,
-          {
-            customerId: site.customer_id,
-            siteId: job.site_id,
-          },
-          { sendReportEmail: false }
-        );
-      }
-    }
+    await updateJobStatus(jobId, "in_progress");
   } catch (err) {
     return {
       success: false,

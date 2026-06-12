@@ -1,18 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { updateJobStatusAction } from "@/app/(app)/jobs/[id]/actions";
 import { JOB_STATUS_COLORS } from "@/lib/constants/job-labels";
+import { ROUTES } from "@/lib/constants/routes";
 import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
 import type { ActionState } from "@/types/actions";
 import type { JobStatus } from "@/types/database";
 
-// Meta for the wrapper — module-level for ref stability.
-const VALID_STATUSES: readonly JobStatus[] = [
-  "scheduled",
-  "in_progress",
-  "completed",
-];
 interface UpdateJobStatusInput {
   job_id: string;
   status: JobStatus;
@@ -25,7 +21,11 @@ const updateJobStatusMeta: WrapMeta<UpdateJobStatusInput> = {
     const jobId = formData.get("job_id");
     const status = formData.get("status");
     if (typeof jobId !== "string" || typeof status !== "string") return null;
-    if (!VALID_STATUSES.includes(status as JobStatus)) return null;
+    // L1 mirror of the server rule: in_progress is the only status this
+    // action moves to — completion goes through the service sheet. A
+    // null here means the tap neither writes Dexie nor queues an outbox
+    // entry, so local state can't lie about a rejected transition.
+    if (status !== "in_progress") return null;
     return { job_id: jobId, status: status as JobStatus };
   },
   applyLocal: async (input) => {
@@ -131,32 +131,25 @@ export function JobStatusActions({
     );
   }
 
+  // L1: no direct status-to-completed write exists any more. The
+  // completion affordance NAVIGATES to the service sheet — the only
+  // route to completed, whose L0 invariant requires a filled sheet.
   return (
     <div className="flex flex-wrap items-center gap-2">
       {currentStatus === "scheduled" && (
-        <>
-          <StatusButton
-            jobId={jobId}
-            targetStatus="in_progress"
-            label="Start Job"
-            className="bg-amber-100 text-amber-700 hover:bg-amber-200"
-          />
-          <StatusButton
-            jobId={jobId}
-            targetStatus="completed"
-            label="Start & Complete"
-            className="bg-brand text-white hover:bg-brand-dark"
-          />
-        </>
-      )}
-      {currentStatus === "in_progress" && (
         <StatusButton
           jobId={jobId}
-          targetStatus="completed"
-          label="Complete Job"
-          className="bg-brand text-white hover:bg-brand-dark"
+          targetStatus="in_progress"
+          label="Start Job"
+          className="bg-amber-100 text-amber-700 hover:bg-amber-200"
         />
       )}
+      <Link
+        href={`${ROUTES.jobDetail(jobId)}/complete`}
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white transition-all duration-75 hover:bg-brand-dark active:scale-95"
+      >
+        Complete job →
+      </Link>
     </div>
   );
 }
@@ -179,13 +172,25 @@ export function JobQuickAction({
 
   if (currentStatus === "completed") return null;
 
-  const target: JobStatus = currentStatus === "scheduled" ? "in_progress" : "completed";
-  const label = currentStatus === "scheduled" ? "Start" : "Done";
+  // L1: "Done" (one-tap empty completion from the dashboard — how the
+  // three stranded empty-completed jobs were made) is gone. In-progress
+  // jobs link to the service sheet instead; "Start" stays a status
+  // write (scheduled → in_progress is harmless).
+  if (currentStatus !== "scheduled") {
+    return (
+      <Link
+        href={`${ROUTES.jobDetail(jobId)}/complete`}
+        className="inline-flex items-center justify-center gap-1 rounded px-3 py-1.5 text-xs font-medium text-brand-darker transition-all duration-75 hover:bg-brand-soft active:scale-95"
+      >
+        Complete →
+      </Link>
+    );
+  }
 
   return (
     <form action={action}>
       <input type="hidden" name="job_id" value={jobId} />
-      <input type="hidden" name="status" value={target} />
+      <input type="hidden" name="status" value="in_progress" />
       <button
         type="submit"
         disabled={isPending}
@@ -197,7 +202,7 @@ export function JobQuickAction({
             <span>Saving…</span>
           </>
         ) : (
-          label
+          "Start"
         )}
       </button>
     </form>

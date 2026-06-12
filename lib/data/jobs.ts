@@ -237,24 +237,28 @@ export async function getJobById(id: string): Promise<Job | null> {
   return data;
 }
 
+/**
+ * L1: the only status transition left outside the service-sheet flow is
+ * → in_progress (Start). The `neq` makes the no-downgrade rule atomic
+ * server-side (same shape as writeServiceSheet's Pass-0 guard): a stale
+ * offline "Start" replay that drains AFTER the job completed matches
+ * zero rows and no-ops instead of regressing a completed job.
+ */
 export async function updateJobStatus(
   jobId: string,
   status: JobStatus
-): Promise<Job> {
+): Promise<void> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from("jobs")
     .update({ job_status: status })
     .eq("id", jobId)
-    .select()
-    .single();
+    .neq("job_status", "completed");
 
   if (error) {
     console.error("[updateJobStatus]", error.code, error.message);
     throw new Error(`Failed to update job status: ${error.message}`);
   }
-
-  return data;
 }
 
 export async function hasJobForSiteOnDate(
