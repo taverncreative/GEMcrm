@@ -56,19 +56,22 @@ export async function onJobCreated(
 /**
  * Side effects triggered after a job is marked completed.
  *
- * `sendReportEmail` (default true) controls the automatic service-report
- * email. The sheet-approval path passes false — there the operator's
- * explicit "email customer" choice is the single owner of dispatch
- * (sending here as well double-emailed the customer whenever a PDF
- * existed). The status-dropdown path (updateJobStatusAction) keeps the
- * default auto-send.
+ * `sendReportEmail` (default FALSE) controls the automatic
+ * service-report email. The single-owner rule (pass B, hardened after
+ * the client's Generate-Report scare): the ONLY thing that ever emails
+ * a customer is the sheet's explicit "Complete & Email" choice — the
+ * approval action's own send block. No completion path auto-sends:
+ * the dropdown path used to, which meant flipping a job to completed
+ * could mail whatever PDF happened to be newest (including a
+ * placeholder report generated against an unfilled sheet). Opting in
+ * requires an explicit `sendReportEmail: true` from a future caller.
  */
 export async function onJobCompleted(
   job: Job,
   context: JobContext,
   opts: { sendReportEmail?: boolean } = {}
 ): Promise<void> {
-  const { sendReportEmail = true } = opts;
+  const { sendReportEmail = false } = opts;
   try {
     const exists = await hasPendingTaskOfType(job.id, "review_request");
     if (exists) return;

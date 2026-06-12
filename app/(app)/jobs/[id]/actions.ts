@@ -34,10 +34,19 @@ export async function updateJobStatusAction(
     if (status === "completed") {
       const site = await getSiteById(job.site_id);
       if (site) {
-        await onJobCompleted(job, {
-          customerId: site.customer_id,
-          siteId: job.site_id,
-        });
+        // sendReportEmail: false — completing via the status dropdown
+        // must never email the customer. The auto-send here once mailed
+        // the NEWEST report row, which can be a placeholder PDF from
+        // the Generate Report button on an unfilled sheet. The sheet's
+        // explicit "Complete & Email" is the only sender.
+        await onJobCompleted(
+          job,
+          {
+            customerId: site.customer_id,
+            siteId: job.site_id,
+          },
+          { sendReportEmail: false }
+        );
       }
     }
   } catch (err) {
