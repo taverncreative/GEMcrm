@@ -635,6 +635,39 @@ on conflict do nothing;
 
 
 -- ============================================================
+-- 032: soft_delete_customer SECURITY DEFINER RPC
+-- ============================================================
+-- The SELECT policy's USING (deleted_at IS NULL) is enforced against
+-- the post-update row, so the update that sets deleted_at is itself
+-- rejected (42501). Narrowest bypass: a SECURITY DEFINER function;
+-- read policies untouched. Customers only — sites/jobs/tasks/
+-- agreements get the same pattern when their archive actions are
+-- built. See supabase/migrations/032_soft_delete_customer_rpc.sql.
+
+create or replace function public.soft_delete_customer(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'soft_delete_customer: not authenticated';
+  end if;
+
+  update public.customers
+     set deleted_at = now()
+   where id = p_id
+     and deleted_at is null;
+end;
+$$;
+
+revoke all on function public.soft_delete_customer(uuid) from public;
+revoke all on function public.soft_delete_customer(uuid) from anon;
+grant execute on function public.soft_delete_customer(uuid) to authenticated;
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)

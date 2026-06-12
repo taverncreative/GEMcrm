@@ -76,13 +76,11 @@ export interface SiteInputLoose {
   postcode?: string;
 }
 
-/** True when the address has enough to be a useful site (line 1 + town +
- *  postcode at minimum — county is often omitted in UK addresses). */
+/** True when the address has enough to be a useful site (line 1 + town
+ *  at minimum — county and postcode are often omitted in UK addresses). */
 function hasUsableSiteAddress(input: SiteInputLoose): boolean {
   return Boolean(
-    emptyToNull(input.address_line_1) &&
-      emptyToNull(input.town) &&
-      emptyToNull(input.postcode)
+    emptyToNull(input.address_line_1) && emptyToNull(input.town)
   );
 }
 
@@ -230,18 +228,18 @@ export async function setGoogleReviewReceived(
  * are untouched — they're keyed by uuid in the path and harmless once
  * the parent row is hidden.
  *
- * Note: deliberately no `.select()` chain on the update. The same SELECT
- * RLS policy would filter the just-updated row (which now has
- * `deleted_at IS NOT NULL`) and return an empty payload. We don't need
- * the row back here (return type is `Promise<void>`), so omitting
- * `.select()` saves a round-trip and avoids a misleading empty result.
+ * Goes through the soft_delete_customer SECURITY DEFINER RPC
+ * (migration 032), NOT a direct `.update()`: the SELECT policy's
+ * `USING (deleted_at IS NULL)` is enforced against the post-update row,
+ * so the very update that sets deleted_at is rejected with 42501 for
+ * every authenticated user. The RPC is the narrowest bypass — read
+ * policies stay untouched, deleted rows stay hidden.
  */
 export async function deleteCustomer(customerId: string): Promise<void> {
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("customers")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", customerId);
+  const { error } = await supabase.rpc("soft_delete_customer", {
+    p_id: customerId,
+  });
   if (error) {
     console.error("[deleteCustomer]", error.code, error.message);
     throw new Error(`Failed to soft-delete customer: ${error.message}`);

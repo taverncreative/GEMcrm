@@ -64,15 +64,14 @@ function trimToNull(v: string | undefined): string | null {
   return t === "" ? null : t;
 }
 
-/** Mirrors the data layer's hasUsableSiteAddress: line 1 + town +
- *  postcode at minimum — applyLocal must only write the sites the
- *  server will actually create on replay. */
+/** Mirrors the data layer's hasUsableSiteAddress: line 1 + town at
+ *  minimum (postcode optional) — applyLocal must only write the sites
+ *  the server will actually create on replay. */
 function usableSite(s: {
   address_line_1?: string;
   town?: string;
-  postcode?: string;
 }): boolean {
-  return Boolean(trimToNull(s.address_line_1) && trimToNull(s.town) && trimToNull(s.postcode));
+  return Boolean(trimToNull(s.address_line_1) && trimToNull(s.town));
 }
 
 interface ExtraSiteWithId extends ExtraSite {
