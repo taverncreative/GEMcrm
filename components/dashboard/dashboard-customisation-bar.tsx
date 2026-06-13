@@ -19,6 +19,7 @@ import { AddWidgetMenu } from "@/components/dashboard/widget-frame";
 export const WIDGET_REGISTRY = [
   { id: "revenue-stats", title: "Revenue", desktopOnly: true },
   { id: "service-sheets-to-fill", title: "Service sheets to fill", desktopOnly: false },
+  { id: "drafts-to-upgrade", title: "Drafts to upgrade", desktopOnly: false },
   { id: "jobs-today", title: "Jobs today", desktopOnly: false },
   // "upcoming-visits" is intentionally absent: it's now a featured,
   // full-width section at the top of the dashboard (see dashboard/page.tsx),
