@@ -6,6 +6,7 @@ import { getReportByJobId } from "@/lib/data/reports";
 import { createInvoiceForJob, getInvoiceByJobId } from "@/lib/data/invoices";
 import { sendServiceReport } from "@/lib/services/email";
 import { todayUk, dateUk } from "@/lib/utils/today-uk";
+import { REVIEW_REQUESTS_ENABLED } from "@/lib/constants/feature-flags";
 
 interface JobContext {
   customerId: string;
@@ -73,20 +74,29 @@ export async function onJobCompleted(
 ): Promise<void> {
   const { sendReportEmail = false } = opts;
   try {
-    const exists = await hasPendingTaskOfType(job.id, "review_request");
-    if (exists) return;
+    // Review-request auto-creation — DISABLED at the client's request
+    // (2026-06) via REVIEW_REQUESTS_ENABLED. The logic is intact behind
+    // the gate; flipping the flag back to `true` restores the original
+    // behaviour byte-for-byte, including the dedup early-return that
+    // short-circuits the rest of this sequence. When off, completion
+    // skips straight to the email + invoice side effects below (both
+    // carry their own guards, so nothing else changes).
+    if (REVIEW_REQUESTS_ENABLED) {
+      const exists = await hasPendingTaskOfType(job.id, "review_request");
+      if (exists) return;
 
-    const { customerName, siteName } = await getContextNames(context);
+      const { customerName, siteName } = await getContextNames(context);
 
-    await createTask({
-      title: `Send review request to ${customerName} (${siteName})`,
-      due_date: todayUk(),
-      task_type: "review_request",
-      priority: "high",
-      related_job_id: job.id,
-      related_customer_id: context.customerId,
-      site_id: context.siteId,
-    });
+      await createTask({
+        title: `Send review request to ${customerName} (${siteName})`,
+        due_date: todayUk(),
+        task_type: "review_request",
+        priority: "high",
+        related_job_id: job.id,
+        related_customer_id: context.customerId,
+        site_id: context.siteId,
+      });
+    }
 
     // Send service report email if report exists (suppressed when the
     // caller owns email dispatch — see doc comment).
