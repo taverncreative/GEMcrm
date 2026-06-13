@@ -704,6 +704,34 @@ alter table jobs add column if not exists job_time_end time;
 
 
 -- ============================================================
+-- 035: L4 — completed jobs require a filled service sheet
+-- ============================================================
+-- DB backstop mirroring isServiceSheetFilled (lib/validation/
+-- service-sheet.ts) EXACTLY: a completed job must carry a filled sheet
+-- (findings/recommendations/pesticides_used/risk_comments non-empty
+-- trimmed, risk_level non-empty, pest_species + method_used non-empty).
+-- Gate is `job_status <> 'completed' OR (...)`, so draft / scheduled /
+-- in_progress pass vacuously. The completion write order keeps this
+-- safe (fields persisted before the status flip). See
+-- supabase/migrations/035_completed_requires_filled_sheet.sql.
+
+alter table jobs drop constraint if exists jobs_completed_requires_filled_sheet;
+alter table jobs add constraint jobs_completed_requires_filled_sheet
+  check (
+    job_status <> 'completed'
+    or (
+      findings is not null and btrim(findings) <> ''
+      and recommendations is not null and btrim(recommendations) <> ''
+      and pesticides_used is not null and btrim(pesticides_used) <> ''
+      and risk_level is not null and risk_level <> ''
+      and risk_comments is not null and btrim(risk_comments) <> ''
+      and coalesce(array_length(pest_species, 1), 0) > 0
+      and coalesce(array_length(method_used, 1), 0) > 0
+    )
+  );
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)
