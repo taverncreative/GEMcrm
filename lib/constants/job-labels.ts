@@ -24,14 +24,21 @@ export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
   scheduled: "Scheduled",
   in_progress: "In Progress",
   completed: "Completed",
+  draft: "Draft",
 };
 
 export const JOB_STATUS_COLORS: Record<JobStatus, string> = {
   scheduled: "bg-blue-100 text-blue-700",
   in_progress: "bg-amber-100 text-amber-700",
   completed: "bg-brand-soft text-brand-darker",
+  // Neutral grey — a draft is an unconfirmed jotting, visually quieter
+  // than a scheduled job.
+  draft: "bg-gray-100 text-gray-600",
 };
 
+// Confirmed/working statuses only. `draft` is deliberately excluded:
+// this list drives active-work surfaces; drafts live behind their own
+// tab/prompt until upgraded.
 export const JOB_STATUSES: JobStatus[] = ["scheduled", "in_progress", "completed"];
 
 export const AGREEMENT_STATUS_LABELS: Record<AgreementStatus, string> = {

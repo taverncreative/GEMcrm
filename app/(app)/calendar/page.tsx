@@ -75,11 +75,14 @@ export default async function CalendarPage({
     (t) => t.due_date && t.due_date >= firstOfMonth && t.due_date <= lastOfMonth
   );
 
-  // Counts per status
+  // Counts per status. `draft` is tracked so the type stays exhaustive,
+  // but drafts are unconfirmed jottings — kept out of the month "glance"
+  // panel (see the filtered render below) until upgraded.
   const counts: Record<JobStatus, number> = {
     scheduled: 0,
     in_progress: 0,
     completed: 0,
+    draft: 0,
   };
   for (const j of thisMonthJobs) {
     const st = j.job_status as JobStatus;
@@ -105,15 +108,17 @@ export default async function CalendarPage({
               This month at a glance
             </h3>
             <dl className="mt-3 space-y-2">
-              {(Object.keys(counts) as JobStatus[]).map((st) => (
-                <div
-                  key={st}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <dt className="text-gray-600">{JOB_STATUS_LABELS[st]}</dt>
-                  <dd className="font-semibold text-gray-900">{counts[st]}</dd>
-                </div>
-              ))}
+              {(Object.keys(counts) as JobStatus[])
+                .filter((st) => st !== "draft")
+                .map((st) => (
+                  <div
+                    key={st}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <dt className="text-gray-600">{JOB_STATUS_LABELS[st]}</dt>
+                    <dd className="font-semibold text-gray-900">{counts[st]}</dd>
+                  </div>
+                ))}
               <div className="flex items-center justify-between text-sm">
                 <dt className="text-gray-600">Pending tasks</dt>
                 <dd className="font-semibold text-gray-900">

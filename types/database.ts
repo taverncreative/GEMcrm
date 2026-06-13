@@ -51,7 +51,7 @@ export interface Site {
 
 export type CallType = "routine" | "callout" | "followup" | "survey" | "other";
 export type RiskLevel = "low" | "medium" | "high";
-export type JobStatus = "scheduled" | "in_progress" | "completed";
+export type JobStatus = "scheduled" | "in_progress" | "completed" | "draft";
 
 export interface Job {
   id: string;

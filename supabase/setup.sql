@@ -680,6 +680,30 @@ alter table jobs
 
 
 -- ============================================================
+-- 034: draft jobs + time-window/capture schema foundation (Q0)
+-- ============================================================
+-- Quick job capture: a draft is a real jobs row with a distinct status
+-- value and a null site, gated by a CHECK. New status value + the two
+-- nullable columns flow through sync_pull_jobs (`select *`) and the
+-- Dexie mirror with no RPC/schema bump. See
+-- supabase/migrations/034_draft_jobs_and_window.sql.
+-- NOTE: when the L4 completed-requires-filled-sheet CHECK lands, it
+-- MUST exclude draft rows (gate on job_status = 'completed' only).
+
+alter table jobs drop constraint if exists jobs_job_status_check;
+alter table jobs add constraint jobs_job_status_check
+  check (job_status in ('scheduled', 'in_progress', 'completed', 'draft'));
+
+alter table jobs alter column site_id drop not null;
+alter table jobs drop constraint if exists jobs_draft_site_check;
+alter table jobs add constraint jobs_draft_site_check
+  check (site_id is not null or job_status = 'draft');
+
+alter table jobs add column if not exists capture_note text;
+alter table jobs add column if not exists job_time_end time;
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)
