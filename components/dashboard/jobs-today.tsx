@@ -1,5 +1,5 @@
 import { WidgetCard } from "./widget-card";
-import { formatJobTime } from "@/lib/utils/format-time";
+import { formatWindow } from "@/lib/utils/format-time";
 import { ROUTES } from "@/lib/constants/routes";
 import type { JobWithContext } from "@/lib/data/jobs";
 import Link from "next/link";
@@ -48,7 +48,7 @@ export function JobsToday({ jobs }: JobsTodayProps) {
                 >
                   {job.job_time && (
                     <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-gray-700">
-                      {formatJobTime(job.job_time)}
+                      {formatWindow(job.job_time, job.job_time_end)}
                     </span>
                   )}
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">

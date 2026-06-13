@@ -123,6 +123,8 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     deleted_at: null,
     job_date: "2026-05-15",
     job_time: null,
+    job_time_end: null,
+    capture_note: null,
     call_type: "routine",
     pest_species: ["Mice"],
     findings: null,

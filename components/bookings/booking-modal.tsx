@@ -22,6 +22,7 @@ import {
 } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/utils/id";
+import { TimeWindowPicker } from "@/components/ui/time-window-picker";
 import type { ActionState } from "@/types/actions";
 import type { Customer, CustomerType, Job, Site } from "@/types/database";
 
@@ -67,6 +68,7 @@ export interface BookingWrapInput {
     site_postcode: string;
     job_date: string;
     job_time: string;
+    job_time_end: string;
     call_type: string;
     pest_species: string[];
     value: string;
@@ -140,6 +142,7 @@ export const bookingMeta: WrapMeta<BookingWrapInput> = {
         site_postcode: s(formData, "site_postcode"),
         job_date: jobDate,
         job_time: s(formData, "job_time"),
+        job_time_end: s(formData, "job_time_end"),
         call_type: callType,
         pest_species: parseBookingPests(formData),
         value: s(formData, "value"),
@@ -204,6 +207,8 @@ export const bookingMeta: WrapMeta<BookingWrapInput> = {
       deleted_at: null,
       job_date: f.job_date,
       job_time: f.job_time.trim() || null,
+      job_time_end: f.job_time_end.trim() || null,
+      capture_note: null,
       call_type: (f.call_type || null) as Job["call_type"],
       pest_species: f.pest_species,
       findings: null,
@@ -323,6 +328,7 @@ export function BookingModal({
   // ── Booking state ──
   const [jobDate, setJobDate] = useState(todayIso);
   const [jobTime, setJobTime] = useState("");
+  const [jobTimeEnd, setJobTimeEnd] = useState("");
   const [callType, setCallType] = useState("");
   const [value, setValue] = useState("");
   const [reportNotes, setReportNotes] = useState("");
@@ -613,6 +619,7 @@ export function BookingModal({
           <input type="hidden" name="site_postcode" value={newSitePostcode} />
           <input type="hidden" name="job_date" value={jobDate} />
           <input type="hidden" name="job_time" value={jobTime} />
+          <input type="hidden" name="job_time_end" value={jobTimeEnd} />
           <input type="hidden" name="call_type" value={callType} />
           <input type="hidden" name="value" value={value} />
           <input type="hidden" name="report_notes" value={reportNotes} />
@@ -1052,32 +1059,21 @@ export function BookingModal({
               Booking
             </h3>
             <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className={labelClass}>
+              <div className="sm:col-span-2">
+                <label htmlFor="bn-job_date" className={labelClass}>
                   Date <span className="text-red-500">*</span>
                   <span className="ml-2 font-normal text-gray-400">
-                    / Time
+                    / Arrival window
                   </span>
                 </label>
-                {/* flex-wrap + min-w-0 so the time input drops below the
-                    date on phones whose intrinsic native date-picker width
-                    would otherwise push it off-screen. */}
-                <div className="mt-1 flex flex-wrap gap-2">
+                <div className="mt-1">
                   <input
                     id="bn-job_date"
                     type="date"
                     value={jobDate}
                     onChange={(e) => setJobDate(e.target.value)}
                     required
-                    className="block min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                  />
-                  <input
-                    id="bn-job_time"
-                    type="time"
-                    value={jobTime}
-                    onChange={(e) => setJobTime(e.target.value)}
-                    placeholder="All day"
-                    className="block w-28 shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    className="block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand sm:max-w-xs"
                   />
                 </div>
                 {errors.job_date && (
@@ -1085,9 +1081,16 @@ export function BookingModal({
                     {errors.job_date}
                   </p>
                 )}
-                <p className="mt-1 text-[11px] text-gray-400">
-                  Leave time blank for &ldquo;all day&rdquo;.
-                </p>
+                <div className="mt-2">
+                  <TimeWindowPicker
+                    idPrefix="bn-window"
+                    value={{ start: jobTime, end: jobTimeEnd }}
+                    onChange={({ start, end }) => {
+                      setJobTime(start);
+                      setJobTimeEnd(end);
+                    }}
+                  />
+                </div>
               </div>
               <div>
                 <label htmlFor="bn-call_type" className={labelClass}>

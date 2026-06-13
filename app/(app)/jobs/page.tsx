@@ -73,7 +73,7 @@ import { db } from "@/lib/db";
 import { runSync } from "@/lib/sync/engine";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { formatAddress } from "@/lib/utils/format-address";
-import { formatJobTime } from "@/lib/utils/format-time";
+import { formatWindow } from "@/lib/utils/format-time";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
 import { todayUk } from "@/lib/utils/today-uk";
 import { ROUTES } from "@/lib/constants/routes";
@@ -605,7 +605,7 @@ export default function JobsPage() {
                               job.job_time ? "text-gray-600" : "text-gray-400"
                             }`}
                           >
-                            {formatJobTime(job.job_time)}
+                            {formatWindow(job.job_time, job.job_time_end)}
                           </span>
                         </Link>
                       </td>

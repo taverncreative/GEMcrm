@@ -356,9 +356,10 @@ export async function approveServiceSheetAction(
         await createBooking({
           site_id: updated.site_id,
           job_date: options.followUpDate,
-          // Follow-ups inherit no specific time — operator can edit
-          // the booking afterwards to add one.
+          // Follow-ups inherit no specific time/window — operator can
+          // edit the booking afterwards to add one.
           job_time: "",
+          job_time_end: "",
           call_type: "followup",
           pest_species: updated.pest_species ?? [],
           report_notes: "",

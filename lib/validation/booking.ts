@@ -13,9 +13,11 @@ export const BookingSchema = z.object({
   site_id: z.string().min(1, "Site is required"),
   job_date: z.string().min(1, "Date is required"),
   // HH:MM (24h) from <input type="time">. Empty string = "all day".
-  // DB column is `time` and will reject malformed values; the form input
-  // already constrains the shape so no extra regex needed here.
+  // With a window, job_time is the START; job_time_end is the end. DB
+  // columns are `time` and reject malformed values; the picker already
+  // constrains the shape (and prevents end <= start) so no regex here.
   job_time: optionalString,
+  job_time_end: optionalString,
   call_type: z.enum(CALL_TYPES, { message: "Select a call type" }),
   pest_species: z.array(z.string()).default([]),
   value: z.coerce.number().min(0).optional(),

@@ -344,6 +344,7 @@ export async function createBooking(
         site_id: input.site_id,
         job_date: input.job_date,
         job_time: emptyToNull(input.job_time),
+        job_time_end: emptyToNull(input.job_time_end),
         call_type: input.call_type,
         pest_species: input.pest_species,
         value: input.value ?? null,

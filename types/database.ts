@@ -61,9 +61,16 @@ export interface Job {
   /** See `Customer.deleted_at`. */
   deleted_at: string | null;
   job_date: string;
-  /** Booked-in clock time ("HH:MM:SS" / "HH:MM"). Null means no specific
-   *  time yet — UI shows "All day". */
+  /** Booked-in clock time ("HH:MM:SS" / "HH:MM"). With a window this is
+   *  the START; null means no specific time — UI shows "All day". The
+   *  soonest-first sort keys on this. */
   job_time: string | null;
+  /** Arrival-window END (Q1). Null when the booking is a single time or
+   *  all-day. Always >= job_time when both are set. */
+  job_time_end: string | null;
+  /** Quick-capture phrase ("Sarah, Wasps, Folkestone") on a draft job
+   *  (Q0 column). Null on normal bookings. */
+  capture_note: string | null;
   call_type: CallType | null;
   pest_species: string[];
   findings: string | null;

@@ -64,6 +64,7 @@ const BookingPayloadSchema = z.object({
 
   job_date: z.string().min(1, "Date is required"),
   job_time: z.string().optional().default(""),
+  job_time_end: z.string().optional().default(""),
   call_type: z.enum(["routine", "callout", "followup", "survey", "other"], {
     message: "Select a call type",
   }),
@@ -108,6 +109,7 @@ export async function createQuickBookingAction(
     site_postcode: (formData.get("site_postcode") as string) ?? "",
     job_date: (formData.get("job_date") as string) ?? "",
     job_time: (formData.get("job_time") as string) ?? "",
+    job_time_end: (formData.get("job_time_end") as string) ?? "",
     call_type: (formData.get("call_type") as string) ?? "",
     pest_species: parseJsonArray(formData.get("pest_species") as string | null),
     value: (formData.get("value") as string) ?? "",
@@ -252,6 +254,7 @@ export async function createQuickBookingAction(
     site_id: siteId,
     job_date: data.job_date,
     job_time: data.job_time,
+    job_time_end: data.job_time_end,
     call_type: data.call_type,
     pest_species: data.pest_species,
     value: data.value,
