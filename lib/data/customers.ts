@@ -359,7 +359,7 @@ export interface CustomerListItem extends Customer {
   invoiceCount: number | null;
   primarySite: Site | null;
   latestJobCallType: string | null;
-  upcomingJob: { id: string; job_date: string; site_id: string } | null;
+  upcomingJob: { id: string; job_date: string; site_id: string | null } | null;
   hasActiveAgreement: boolean;
 }
 
@@ -438,6 +438,7 @@ export async function getCustomerListItems(
 
   const jobsByCustomer = new Map<string, Job[]>();
   for (const j of jobs) {
+    if (!j.site_id) continue; // drafts (Q2) have no site → no customer
     const cid = siteToCustomer.get(j.site_id);
     if (!cid) continue;
     const list = jobsByCustomer.get(cid) ?? [];

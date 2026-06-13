@@ -100,6 +100,58 @@ interface JobWithContext extends Job {
   site: Site & { customer: Customer };
 }
 
+/**
+ * Drafts tab (Q2). Quick captures have no customer/site context — they
+ * render straight from their phrase + date + arrival window. Each row
+ * links to the job detail, where "Upgrade to booking →" lives (Q3).
+ */
+function DraftsList({ drafts }: { drafts: Job[] | null }) {
+  if (drafts === null) return <JobsTableSkeleton />;
+  if (drafts.length === 0) {
+    return (
+      <div className="rounded-xl bg-white p-12 text-center shadow-sm">
+        <p className="text-sm text-gray-500">No draft jobs.</p>
+        <p className="mt-1 text-xs text-gray-400">
+          Use “Quick job” to jot a phone booking down in seconds — add the
+          customer and details later.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-hidden rounded-xl bg-white shadow-sm">
+      <ul className="divide-y divide-gray-100">
+        {drafts.map((d) => (
+          <li key={d.id}>
+            <Link
+              href={ROUTES.jobDetail(d.id)}
+              className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-gray-50"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-gray-900">
+                  {d.capture_note || "(no description)"}
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  {new Date(d.job_date).toLocaleDateString("en-GB", {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short",
+                  })}
+                  {" · "}
+                  {formatWindow(d.job_time, d.job_time_end)}
+                </p>
+              </div>
+              <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                Draft
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function JobsTableSkeleton() {
   return (
     <div className="overflow-hidden rounded-xl bg-white shadow-sm">
@@ -208,6 +260,10 @@ function buildRows(args: {
   for (const j of jobs) {
     if (j.deleted_at) continue;
     if (j.is_archived) continue;
+    // Drafts (Q2) carry a null site_id — they have no site/customer
+    // context and never belong in the context-joined Open/Completed
+    // views. The Drafts tab renders them from the raw jobs list instead.
+    if (!j.site_id) continue;
     const site = sitesById.get(j.site_id);
     if (!site) continue;
     const customer = customersById.get(site.customer_id);
@@ -228,10 +284,16 @@ export default function JobsPage() {
   const filter: "today" | "upcoming" | "all" =
     filterParam === "today" || filterParam === "upcoming" ? filterParam : "all";
 
-  // Two-segment status: Open (scheduled + in_progress) is the default; the
-  // Completed tab sets ?status=completed. Together they exhaust JobStatus.
-  const status: "open" | "completed" =
-    params.get("status") === "completed" ? "completed" : "open";
+  // Three-segment status: Open (scheduled + in_progress) is the default;
+  // Completed sets ?status=completed; Drafts (quick captures) sets
+  // ?status=draft. Each tab enumerates exactly the status(es) it wants.
+  const statusParam = params.get("status");
+  const status: "open" | "completed" | "draft" =
+    statusParam === "completed"
+      ? "completed"
+      : statusParam === "draft"
+        ? "draft"
+        : "open";
 
   // Date sort direction — presentational, local state (no need to deep-link
   // it). Default "asc" = soonest first, so the next/overdue job sits at the
@@ -315,6 +377,19 @@ export default function JobsPage() {
 
     return list.slice(0, JOBS_LIMIT);
   }, [jobs, sites, customers, filter, status, searchParam, today, sortDir]);
+
+  // Drafts (Q2) live outside the site/customer join — build them straight
+  // from the raw jobs list. Quick captures awaiting upgrade: phrase +
+  // date + window, newest date first.
+  const draftRows = useMemo<Job[] | null>(() => {
+    if (jobs === undefined) return null;
+    return jobs
+      .filter((j) => !j.deleted_at && !j.is_archived && j.job_status === "draft")
+      .sort((a, b) => {
+        const byDate = b.job_date.localeCompare(a.job_date);
+        return byDate !== 0 ? byDate : b.created_at.localeCompare(a.created_at);
+      });
+  }, [jobs]);
 
   // Selection only exists on the Completed tab — drop it when the tab
   // switches away. Render-time adjustment (the documented alternative
@@ -487,7 +562,9 @@ export default function JobsPage() {
       )}
 
       <div className="mt-4">
-        {rows === null ? (
+        {status === "draft" ? (
+          <DraftsList drafts={draftRows} />
+        ) : rows === null ? (
           <JobsTableSkeleton />
         ) : rows.length === 0 ? (
           <div className="rounded-xl bg-white p-12 text-center shadow-sm">

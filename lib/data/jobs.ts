@@ -371,6 +371,60 @@ export async function createBooking(
   return data;
 }
 
+export interface DraftJobInput {
+  /** The captured phrase, e.g. "Sarah, Wasps, Folkestone". */
+  capture_note: string;
+  job_date: string;
+  /** Arrival-window start / end (Q1 picker). Empty string = unset. */
+  job_time?: string;
+  job_time_end?: string;
+}
+
+/**
+ * Create a DRAFT job from quick capture (Q2): a phrase + date + arrival
+ * window, with NO customer/site/details. `job_status='draft'` lets the
+ * row carry a null site_id (DB CHECK), keeps it out of every active
+ * surface (each status filter enumerates only the statuses it wants),
+ * and out of the completion/invoice gates (drafts aren't fillable). No
+ * reference_number — that needs a customer and is generated at upgrade
+ * (Q3).
+ *
+ * `opts.id` is the offline-first client UUID: applyLocal already wrote
+ * the draft to Dexie with this id, and the outbox replay passes it so
+ * server == local. upsert(onConflict:"id") makes a lost-ack replay
+ * idempotent. There is no partial-unique clash to fear — that index is
+ * scoped to non-null site_id rows.
+ */
+export async function createDraftJob(
+  input: DraftJobInput,
+  opts?: { id?: string }
+): Promise<Job> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("jobs")
+    .upsert(
+      {
+        id: opts?.id ?? newId(),
+        site_id: null,
+        job_status: "draft" as JobStatus,
+        capture_note: emptyToNull(input.capture_note),
+        job_date: input.job_date,
+        job_time: emptyToNull(input.job_time),
+        job_time_end: emptyToNull(input.job_time_end),
+      },
+      { onConflict: "id" }
+    )
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[createDraftJob]", error.code, error.message);
+    throw new Error(`Failed to capture draft job: ${error.message}`);
+  }
+
+  return data;
+}
+
 /**
  * Save Service Sheet data + uploads but DON'T finalise.
  * Returns the updated job (status moves to in_progress so the user can see

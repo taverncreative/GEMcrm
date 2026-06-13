@@ -24,7 +24,12 @@ export async function getSitesByCustomer(customerId: string): Promise<Site[]> {
   return data;
 }
 
-export async function getSiteById(id: string): Promise<Site | null> {
+export async function getSiteById(
+  id: string | null | undefined
+): Promise<Site | null> {
+  // A draft job (Q2) has no site — callers following job -> site pass a
+  // null id; short-circuit rather than round-trip a guaranteed miss.
+  if (!id) return null;
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("sites")

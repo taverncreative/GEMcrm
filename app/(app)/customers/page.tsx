@@ -114,6 +114,7 @@ function buildListItems(args: {
   for (const j of jobs) {
     if (j.deleted_at) continue;
     if (j.is_archived) continue;
+    if (!j.site_id) continue; // drafts (Q2) have no site → no customer
     const cid = siteToCustomer.get(j.site_id);
     if (!cid) continue;
     const list = jobsByCustomer.get(cid) ?? [];

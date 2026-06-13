@@ -6,7 +6,7 @@ import { createCustomer, getCustomerById } from "@/lib/data/customers";
 import { createSite, getSiteById } from "@/lib/data/sites";
 import { searchCustomers, getCustomers } from "@/lib/data/customers";
 import { getSitesByCustomer } from "@/lib/data/sites";
-import { createBooking, JobClashError } from "@/lib/data/jobs";
+import { createBooking, createDraftJob, JobClashError } from "@/lib/data/jobs";
 import { CustomerSchema } from "@/lib/validation/customer";
 import { SiteSchema } from "@/lib/validation/site";
 import { BookingSchema } from "@/lib/validation/booking";
@@ -295,4 +295,63 @@ export async function createQuickBookingAction(
   revalidatePath(ROUTES.customerDetail(customerId));
 
   return { success: true, errors: {}, message: "Booking created" };
+}
+
+// ─── Quick job capture (Q2) ──────────────────────────────────────────────
+
+const QuickCaptureSchema = z.object({
+  // The phrase IS the draft — required so a blank capture can't create a
+  // contentless ghost row. job_date is required (NOT NULL on jobs).
+  capture_note: z.string().trim().min(1, "Jot down what the job is"),
+  job_date: z.string().min(1, "Pick a date"),
+  job_time: z.string().optional().default(""),
+  job_time_end: z.string().optional().default(""),
+});
+
+/**
+ * Capture a draft job in seconds: phrase + date + arrival window, no
+ * customer/site. Optimistic path (offline-first): the client wrapper
+ * writes the draft to Dexie and enqueues ONE outbox entry, and this
+ * server action is its replay (and the online fast-path). `job_id` is
+ * the client UUID so server == local. Upgrading the draft to a real
+ * booking is Q3.
+ */
+export async function captureQuickJobAction(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  await requireUser();
+
+  const parsed = QuickCaptureSchema.safeParse({
+    capture_note: (formData.get("capture_note") as string) ?? "",
+    job_date: (formData.get("job_date") as string) ?? "",
+    job_time: (formData.get("job_time") as string) ?? "",
+    job_time_end: (formData.get("job_time_end") as string) ?? "",
+  });
+  if (!parsed.success) {
+    const errors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0];
+      if (typeof key === "string") errors[key] = issue.message;
+    }
+    return { success: false, errors, message: null };
+  }
+
+  // Client UUID from the optimistic wrapper (replayArgs injects it).
+  // Absent on a hypothetical bare online call → fresh id server-side.
+  const jobId = (formData.get("job_id") as string) || undefined;
+
+  try {
+    await createDraftJob(parsed.data, { id: jobId });
+  } catch (err) {
+    return {
+      success: false,
+      errors: {},
+      message: err instanceof Error ? err.message : "Failed to capture draft",
+    };
+  }
+
+  revalidatePath(ROUTES.JOBS);
+  revalidatePath(ROUTES.DASHBOARD);
+  return { success: true, errors: {}, message: "Draft captured" };
 }

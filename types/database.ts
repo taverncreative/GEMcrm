@@ -55,7 +55,10 @@ export type JobStatus = "scheduled" | "in_progress" | "completed" | "draft";
 
 export interface Job {
   id: string;
-  site_id: string;
+  /** Null ONLY for `draft` jobs (quick capture, Q2) — a DB CHECK
+   *  enforces site_id IS NOT NULL for every non-draft status. Reads
+   *  that follow site -> customer must guard for the draft case. */
+  site_id: string | null;
   created_at: string;
   updated_at: string;
   /** See `Customer.deleted_at`. */

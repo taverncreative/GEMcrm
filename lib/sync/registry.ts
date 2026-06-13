@@ -38,7 +38,10 @@ import {
   createCustomerAction,
 } from "@/app/(app)/customers/actions";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
-import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
+import {
+  createQuickBookingAction,
+  captureQuickJobAction,
+} from "@/app/(app)/bookings/actions";
 import type { ActionState } from "@/types/actions";
 
 /** Fresh initial state to satisfy the React `useActionState` calling
@@ -86,6 +89,10 @@ export const REGISTRY: Record<string, RegistryEntry> = {
   createQuickBookingAction: {
     kind: "form",
     invoke: (fd) => createQuickBookingAction(INITIAL_FORM_STATE, fd),
+  },
+  captureQuickJobAction: {
+    kind: "form",
+    invoke: (fd) => captureQuickJobAction(INITIAL_FORM_STATE, fd),
   },
   completeServiceSheetAction: {
     kind: "form",

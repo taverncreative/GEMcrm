@@ -305,7 +305,9 @@ export async function approveServiceSheetAction(
         updated,
         {
           customerId: site.customer_id,
-          siteId: updated.site_id,
+          // site is non-null here (guarded); use its id rather than the
+          // now-nullable job.site_id (draft jobs never reach completion).
+          siteId: site.id,
         },
         { sendReportEmail: false }
       );
@@ -354,7 +356,7 @@ export async function approveServiceSheetAction(
     if (options.scheduleFollowUp && options.followUpDate && site) {
       try {
         await createBooking({
-          site_id: updated.site_id,
+          site_id: site.id,
           job_date: options.followUpDate,
           // Follow-ups inherit no specific time/window — operator can
           // edit the booking afterwards to add one.
