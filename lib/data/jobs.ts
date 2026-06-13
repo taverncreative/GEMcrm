@@ -371,6 +371,103 @@ export async function createBooking(
   return data;
 }
 
+/**
+ * Upgrade a DRAFT job to a real scheduled booking (Q3).
+ *
+ * The draft already exists (quick capture wrote it with site_id NULL,
+ * job_status 'draft'). This ATTACHES a resolved site, fills the booking
+ * fields, generates the reference_number, and flips status draft →
+ * scheduled — all on the SAME row, so the operator's original
+ * capture_note is preserved (it is deliberately OMITTED from the SET).
+ *
+ * Guarded UPDATE — `.eq("job_status", "draft")` is the positive analog of
+ * {@link updateJobStatus}'s `.neq("completed")`: a stale upgrade replay
+ * that drains AFTER the job has already advanced (draft → scheduled →
+ * in_progress → completed — a lost-ack re-run, or a second client) matches
+ * ZERO rows and no-ops, instead of slamming a progressed job back to
+ * 'scheduled'. That zero-row match is why this uses `.maybeSingle()` and
+ * NOT `.single()` — a guarded no-op must not throw PGRST116. Returns the
+ * upgraded row, or `null` when the guard matched nothing (a deliberate
+ * no-op, never an error).
+ *
+ * reference_number is derived server-side via the same site → customer
+ * lookup {@link createBooking} uses ({@link generateJobReference}); it is
+ * NOT computable offline, so the optimistic local write leaves it null and
+ * the UI falls back to the short id until this replay fills it.
+ *
+ * A 23505 from idx_jobs_site_date_unique (the moment the draft's null site
+ * becomes a real site that already has a job for this date + call_type) is
+ * mapped to {@link JobClashError} — the SAME graceful surfacing as
+ * createBooking, never a raw DB error. (A brand-new site can't clash; the
+ * risk is confined to the existing-site upgrade path.)
+ */
+export async function upgradeDraftJob(
+  draftJobId: string,
+  input: BookingInput
+): Promise<Job | null> {
+  const supabase = await createClient();
+
+  // The reference needs the customer's type + company_name/name, reached
+  // via the now-resolved site → customer chain (the same embedded select
+  // createBooking uses). The site exists by now — the action created or
+  // resolved it before calling here.
+  const { data: siteRow, error: siteErr } = await supabase
+    .from("sites")
+    .select("customer:customers!inner(customer_type, company_name, name)")
+    .eq("id", input.site_id)
+    .single();
+  if (siteErr || !siteRow) {
+    throw new Error("Site not found for draft upgrade");
+  }
+  const customer = (siteRow as unknown as {
+    customer: Pick<Customer, "customer_type" | "company_name" | "name">;
+  }).customer;
+
+  const parentJobId = input.parent_job_id?.trim() || null;
+  const referenceNumber = await generateJobReference({
+    customer,
+    parentJobId,
+  });
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .update({
+      site_id: input.site_id,
+      job_date: input.job_date,
+      job_time: emptyToNull(input.job_time),
+      job_time_end: emptyToNull(input.job_time_end),
+      call_type: input.call_type,
+      pest_species: input.pest_species,
+      value: input.value ?? null,
+      report_notes: emptyToNull(input.report_notes),
+      job_status: "scheduled",
+      reference_number: referenceNumber,
+      parent_job_id: parentJobId,
+      // capture_note is deliberately NOT set — the operator's original
+      // jotting persists untouched on the upgraded row.
+    })
+    .eq("id", draftJobId)
+    // Guard: only a still-draft row upgrades. A stale replay onto an
+    // already-advanced job matches zero rows → no-op (see doc above).
+    .eq("job_status", "draft")
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "23505") {
+      throw new JobClashError(
+        "A booking of this call type already exists for this site on this date."
+      );
+    }
+    console.error("[upgradeDraftJob]", error.code, error.message);
+    throw new Error(`Failed to upgrade draft: ${error.message}`);
+  }
+
+  // null when the guard matched zero rows (already-advanced / idempotent
+  // replay) — a deliberate no-op, NOT an error.
+  return data ?? null;
+}
+
 export interface DraftJobInput {
   /** The captured phrase, e.g. "Sarah, Wasps, Folkestone". */
   capture_note: string;

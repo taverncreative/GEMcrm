@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import type { Customer, Site } from "@/types/database";
+import type { Customer, Job, Site } from "@/types/database";
 
 /**
  * Local (Dexie) lookups for the booking / invoice customer + site
@@ -61,4 +61,43 @@ export async function getSitesForCustomerLocal(
     .equals(customerId)
     .toArray();
   return sites.filter((s) => !s.deleted_at).sort(byCreatedAtDesc);
+}
+
+/**
+ * Offline clash check (Q3c) — the Dexie mirror of the server's partial
+ * unique index `idx_jobs_site_date_unique`
+ * (site_id, job_date, call_type WHERE is_archived=false AND
+ * agreement_id IS NULL AND deleted_at IS NULL).
+ *
+ * The booking + upgrade modals call this against Dexie BEFORE the
+ * optimistic write, so a duplicate is blocked inline (online AND offline)
+ * instead of only surfacing later as a stuck outbox entry in the conflict
+ * inbox (which stays as the server-side backstop). This honours the
+ * "client-checkable from Dexie" rule — the operator learns about the
+ * clash with no signal, not after a sync round-trip.
+ *
+ * Uses the compound `[site_id+job_date+call_type]` index, then filters
+ * out the archived / soft-deleted / agreement rows the partial index
+ * excludes. `excludeJobId` skips a row by id — the upgrade passes the
+ * draft's own id so it can never clash with itself (a draft has a null
+ * site_id and so isn't in this index anyway, but belt-and-braces).
+ */
+export async function findClashingJobLocal(
+  siteId: string,
+  jobDate: string,
+  callType: string,
+  excludeJobId?: string
+): Promise<Job | undefined> {
+  if (!siteId || !jobDate || !callType) return undefined;
+  const candidates = await db.jobs
+    .where("[site_id+job_date+call_type]")
+    .equals([siteId, jobDate, callType])
+    .toArray();
+  return candidates.find(
+    (j) =>
+      j.id !== excludeJobId &&
+      !j.is_archived &&
+      !j.deleted_at &&
+      !j.agreement_id
+  );
 }
