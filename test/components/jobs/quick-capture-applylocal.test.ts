@@ -14,6 +14,10 @@ const baseInput = {
   job_date: "2026-06-20",
   job_time: "09:00",
   job_time_end: "12:00",
+  // Optional caller contact (Track 2) — empty here = the minimal no-contact
+  // draft; a dedicated test below covers the with-contact case.
+  draft_contact_name: "",
+  draft_contact_phone: "",
 };
 
 beforeEach(async () => {
@@ -58,6 +62,48 @@ describe("quickCaptureMeta", () => {
     expect(row!.job_time).toBe("09:00");
     expect(row!.job_time_end).toBe("12:00");
     expect(row!.reference_number).toBeNull();
+    // Contact is optional — blank in/blank out persists as null (Track 2).
+    expect(row!.draft_contact_name).toBeNull();
+    expect(row!.draft_contact_phone).toBeNull();
+  });
+
+  it("parseInput carries optional caller name + phone (Track 2)", () => {
+    const fd = new FormData();
+    fd.set("capture_note", "Sarah, Wasps, Folkestone");
+    fd.set("job_date", "2026-06-20");
+    fd.set("draft_contact_name", "Sarah Jones");
+    fd.set("draft_contact_phone", "07700 900000");
+    const parsed = quickCaptureMeta.parseInput!(fd);
+    expect(parsed!.draft_contact_name).toBe("Sarah Jones");
+    expect(parsed!.draft_contact_phone).toBe("07700 900000");
+  });
+
+  it("applyLocal persists caller name + phone onto the draft (Track 2)", async () => {
+    await quickCaptureMeta.applyLocal({
+      ...baseInput,
+      jobId: "22222222-2222-4222-8222-222222222222",
+      draft_contact_name: "Sarah Jones",
+      draft_contact_phone: "07700 900000",
+    });
+    const row = await db.jobs.get("22222222-2222-4222-8222-222222222222");
+    expect(row!.draft_contact_name).toBe("Sarah Jones");
+    expect(row!.draft_contact_phone).toBe("07700 900000");
+    // Still a draft — contact doesn't change the offline shape.
+    expect(row!.job_status).toBe("draft");
+    expect(row!.site_id).toBeNull();
+  });
+
+  it("replayArgs carries the contact fields so server == local on drain", () => {
+    const args = quickCaptureMeta.replayArgs!(
+      {
+        ...baseInput,
+        draft_contact_name: "Sarah Jones",
+        draft_contact_phone: "07700 900000",
+      },
+      new FormData()
+    );
+    expect(args.draft_contact_name).toBe("Sarah Jones");
+    expect(args.draft_contact_phone).toBe("07700 900000");
   });
 
   it("op is 'create' and entityIds lists only the new job id", () => {

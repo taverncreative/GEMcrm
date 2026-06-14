@@ -79,6 +79,43 @@ describe("captureQuickJobAction", () => {
     expect(opts.id).toBe("client-uuid-1");
   });
 
+  it("carries optional caller name + phone through to createDraftJob", async () => {
+    const res = await captureQuickJobAction(
+      INITIAL,
+      fd({
+        capture_note: "Sarah, Wasps, Folkestone",
+        job_date: "2026-06-20",
+        draft_contact_name: "Sarah Jones",
+        draft_contact_phone: "07700 900000",
+      })
+    );
+
+    expect(res.success).toBe(true);
+    const [input] = createDraftJobMock.mock.calls[0] as unknown as [
+      Record<string, string>,
+    ];
+    expect(input).toMatchObject({
+      draft_contact_name: "Sarah Jones",
+      draft_contact_phone: "07700 900000",
+    });
+  });
+
+  it("contact is optional — succeeds with no name/phone (empty defaults)", async () => {
+    const res = await captureQuickJobAction(
+      INITIAL,
+      fd({ capture_note: "Wasps, Hythe", job_date: "2026-06-21" })
+    );
+
+    expect(res.success).toBe(true);
+    expect(createDraftJobMock).toHaveBeenCalledTimes(1);
+    const [input] = createDraftJobMock.mock.calls[0] as unknown as [
+      Record<string, string>,
+    ];
+    // Absent fields default to "" (createDraftJob maps "" -> null).
+    expect(input.draft_contact_name).toBe("");
+    expect(input.draft_contact_phone).toBe("");
+  });
+
   it("blank phrase → rejected, nothing created", async () => {
     const res = await captureQuickJobAction(
       INITIAL,

@@ -30,6 +30,9 @@ interface QuickCaptureInput {
   job_date: string;
   job_time: string;
   job_time_end: string;
+  /** Optional caller contact (Track 2). Empty string = unset. */
+  draft_contact_name: string;
+  draft_contact_phone: string;
 }
 
 const s = (fd: FormData, k: string) => ((fd.get(k) as string | null) ?? "").trim();
@@ -52,6 +55,8 @@ export const quickCaptureMeta: WrapMeta<QuickCaptureInput> = {
       job_date,
       job_time: s(formData, "job_time"),
       job_time_end: s(formData, "job_time_end"),
+      draft_contact_name: s(formData, "draft_contact_name"),
+      draft_contact_phone: s(formData, "draft_contact_phone"),
     };
   },
   applyLocal: async (input) => {
@@ -69,6 +74,8 @@ export const quickCaptureMeta: WrapMeta<QuickCaptureInput> = {
       job_time: input.job_time || null,
       job_time_end: input.job_time_end || null,
       capture_note: input.capture_note,
+      draft_contact_name: input.draft_contact_name || null,
+      draft_contact_phone: input.draft_contact_phone || null,
       call_type: null,
       pest_species: [],
       findings: null,
@@ -110,6 +117,8 @@ export const quickCaptureMeta: WrapMeta<QuickCaptureInput> = {
     job_date: input.job_date,
     job_time: input.job_time,
     job_time_end: input.job_time_end,
+    draft_contact_name: input.draft_contact_name,
+    draft_contact_phone: input.draft_contact_phone,
   }),
 };
 
@@ -136,6 +145,8 @@ export function QuickJobCapture({
   const [jobDate, setJobDate] = useState(todayUk());
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
   const [phraseError, setPhraseError] = useState<string | null>(null);
 
   const [, action, isPending] = useLocalFirstAction<
@@ -150,6 +161,8 @@ export function QuickJobCapture({
     setJobDate(todayUk());
     setStart("");
     setEnd("");
+    setContactName("");
+    setContactPhone("");
     setPhraseError(null);
   }
 
@@ -210,6 +223,42 @@ export function QuickJobCapture({
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
             />
             {phraseError && <p className="mt-1 text-xs text-red-500">{phraseError}</p>}
+          </div>
+
+          {/* Optional caller contact (Track 2). The everyday trigger is a
+              usually-new customer phoning in — jot their name + number now so
+              the draft carries it to upgrade. Both optional; the phrase above
+              stays the only required field. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="qjc-contact-name" className="block text-sm font-medium text-gray-700">
+                Caller name <span className="font-normal text-gray-400">(optional)</span>
+              </label>
+              <input
+                id="qjc-contact-name"
+                name="draft_contact_name"
+                type="text"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                placeholder="e.g. Sarah Jones"
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="qjc-contact-phone" className="block text-sm font-medium text-gray-700">
+                Phone <span className="font-normal text-gray-400">(optional)</span>
+              </label>
+              <input
+                id="qjc-contact-phone"
+                name="draft_contact_phone"
+                type="tel"
+                inputMode="tel"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="e.g. 07700 900000"
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
+              />
+            </div>
           </div>
 
           <div>

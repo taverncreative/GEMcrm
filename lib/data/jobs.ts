@@ -475,6 +475,10 @@ export interface DraftJobInput {
   /** Arrival-window start / end (Q1 picker). Empty string = unset. */
   job_time?: string;
   job_time_end?: string;
+  /** Optional caller contact (Track 2) — name + phone jotted at intake.
+   *  Empty/absent = unset (stored null). */
+  draft_contact_name?: string;
+  draft_contact_phone?: string;
 }
 
 /**
@@ -505,6 +509,8 @@ export async function createDraftJob(
         site_id: null,
         job_status: "draft" as JobStatus,
         capture_note: emptyToNull(input.capture_note),
+        draft_contact_name: emptyToNull(input.draft_contact_name),
+        draft_contact_phone: emptyToNull(input.draft_contact_phone),
         job_date: input.job_date,
         job_time: emptyToNull(input.job_time),
         job_time_end: emptyToNull(input.job_time_end),

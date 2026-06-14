@@ -311,6 +311,10 @@ const QuickCaptureSchema = z.object({
   job_date: z.string().min(1, "Pick a date"),
   job_time: z.string().optional().default(""),
   job_time_end: z.string().optional().default(""),
+  // Optional caller contact (Track 2) — never required; the phrase stays
+  // the only mandatory content. Trimmed; blank → "" → stored null.
+  draft_contact_name: z.string().trim().optional().default(""),
+  draft_contact_phone: z.string().trim().optional().default(""),
 });
 
 /**
@@ -332,6 +336,8 @@ export async function captureQuickJobAction(
     job_date: (formData.get("job_date") as string) ?? "",
     job_time: (formData.get("job_time") as string) ?? "",
     job_time_end: (formData.get("job_time_end") as string) ?? "",
+    draft_contact_name: (formData.get("draft_contact_name") as string) ?? "",
+    draft_contact_phone: (formData.get("draft_contact_phone") as string) ?? "",
   });
   if (!parsed.success) {
     const errors: Record<string, string> = {};

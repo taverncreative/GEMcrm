@@ -74,6 +74,18 @@ export interface Job {
   /** Quick-capture phrase ("Sarah, Wasps, Folkestone") on a draft job
    *  (Q0 column). Null on normal bookings. */
   capture_note: string | null;
+  /** Optional caller contact jotted at quick-capture (Track 2, migration
+   *  036) — the everyday trigger is a usually-new customer phoning in.
+   *  Deliberately DISTINCT from `client_name` (the service-sheet's "client
+   *  present at the visit"). Read at upgrade to pre-fill / local-match the
+   *  customer; only ever set on draft rows.
+   *
+   *  Optional on the TYPE (like `is_archived`): the column flows through
+   *  `sync_pull_jobs` (`select *`), so freshly-pulled rows carry it as a
+   *  value-or-null — but draft rows synced into Dexie BEFORE 036 lack the
+   *  field entirely (`undefined`) until re-pulled. Readers use `?? null`. */
+  draft_contact_name?: string | null;
+  draft_contact_phone?: string | null;
   call_type: CallType | null;
   pest_species: string[];
   findings: string | null;

@@ -732,6 +732,19 @@ alter table jobs add constraint jobs_completed_requires_filled_sheet
 
 
 -- ============================================================
+-- 036: optional structured contact on draft jobs (Track 2)
+-- ============================================================
+-- Two nullable contact columns on draft quick-captures (caller name +
+-- phone), captured at intake when a usually-new customer phones in.
+-- Distinct from the service-sheet's client_name. Additive, nullable, no
+-- backfill; sync_pull_jobs is `select *` so no RPC change; not indexed so
+-- no Dexie bump. See supabase/migrations/036_draft_contact.sql.
+
+alter table jobs add column if not exists draft_contact_name text;
+alter table jobs add column if not exists draft_contact_phone text;
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)
