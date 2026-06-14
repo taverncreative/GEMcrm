@@ -169,14 +169,11 @@ export function renderJobReportHtml({
     </div>
   </div>` : ""}
 
-  <!-- Internal Notes (separate, styled differently) -->
-  ${job.report_notes ? `
-  <div class="section avoid-break">
-    <div class="section-title" style="color: #9ca3af; font-size: 9px;">Internal Notes</div>
-    <div class="section-card" style="background: #f3f4f6; border: 1px dashed #d1d5db;">
-      <div style="font-size: 10px; color: #6b7280; line-height: 1.5; white-space: pre-wrap;">${escape(job.report_notes)}</div>
-    </div>
-  </div>` : ""}
+  <!-- Internal Notes (job.report_notes) are DELIBERATELY OMITTED here: this
+       PDF is the customer-facing service report, and report_notes is the
+       operator's internal field ("Internal Notes" in the service-sheet form,
+       e.g. gate codes / access notes). The data is untouched — it still shows
+       in the in-app job view; it just must never reach the customer doc. -->
 
   <!-- Treatment -->
   ${job.method_used?.length > 0 || job.pesticides_used ? `
