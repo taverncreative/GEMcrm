@@ -345,6 +345,51 @@ const bookingLocalFirstOpts: LocalFirstOptions<ActionState, BookingWrapInput> =
     }),
   };
 
+// ─── Smart contact match for draft upgrades (Track 2, Half 2) ───────
+//
+// When a draft carries a captured caller name/phone, classify it against
+// the synced customers BEFORE defaulting the customer step. REUSES the
+// existing offline customer search (searchCustomersLocal — name/company
+// substring, soft-delete-excluded); no new lookup, no server call.
+//
+//   strong → an exact (case-insensitive) name match, OR a candidate whose
+//            phone/mobile matches the captured number — a returning caller.
+//            The upgrade preselects them so they're not duplicated.
+//   weak   → a partial name hit (substring, not exact) — kept as a "new"
+//            default but surfaced as a tappable hint.
+//   none   → nothing matched (or no contact captured) → "new", as-is.
+type ContactMatch =
+  | { kind: "none" }
+  | { kind: "weak"; customer: Customer }
+  | { kind: "strong"; customer: Customer };
+
+function digitsOnly(v: string | null | undefined): string {
+  return (v ?? "").replace(/\D/g, "");
+}
+
+async function matchCapturedContact(
+  name: string,
+  phone: string
+): Promise<ContactMatch> {
+  const nm = name.trim();
+  const ph = digitsOnly(phone);
+  if (!nm && !ph) return { kind: "none" };
+  // Name-driven (the everyday capture). Phone, when present, strengthens a
+  // partial name hit to a confident match among those candidates.
+  const candidates = nm ? await searchCustomersLocal(nm) : [];
+  if (candidates.length === 0) return { kind: "none" };
+  const lowerNm = nm.toLowerCase();
+  const strong =
+    candidates.find((c) => (c.name ?? "").trim().toLowerCase() === lowerNm) ??
+    (ph
+      ? candidates.find(
+          (c) => digitsOnly(c.phone) === ph || digitsOnly(c.mobile) === ph
+        )
+      : undefined);
+  if (strong) return { kind: "strong", customer: strong };
+  return { kind: "weak", customer: candidates[0] };
+}
+
 interface BookingModalProps {
   open: boolean;
   onClose: () => void;
@@ -362,6 +407,11 @@ interface BookingModalProps {
   presetJobDate?: string;
   /** Prefill the arrival window from the draft (Q5). Create mode → blank. */
   presetWindow?: { start: string; end: string };
+  /** Upgrade mode (Track 2 Half 2): the draft's captured caller name/phone.
+   *  Used ONLY to DEFAULT + PREFILL the customer step on open (smart match);
+   *  never written back as-is — the operator confirms the customer. */
+  presetContactName?: string;
+  presetContactPhone?: string;
 }
 
 type CustomerMode = "existing" | "new";
@@ -389,6 +439,8 @@ export function BookingModal({
   presetCaptureNote,
   presetJobDate,
   presetWindow,
+  presetContactName,
+  presetContactPhone,
 }: BookingModalProps) {
   // ── Customer state ──
   const [customerMode, setCustomerMode] = useState<CustomerMode>("existing");
@@ -429,6 +481,11 @@ export function BookingModal({
   // so without this a missing required field is a silent no-op. Merged with
   // any server-returned errors for display.
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+
+  // Smart-match hint (Track 2 Half 2): a possible existing customer for the
+  // captured contact, offered inline in "new" mode. Tapping it switches to
+  // that customer instead of creating a duplicate.
+  const [matchHint, setMatchHint] = useState<Customer | null>(null);
 
   const customerInputRef = useRef<HTMLInputElement>(null);
   const customerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -504,6 +561,7 @@ export function BookingModal({
     setSites([]);
     setSelectedPests([]);
     setClientErrors({});
+    setMatchHint(null);
     setNewCustomerType("commercial");
     setNewCustomerName("");
     setNewCustomerCompany("");
@@ -525,6 +583,40 @@ export function BookingModal({
     setCallType("");
     setValue("");
     setReportNotes("");
+
+    // Upgrade (attach-to-draft, Track 2 Half 2): the everyday trigger is a
+    // usually-new caller, so DEFAULT to "new" and prefill from the captured
+    // contact. Then run a smart local match (Dexie, offline): a clear match
+    // switches to "existing" + preselect (no duplicate); a partial match is
+    // offered as an inline hint; no match stays "new". Takes precedence over
+    // the search-only / presetCustomer branches below.
+    if (draftJobId && !presetCustomer) {
+      setCustomerMode("new");
+      setSiteMode("new");
+      setNewCustomerName(presetContactName ?? "");
+      setNewCustomerPhone(presetContactPhone ?? "");
+      setCustomerResults([]);
+      setLoadingCustomers(false);
+      void matchCapturedContact(
+        presetContactName ?? "",
+        presetContactPhone ?? ""
+      ).then(async (m) => {
+        if (m.kind === "strong") {
+          // Returning caller — switch to existing + preselect, don't duplicate.
+          setCustomerMode("existing");
+          setSelectedCustomer(m.customer);
+          setSiteMode("existing");
+          const list = await getSitesForCustomerLocal(m.customer.id);
+          setSites(list);
+          if (list.length > 0) setSelectedSite(list[0]);
+          else prefillSiteFromCustomer(m.customer);
+        } else if (m.kind === "weak") {
+          setMatchHint(m.customer);
+        }
+        // none → stay "new" (prefilled), no hint.
+      });
+      return;
+    }
 
     if (!presetCustomer) {
       // Search-only picker: no list until the user types (≥1 char). Just
@@ -548,7 +640,16 @@ export function BookingModal({
         }
       });
     }
-  }, [open, presetCustomer, presetSite, presetJobDate, presetWindow]);
+  }, [
+    open,
+    presetCustomer,
+    presetSite,
+    presetJobDate,
+    presetWindow,
+    draftJobId,
+    presetContactName,
+    presetContactPhone,
+  ]);
 
   // Close on successful submission — and that's it. The post-save NEVER
   // touches the network. router.refresh() used to live here, but it's the
@@ -907,7 +1008,33 @@ export function BookingModal({
                 )}
               </div>
             ) : (
-              <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="mt-2">
+                {/* Smart-match hint (Track 2 Half 2): the captured contact
+                    partially matches an existing customer. Offer them inline
+                    so a returning caller isn't duplicated — tapping switches
+                    to that customer (existing mode, preselected). */}
+                {matchHint && (
+                  <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="min-w-0 text-xs text-amber-800">
+                      Looks like an existing customer:{" "}
+                      <span className="font-medium">{matchHint.name}</span>
+                      {matchHint.company_name ? ` (${matchHint.company_name})` : ""}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const c = matchHint;
+                        setMatchHint(null);
+                        setCustomerMode("existing");
+                        void pickCustomer(c);
+                      }}
+                      className="shrink-0 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                    >
+                      Use them
+                    </button>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <label className={labelClass}>
                     Customer type <span className="text-red-500">*</span>
@@ -993,6 +1120,7 @@ export function BookingModal({
                       {errors.customer_email}
                     </p>
                   )}
+                </div>
                 </div>
               </div>
             )}

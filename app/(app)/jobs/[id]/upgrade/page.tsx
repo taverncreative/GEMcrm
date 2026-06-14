@@ -66,6 +66,8 @@ export default function UpgradeDraftPage() {
         start: draft.job_time ?? "",
         end: draft.job_time_end ?? "",
       }}
+      presetContactName={draft.draft_contact_name ?? undefined}
+      presetContactPhone={draft.draft_contact_phone ?? undefined}
     />
   );
 }
