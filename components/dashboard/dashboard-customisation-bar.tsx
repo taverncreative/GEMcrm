@@ -1,6 +1,7 @@
 "use client";
 
 import { AddWidgetMenu } from "@/components/dashboard/widget-frame";
+import { REVIEW_REQUESTS_ENABLED } from "@/lib/constants/feature-flags";
 
 /**
  * Widget registry — kept in one place so the `Add widget` picker, the
@@ -16,7 +17,13 @@ import { AddWidgetMenu } from "@/components/dashboard/widget-frame";
  * phone view stays focused on what they need in the van. Desktop layout
  * is unaffected.
  */
-export const WIDGET_REGISTRY = [
+interface WidgetRegistryEntry {
+  id: string;
+  title: string;
+  desktopOnly: boolean;
+}
+
+export const WIDGET_REGISTRY: ReadonlyArray<WidgetRegistryEntry> = [
   { id: "revenue-stats", title: "Revenue", desktopOnly: true },
   { id: "service-sheets-to-fill", title: "Service sheets to fill", desktopOnly: false },
   { id: "drafts-to-upgrade", title: "Drafts to upgrade", desktopOnly: false },
@@ -24,13 +31,22 @@ export const WIDGET_REGISTRY = [
   // "upcoming-visits" is intentionally absent: it's now a featured,
   // full-width section at the top of the dashboard (see dashboard/page.tsx),
   // rendered outside the reorderable grid — so it's not customisable here.
-  { id: "review-requests", title: "Request review", desktopOnly: true },
+  //
+  // "Request review" is gated by REVIEW_REQUESTS_ENABLED (one feature, one
+  // switch). OFF → not registered: gone from the Add-widget picker AND not
+  // a valid id, so DashboardGrid drops it from any saved layout cleanly (no
+  // empty slot). Combined with the widgets-array gate in dashboard/page.tsx,
+  // flipping the flag back to true restores the widget AND the review-task
+  // auto-creation together.
+  ...(REVIEW_REQUESTS_ENABLED
+    ? [{ id: "review-requests", title: "Request review", desktopOnly: true }]
+    : []),
   { id: "customers-to-contact", title: "Customers to contact", desktopOnly: false },
   { id: "pma-renewals", title: "PMA renewals", desktopOnly: true },
   { id: "overdue-tasks", title: "Overdue tasks", desktopOnly: false },
   { id: "recent-activity", title: "Recent activity", desktopOnly: true },
   { id: "this-month-calendar", title: "This month calendar", desktopOnly: true },
-] as const;
+];
 
 export function DashboardCustomisationBar() {
   // Customisation chrome is desktop-only — no drag-and-drop on touch, and

@@ -35,6 +35,7 @@ import { DashboardCalendar } from "@/components/dashboard/dashboard-calendar";
 import { ROUTES } from "@/lib/constants/routes";
 import { dateUk } from "@/lib/utils/today-uk";
 import { BUSINESS } from "@/lib/constants/branding";
+import { REVIEW_REQUESTS_ENABLED } from "@/lib/constants/feature-flags";
 
 async function DashboardWidgets() {
   // Note: domestic-review auto-send used to fire here on every dashboard
@@ -188,14 +189,23 @@ async function DashboardWidgets() {
               </WidgetFrame>
             ),
           },
-          {
-            id: "review-requests",
-            node: (
-              <WidgetFrame id="review-requests" title="Request review">
-                <ReviewRequests candidates={reviewCandidates} />
-              </WidgetFrame>
-            ),
-          },
+          // "Request review" widget — gated by REVIEW_REQUESTS_ENABLED (one
+          // feature, one switch). OFF → omitted from the widgets array, so
+          // DashboardGrid renders no slot for it and drops the id from any
+          // saved layout cleanly (no gap). Flip the flag to bring it back
+          // alongside the review-task auto-creation. Code kept intact.
+          ...(REVIEW_REQUESTS_ENABLED
+            ? [
+                {
+                  id: "review-requests",
+                  node: (
+                    <WidgetFrame id="review-requests" title="Request review">
+                      <ReviewRequests candidates={reviewCandidates} />
+                    </WidgetFrame>
+                  ),
+                },
+              ]
+            : []),
           {
             id: "customers-to-contact",
             node: (
