@@ -490,3 +490,134 @@ describe("JobsPage — StartJobButton (New Booking offline-capable)", () => {
     });
   });
 });
+
+// ─── (h) drafts on the Open tab (Track 1b) ────────────────────────
+
+describe("JobsPage — drafts on the Open tab", () => {
+  it("interleaves a draft by date; shows phrase + Draft badge; no checkbox; links to /upgrade", async () => {
+    await db.customers.put(makeCustomer({ id: "c-1", name: "Acme" }));
+    await db.sites.put(makeSite({ id: "s-1", customer_id: "c-1" }));
+    // Two bookings bracketing the draft's date.
+    await db.jobs.put(
+      makeJob({
+        id: "b-early",
+        site_id: "s-1",
+        reference_number: "BOOK-EARLY",
+        job_date: "2026-06-12",
+      })
+    );
+    await db.jobs.put(
+      makeJob({
+        id: "b-late",
+        site_id: "s-1",
+        reference_number: "BOOK-LATE",
+        job_date: "2026-06-18",
+      })
+    );
+    // A draft dated between them — null site, status draft, no ref.
+    await db.jobs.put(
+      makeJob({
+        id: "d-1",
+        site_id: null,
+        job_status: "draft",
+        reference_number: null,
+        capture_note: "Sarah, wasps, Folkestone",
+        job_date: "2026-06-15",
+      })
+    );
+
+    render(<JobsPage />); // default = Open
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Sarah, wasps, Folkestone")
+      ).toBeInTheDocument();
+    });
+    // Real bookings still render.
+    expect(screen.getByText("BOOK-EARLY")).toBeInTheDocument();
+    expect(screen.getByText("BOOK-LATE")).toBeInTheDocument();
+
+    // Interleaved by date: EARLY < draft phrase < LATE in document order.
+    const table = screen.getByRole("table").textContent ?? "";
+    expect(table.indexOf("BOOK-EARLY")).toBeLessThan(
+      table.indexOf("Sarah, wasps, Folkestone")
+    );
+    expect(table.indexOf("Sarah, wasps, Folkestone")).toBeLessThan(
+      table.indexOf("BOOK-LATE")
+    );
+
+    // Badged "Draft".
+    expect(screen.getAllByText("Draft").length).toBeGreaterThan(0);
+
+    // The only forward action is Upgrade → /jobs/d-1/upgrade.
+    const upgrade = screen.getByRole("link", { name: /upgrade/i });
+    expect(upgrade).toHaveAttribute("href", "/jobs/d-1/upgrade");
+
+    // No checkbox anywhere on the Open tab — a draft can never carry a
+    // selection / completion affordance.
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("does NOT show drafts on the Completed tab", async () => {
+    await db.customers.put(makeCustomer());
+    await db.sites.put(makeSite());
+    await db.jobs.put(
+      makeJob({
+        id: "done",
+        reference_number: "DONE",
+        job_status: "completed",
+        findings: "f",
+        recommendations: "r",
+        pesticides_used: "p",
+        risk_level: "low",
+        risk_comments: "rc",
+        pest_species: ["Wasps"],
+        method_used: ["Survey"],
+      })
+    );
+    await db.jobs.put(
+      makeJob({
+        id: "d-1",
+        site_id: null,
+        job_status: "draft",
+        reference_number: null,
+        capture_note: "Sarah, wasps, Folkestone",
+        job_date: "2026-06-15",
+      })
+    );
+
+    searchParamsMock = new URLSearchParams({ status: "completed" });
+    render(<JobsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("DONE")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Sarah, wasps, Folkestone")).toBeNull();
+  });
+
+  it("Drafts tab routes each row to /upgrade (not the job detail page)", async () => {
+    await db.jobs.put(
+      makeJob({
+        id: "d-1",
+        site_id: null,
+        job_status: "draft",
+        reference_number: null,
+        capture_note: "Sarah, wasps, Folkestone",
+        job_date: "2026-06-15",
+      })
+    );
+
+    searchParamsMock = new URLSearchParams({ status: "draft" });
+    render(<JobsPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Sarah, wasps, Folkestone")
+      ).toBeInTheDocument();
+    });
+    const link = screen.getByRole("link", {
+      name: /Sarah, wasps, Folkestone/i,
+    });
+    expect(link).toHaveAttribute("href", "/jobs/d-1/upgrade");
+  });
+});
