@@ -1,6 +1,7 @@
 import type { Job, Site, Customer } from "@/types/database";
 import { CALL_TYPE_LABELS, RISK_LEVEL_LABELS } from "@/lib/constants/job-labels";
 import { PDF_STYLES } from "./styles";
+import { renderDocHeader, renderDocFooter } from "./partials";
 
 function escape(val: string | null | undefined): string {
   if (!val) return "";
@@ -71,22 +72,17 @@ export function renderJobReportHtml({
 <body>
 <div class="page">
 
-  <!-- Header -->
-  <div class="header">
-    <div class="header-brand">
-      <div class="header-icon">G</div>
-      <div class="header-text">
-        <div class="company">GEM Services</div>
-        <div class="doc-type">Pest Control Service Report</div>
-      </div>
-    </div>
-    <div class="header-meta">
-      <strong>Visit Date</strong><br />
-      ${formatDate(job.job_date)}<br /><br />
-      <strong>Ref</strong><br />
-      ${escape(job.id.slice(0, 8).toUpperCase())}
-    </div>
-  </div>
+  <!-- Header (shared branded partial) -->
+  ${renderDocHeader({
+    docType: "Pest Control Service Report",
+    meta: [
+      { label: "Visit Date", value: formatDate(job.job_date) },
+      {
+        label: "Reference",
+        value: job.reference_number ?? job.id.slice(0, 8).toUpperCase(),
+      },
+    ],
+  })}
 
   <!-- Customer & Site -->
   <div class="section avoid-break">
@@ -251,17 +247,8 @@ export function renderJobReportHtml({
     </div>
   </div>
 
-  <!-- Footer -->
-  <div class="footer">
-    <div class="footer-left">
-      <div class="footer-company">GEM Services \u2014 Professional Pest Management</div>
-      This service report is provided as a record of the visit carried out at the above premises.
-    </div>
-    <div class="footer-right">
-      Ref: ${escape(job.id.slice(0, 8).toUpperCase())}<br />
-      ${formatDate(job.job_date)}
-    </div>
-  </div>
+  <!-- Footer (shared branded contact strip) -->
+  ${renderDocFooter()}
 
 </div>
 </body>

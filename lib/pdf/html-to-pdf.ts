@@ -52,6 +52,14 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
     // on, and puppeteer-core's `setContent` types exclude the `networkidle*`
     // events since they don't apply meaningfully when there's no nav.
     await page.setContent(html, { waitUntil: "load" });
+    // The brand font (Montserrat) is embedded as a base64 @font-face. Wait
+    // for it to be fully parsed before printing, else the first PDF can
+    // fall back to a system font (FOIT). No network — resolves immediately
+    // once the inlined woff2 is decoded.
+    await page.evaluate(async () => {
+      await (document as unknown as { fonts: { ready: Promise<unknown> } })
+        .fonts.ready;
+    });
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,

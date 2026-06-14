@@ -1,4 +1,15 @@
+import { MONTSERRAT_FACE_CSS } from "@/lib/pdf/assets";
+
 export const PDF_STYLES = `
+  ${MONTSERRAT_FACE_CSS}
+
+  :root {
+    --brand: #4EA25A;       /* section heading text */
+    --brand-rule: #72BA42;  /* header rule + tags / badges */
+    --brand-dark: #3E7D2C;  /* footer strip + badge text */
+    --brand-pale: #EDF4E1;  /* pale tints (badges, tags) */
+  }
+
   @page {
     size: A4;
     margin: 20mm 22mm 24mm 22mm;
@@ -11,7 +22,7 @@ export const PDF_STYLES = `
   }
 
   body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif;
     color: #1f2937;
     font-size: 11px;
     line-height: 1.55;
@@ -48,7 +59,7 @@ export const PDF_STYLES = `
     align-items: flex-start;
     padding-bottom: 20px;
     margin-bottom: 28px;
-    border-bottom: 2.5px solid #059669;
+    border-bottom: 2.5px solid var(--brand-rule);
   }
   .header-brand {
     display: flex;
@@ -58,7 +69,7 @@ export const PDF_STYLES = `
   .header-icon {
     width: 44px;
     height: 44px;
-    background: #059669;
+    background: var(--brand-rule);
     border-radius: 10px;
     display: flex;
     align-items: center;
@@ -98,7 +109,7 @@ export const PDF_STYLES = `
   .section-title {
     font-size: 13px;
     font-weight: 700;
-    color: #059669;
+    color: var(--brand);
     text-transform: uppercase;
     letter-spacing: 0.8px;
     margin-bottom: 14px;
@@ -161,7 +172,7 @@ export const PDF_STYLES = `
     font-weight: 600;
     line-height: 1.4;
   }
-  .badge-green { background: #d1fae5; color: #065f46; }
+  .badge-green { background: var(--brand-pale); color: var(--brand-dark); }
   .badge-amber { background: #fef3c7; color: #92400e; }
   .badge-red { background: #fee2e2; color: #991b1b; }
   .badge-blue { background: #dbeafe; color: #1e40af; }
@@ -178,9 +189,9 @@ export const PDF_STYLES = `
     padding: 3px 10px;
     border-radius: 12px;
     font-size: 10px;
-    font-weight: 500;
-    background: #e5e7eb;
-    color: #374151;
+    font-weight: 600;
+    background: var(--brand-pale);
+    color: var(--brand-dark);
   }
 
   /* ─── Terms ─── */
@@ -314,6 +325,100 @@ export const PDF_STYLES = `
   .avoid-break {
     page-break-inside: avoid;
   }
+
+  /* ─── Branded doc header (shared partial) ─── */
+  .doc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-bottom: 18px;
+    margin-bottom: 26px;
+    border-bottom: 3px solid var(--brand-rule);
+  }
+  .doc-brand { display: flex; flex-direction: column; gap: 10px; }
+  .doc-lockup { display: flex; align-items: center; gap: 12px; }
+  .doc-logo { height: 54px; width: auto; }
+  .doc-wordmark {
+    font-size: 21px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    color: #111827;
+    line-height: 1;
+  }
+  .doc-tagline {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: #6b7280;
+    margin-top: 4px;
+  }
+  .doc-doctype {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--brand-dark);
+    letter-spacing: 0.3px;
+  }
+  .doc-meta {
+    text-align: right;
+    font-size: 10px;
+    color: #6b7280;
+    line-height: 1.85;
+  }
+  .doc-meta strong {
+    display: block;
+    color: #374151;
+    font-weight: 700;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .doc-meta-row { margin-bottom: 8px; }
+  .doc-meta-row:last-child { margin-bottom: 0; }
+
+  /* ─── Branded doc footer — full-width green contact strip ─── */
+  .doc-footer {
+    margin-top: 32px;
+    background: var(--brand-dark);
+    color: #fff;
+    padding: 16px 22px 18px;
+  }
+  .doc-footer-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .doc-footer-co { font-size: 11px; font-weight: 700; letter-spacing: 0.3px; }
+  .doc-footer-co span { font-weight: 400; opacity: 0.82; }
+  .doc-footer-ph {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px dashed rgba(255, 255, 255, 0.6);
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .doc-footer-contacts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 24px;
+    margin-top: 11px;
+    font-size: 10.5px;
+  }
+  .doc-footer-contacts .lab {
+    font-weight: 700;
+    opacity: 0.75;
+    margin-right: 5px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .doc-footer-contacts .val { font-weight: 500; }
+  .doc-footer-contacts .ph { opacity: 0.7; font-style: italic; }
 
   @media print {
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

@@ -24,7 +24,17 @@ const nextConfig: NextConfig = {
   // is on when sync drains — per-route tracing would leave holes
   // exactly where replays land.
   outputFileTracingIncludes: {
-    "/*": ["./node_modules/@sparticuz/chromium/bin/**/*"],
+    // Chromium blobs (above) PLUS the PDF brand assets: the Montserrat
+    // woff2 + gem-mark logo are read at runtime via fs in lib/pdf/assets.ts
+    // and base64-inlined into every PDF's HTML. Computed fs reads are
+    // invisible to output tracing, so they're force-included here — without
+    // it the read throws on Vercel and every PDF fails. Keyed '/*' for the
+    // same reason as chromium: PDF generation runs from many routes/replays.
+    "/*": [
+      "./node_modules/@sparticuz/chromium/bin/**/*",
+      "./lib/pdf/fonts/**/*",
+      "./public/logo/gem-services-logo.png",
+    ],
   },
   images: {
     remotePatterns: [
