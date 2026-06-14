@@ -18,3 +18,20 @@ export const BUSINESS = {
   /** Public Google review URL. Override via REVIEW_LINK_URL env if needed. */
   reviewUrl: process.env.REVIEW_LINK_URL ?? "https://g.page/r/CYNNFaOXPoYuEBM/review",
 } as const;
+
+/**
+ * Contact + legal line shown in the green PDF document footer.
+ *
+ * The footer is rendered as a pre-baked IMAGE (scripts/generate-footer-band.ts)
+ * so the band pins to the bottom of every page via Puppeteer's footerTemplate
+ * with exact Montserrat + #9AC44B. THIS is the single source of truth — after
+ * editing here, regenerate the asset:  npx tsx scripts/generate-footer-band.ts
+ * (the diamond ◆ separates the contact items on line 1).
+ */
+export const FOOTER_CONTACT = {
+  phone: "07400 372 204",
+  email: "NATE@GEMSERVICES.UK",
+  website: "WWW.GEMSERVICES.UK",
+  legal:
+    "GEM Services is a trading name of GREEN ENVIRONMENTAL MANAGEMENT LTD. Company number 16671563",
+} as const;

@@ -200,17 +200,6 @@ export function renderInvoiceHtml({
     </div>
   </div>
 
-  <!-- Footer -->
-  <div class="footer">
-    <div class="footer-left">
-      <div class="footer-company">GEM Services — Professional Pest Management</div>
-      Thank you for your custom.
-    </div>
-    <div class="footer-right">
-      Invoice ${escape(ref)}<br />
-      ${formatDate(issued)}
-    </div>
-  </div>
 
 </div>
 </body>

@@ -1,7 +1,7 @@
 import type { Job, Site, Customer } from "@/types/database";
 import { CALL_TYPE_LABELS, RISK_LEVEL_LABELS } from "@/lib/constants/job-labels";
 import { PDF_STYLES } from "./styles";
-import { renderDocHeader, renderDocFooter } from "./partials";
+import { renderDocHeader } from "./partials";
 
 function escape(val: string | null | undefined): string {
   if (!val) return "";
@@ -243,9 +243,6 @@ export function renderJobReportHtml({
       </div>
     </div>
   </div>
-
-  <!-- Footer (shared branded contact strip) -->
-  ${renderDocFooter()}
 
 </div>
 </body>

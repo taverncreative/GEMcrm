@@ -11,8 +11,12 @@ export const PDF_STYLES = `
   }
 
   @page {
+    /* Page margins (top 20mm, L/R 22mm, bottom = footer-band height) are set
+       by Puppeteer's page.pdf so it can also reserve the bottom margin for the
+       running footer band. Leaving @page margin unset here is deliberate — a
+       CSS @page margin OVERRIDES the page.pdf margin, which would break both
+       the footer reservation and the content insets. */
     size: A4;
-    margin: 20mm 22mm 24mm 22mm;
   }
 
   * {
@@ -294,30 +298,6 @@ export const PDF_STYLES = `
     color: #374151;
   }
 
-  /* ─── Footer ─── */
-  .footer {
-    margin-top: 32px;
-    padding-top: 16px;
-    border-top: 1.5px solid #e5e7eb;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    font-size: 8.5px;
-    color: #9ca3af;
-    line-height: 1.7;
-  }
-  .footer-left {
-    max-width: 60%;
-  }
-  .footer-right {
-    text-align: right;
-  }
-  .footer-company {
-    font-weight: 600;
-    color: #6b7280;
-    font-size: 9px;
-  }
-
   /* ─── Print safety ─── */
   .page-break-before {
     page-break-before: always;
@@ -376,49 +356,11 @@ export const PDF_STYLES = `
   .doc-meta-row { margin-bottom: 8px; }
   .doc-meta-row:last-child { margin-bottom: 0; }
 
-  /* ─── Branded doc footer — full-width green contact strip ─── */
-  .doc-footer {
-    margin-top: 32px;
-    background: var(--brand-dark);
-    color: #fff;
-    padding: 16px 22px 18px;
-  }
-  .doc-footer-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-  }
-  .doc-footer-co { font-size: 11px; font-weight: 700; letter-spacing: 0.3px; }
-  .doc-footer-co span { font-weight: 400; opacity: 0.82; }
-  .doc-footer-ph {
-    font-size: 8px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    background: rgba(255, 255, 255, 0.16);
-    border: 1px dashed rgba(255, 255, 255, 0.6);
-    padding: 3px 9px;
-    border-radius: 999px;
-    white-space: nowrap;
-  }
-  .doc-footer-contacts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 24px;
-    margin-top: 11px;
-    font-size: 10.5px;
-  }
-  .doc-footer-contacts .lab {
-    font-weight: 700;
-    opacity: 0.75;
-    margin-right: 5px;
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-  }
-  .doc-footer-contacts .val { font-weight: 500; }
-  .doc-footer-contacts .ph { opacity: 0.7; font-style: italic; }
+  /* The branded green contact band is NOT in this document's flow — it's a
+     per-page running footer drawn by Puppeteer's footerTemplate as a baked
+     image (htmlToPdf), so it pins to the bottom of every page including a
+     partial last page. Its height is reserved as the bottom page margin, so
+     flowing content never overlaps it. */
 
   @media print {
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

@@ -213,16 +213,6 @@ export function renderAgreementHtml({
     </div>
   </div>
 
-  <!-- Footer -->
-  <div class="footer">
-    <div class="footer-left">
-      <div class="footer-company">GEM Services \u2014 Professional Pest Management</div>
-      This document is confidential and intended for the named client only.
-    </div>
-    <div class="footer-right">
-      Ref: ${escape(agreement.reference_number ?? agreement.id.slice(0, 8).toUpperCase())}
-    </div>
-  </div>
 
 </div>
 </body>
