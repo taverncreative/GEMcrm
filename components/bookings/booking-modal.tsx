@@ -182,7 +182,7 @@ export function makeBookingMeta(
           customer_company: s(formData, "customer_company"),
           customer_email: s(formData, "customer_email"),
           customer_phone: s(formData, "customer_phone"),
-          customer_type: (s(formData, "customer_type") || "commercial") as
+          customer_type: (s(formData, "customer_type") || "domestic") as
             | "commercial"
             | "domestic",
           site_line1: s(formData, "site_line1"),
@@ -419,7 +419,6 @@ interface BookingModalProps {
   presetContactPhone?: string;
 }
 
-type CustomerMode = "existing" | "new";
 type SiteMode = "existing" | "new";
 
 const todayIso = () => todayUk();
@@ -447,19 +446,17 @@ export function BookingModal({
   presetContactName,
   presetContactPhone,
 }: BookingModalProps) {
-  // ── Customer state ──
-  const [customerMode, setCustomerMode] = useState<CustomerMode>("existing");
+  // ── Customer state (single type-to-select-or-create field) ──
+  // No existing/new tabs: `customerQuery` is the field's text; picking a
+  // match sets `selectedCustomer`. On save, a selected customer is used as
+  // existing; otherwise the typed text becomes a new customer (mode/ids are
+  // derived for the hidden inputs below — the server contract is unchanged).
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
     presetCustomer ?? null
   );
   const [loadingCustomers, setLoadingCustomers] = useState(false);
-  const [newCustomerType, setNewCustomerType] = useState<CustomerType>("commercial");
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [newCustomerCompany, setNewCustomerCompany] = useState("");
-  const [newCustomerEmail, setNewCustomerEmail] = useState("");
-  const [newCustomerPhone, setNewCustomerPhone] = useState("");
 
   // ── Site state ──
   const [siteMode, setSiteMode] = useState<SiteMode>("existing");
@@ -557,9 +554,12 @@ export function BookingModal({
     // synchronous reset, not the cascading-render pattern the rule targets.
     // (This warning was previously masked by the use-before-declare error
     // that the prefillSiteFromCustomer reorder just cleared.)
+    //
+    // No customer selected yet → there are no existing sites to pick, so
+    // default the (still-tabbed) Location field to "new". A preset customer
+    // (opened from a customer page) keeps "existing" and loads their sites.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCustomerMode("existing");
-    setSiteMode("existing");
+    setSiteMode(presetCustomer ? "existing" : "new");
     setCustomerQuery("");
     setSelectedCustomer(presetCustomer ?? null);
     setSelectedSite(presetSite ?? null);
@@ -567,11 +567,6 @@ export function BookingModal({
     setSelectedPests([]);
     setClientErrors({});
     setMatchHint(null);
-    setNewCustomerType("commercial");
-    setNewCustomerName("");
-    setNewCustomerCompany("");
-    setNewCustomerEmail("");
-    setNewCustomerPhone("");
     setNewSiteLine1("");
     setNewSiteLine2("");
     setNewSiteTown("");
@@ -596,10 +591,12 @@ export function BookingModal({
     // offered as an inline hint; no match stays "new". Takes precedence over
     // the search-only / presetCustomer branches below.
     if (draftJobId && !presetCustomer) {
-      setCustomerMode("new");
       setSiteMode("new");
-      setNewCustomerName(presetContactName ?? "");
-      setNewCustomerPhone(presetContactPhone ?? "");
+      // Prefill the single field from the draft's captured name; a strong
+      // local match preselects (no duplicate), a weak one shows as a hint,
+      // none stays as the typed name → a new customer on save. The captured
+      // phone (if any) flows to the new customer via the hidden input.
+      setCustomerQuery(presetContactName ?? "");
       setCustomerResults([]);
       setLoadingCustomers(false);
       void matchCapturedContact(
@@ -607,8 +604,7 @@ export function BookingModal({
         presetContactPhone ?? ""
       ).then(async (m) => {
         if (m.kind === "strong") {
-          // Returning caller — switch to existing + preselect, don't duplicate.
-          setCustomerMode("existing");
+          // Returning caller — preselect, don't duplicate.
           setSelectedCustomer(m.customer);
           setSiteMode("existing");
           const list = await getSitesForCustomerLocal(m.customer.id);
@@ -618,7 +614,6 @@ export function BookingModal({
         } else if (m.kind === "weak") {
           setMatchHint(m.customer);
         }
-        // none → stay "new" (prefilled), no hint.
       });
       return;
     }
@@ -726,10 +721,10 @@ export function BookingModal({
   function validateBooking(): Record<string, string> {
     const errs: Record<string, string> = {};
     // Always required: a rough customer + a date.
-    if (customerMode === "existing") {
-      if (!selectedCustomer) errs.customer_id = "Choose a customer";
-    } else if (!newCustomerName.trim()) {
-      errs.customer_name = "Enter the customer's name";
+    // A customer is required: either a picked existing one, or typed text
+    // that becomes a new customer on save.
+    if (!selectedCustomer && !customerQuery.trim()) {
+      errs.customer_name = "Enter a customer name";
     }
     if (!jobDate) errs.job_date = "Pick a date";
     // Site address + call type are required ONLY when upgrading a draft.
@@ -848,18 +843,34 @@ export function BookingModal({
               “{presetCaptureNote}”
             </div>
           )}
-          <input type="hidden" name="mode_customer" value={customerMode} />
+          {/* Customer mode + ids are DERIVED from the single field: a picked
+              customer → existing; otherwise the typed name → a new customer.
+              Company/email aren't collected in the quick flow; the captured
+              phone (draft upgrade), if any, still flows to the new customer. */}
+          <input
+            type="hidden"
+            name="mode_customer"
+            value={selectedCustomer ? "existing" : "new"}
+          />
           <input type="hidden" name="mode_site" value={siteMode} />
           <input
             type="hidden"
             name="customer_id"
-            value={customerMode === "existing" ? selectedCustomer?.id ?? "" : ""}
+            value={selectedCustomer?.id ?? ""}
           />
-          <input type="hidden" name="customer_type" value={newCustomerType} />
-          <input type="hidden" name="customer_name" value={newCustomerName} />
-          <input type="hidden" name="customer_company" value={newCustomerCompany} />
-          <input type="hidden" name="customer_email" value={newCustomerEmail} />
-          <input type="hidden" name="customer_phone" value={newCustomerPhone} />
+          <input type="hidden" name="customer_type" value="domestic" />
+          <input
+            type="hidden"
+            name="customer_name"
+            value={selectedCustomer ? "" : customerQuery.trim()}
+          />
+          <input type="hidden" name="customer_company" value="" />
+          <input type="hidden" name="customer_email" value="" />
+          <input
+            type="hidden"
+            name="customer_phone"
+            value={selectedCustomer ? "" : presetContactPhone ?? ""}
+          />
           <input
             type="hidden"
             name="site_id"
@@ -895,246 +906,139 @@ export function BookingModal({
 
           {/* ─── CUSTOMER ──────────────────────────────────────── */}
           <section>
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Customer
-              </h3>
-              <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCustomerMode("existing");
-                    setSelectedCustomer(null);
-                    setSelectedSite(null);
-                    setSites([]);
-                  }}
-                  className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
-                    customerMode === "existing"
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-500"
-                  }`}
-                >
-                  Existing
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCustomerMode("new");
-                    setSelectedCustomer(null);
-                    setSelectedSite(null);
-                    setSites([]);
-                    setSiteMode("new");
-                  }}
-                  className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
-                    customerMode === "new"
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-500"
-                  }`}
-                >
-                  + New
-                </button>
-              </div>
-            </div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+              Customer
+            </h3>
 
-            {customerMode === "existing" ? (
-              <div className="mt-2">
-                {selectedCustomer ? (
-                  <div className="flex items-center justify-between rounded-lg border border-brand bg-brand-soft px-3 py-2">
-                    <div>
-                      <p className="text-sm font-medium text-brand-darker">
-                        {selectedCustomer.name}
+            <div className="mt-2">
+              {/* Smart-match hint (Track 2 Half 2): the captured contact
+                  partially matches an existing customer. Offer them inline so
+                  a returning caller isn't duplicated — tapping preselects. */}
+              {matchHint && !selectedCustomer && (
+                <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                  <p className="min-w-0 text-xs text-amber-800">
+                    Looks like an existing customer:{" "}
+                    <span className="font-medium">{matchHint.name}</span>
+                    {matchHint.company_name ? ` (${matchHint.company_name})` : ""}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const c = matchHint;
+                      setMatchHint(null);
+                      void pickCustomer(c);
+                    }}
+                    className="shrink-0 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                  >
+                    Use them
+                  </button>
+                </div>
+              )}
+              {selectedCustomer ? (
+                <div className="flex items-center justify-between rounded-lg border border-brand bg-brand-soft px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-brand-darker">
+                      {selectedCustomer.name}
+                    </p>
+                    {selectedCustomer.company_name && (
+                      <p className="text-xs text-brand-darker">
+                        {selectedCustomer.company_name}
                       </p>
-                      {selectedCustomer.company_name && (
-                        <p className="text-xs text-brand-darker">
-                          {selectedCustomer.company_name}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCustomer(null);
-                        setSelectedSite(null);
-                        setSites([]);
-                      }}
-                      className="text-xs font-medium text-brand-darker hover:text-brand-darker"
-                    >
-                      Change
-                    </button>
+                    )}
                   </div>
-                ) : (
-                  <>
-                    <input
-                      ref={customerInputRef}
-                      type="text"
-                      value={customerQuery}
-                      onChange={(e) => runCustomerSearch(e.target.value)}
-                      placeholder="Search by name or company…"
-                      className={inputClass}
-                    />
-                    {/* Search-only: the results list appears only once the
-                        operator types — an empty box shows nothing beneath. */}
-                    {customerQuery.trim() && (
-                    <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Clear the pick and go back to typing — no existing
+                      // customer means no existing sites, so reset Location too.
+                      setSelectedCustomer(null);
+                      setSelectedSite(null);
+                      setSites([]);
+                      setSiteMode("new");
+                      setCustomerQuery("");
+                      setTimeout(() => customerInputRef.current?.focus(), 50);
+                    }}
+                    className="text-xs font-medium text-brand-darker hover:text-brand-darker"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    ref={customerInputRef}
+                    type="text"
+                    value={customerQuery}
+                    onChange={(e) => runCustomerSearch(e.target.value)}
+                    placeholder="Type a customer name…"
+                    className={inputClass}
+                  />
+                  {/* Type-to-select-or-create: matches appear to pick; if you
+                      don't pick one, the typed name becomes a NEW customer on
+                      save. The subtle row below makes that explicit so a
+                      pick-vs-create mix-up can't quietly create a duplicate. */}
+                  {customerQuery.trim() && (
+                    <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-gray-100">
                       {loadingCustomers ? (
                         <p className="px-3 py-4 text-center text-xs text-gray-400">
                           Searching…
                         </p>
-                      ) : customerResults.length === 0 ? (
-                        <p className="px-3 py-4 text-center text-xs text-gray-400">
-                          No matches. Try “+ New” above.
-                        </p>
                       ) : (
-                        customerResults.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => pickCustomer(c)}
-                            className="flex w-full items-center gap-3 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50"
-                          >
-                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand-darker">
-                              {c.name.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-gray-900">
-                                {c.name}
-                              </p>
-                              {c.company_name && (
-                                <p className="truncate text-xs text-gray-500">
-                                  {c.company_name}
+                        <>
+                          {customerResults.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => pickCustomer(c)}
+                              className="flex w-full items-center gap-3 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50"
+                            >
+                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand-darker">
+                                {c.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium text-gray-900">
+                                  {c.name}
                                 </p>
-                              )}
+                                {c.company_name && (
+                                  <p className="truncate text-xs text-gray-500">
+                                    {c.company_name}
+                                  </p>
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                          {/* Create-new cue — informational, not a button: not
+                              picking a match above means this name is added new. */}
+                          <div
+                            className={`flex items-center gap-3 px-3 py-2 ${
+                              customerResults.length > 0
+                                ? "border-t border-dashed border-gray-200"
+                                : ""
+                            }`}
+                          >
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-dashed border-gray-300 text-base leading-none text-gray-400">
+                              +
                             </div>
-                          </button>
-                        ))
+                            <p className="min-w-0 text-xs text-gray-600">
+                              Create new customer “
+                              <span className="font-medium text-gray-900">
+                                {customerQuery.trim()}
+                              </span>
+                              ”
+                            </p>
+                          </div>
+                        </>
                       )}
                     </div>
-                    )}
-                    {errors.customer_id && (
-                      <p className="mt-1 text-xs text-red-500">
-                        {errors.customer_id}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="mt-2">
-                {/* Smart-match hint (Track 2 Half 2): the captured contact
-                    partially matches an existing customer. Offer them inline
-                    so a returning caller isn't duplicated — tapping switches
-                    to that customer (existing mode, preselected). */}
-                {matchHint && (
-                  <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                    <p className="min-w-0 text-xs text-amber-800">
-                      Looks like an existing customer:{" "}
-                      <span className="font-medium">{matchHint.name}</span>
-                      {matchHint.company_name ? ` (${matchHint.company_name})` : ""}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const c = matchHint;
-                        setMatchHint(null);
-                        setCustomerMode("existing");
-                        void pickCustomer(c);
-                      }}
-                      className="shrink-0 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700"
-                    >
-                      Use them
-                    </button>
-                  </div>
-                )}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <label className={labelClass}>
-                    Customer type <span className="text-red-500">*</span>
-                  </label>
-                  <div className="mt-1 grid grid-cols-2 gap-2">
-                    {(["commercial", "domestic"] as const).map((t) => (
-                      <label
-                        key={t}
-                        className="flex cursor-pointer items-center justify-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors has-[:checked]:border-brand has-[:checked]:bg-brand-soft has-[:checked]:text-brand-darker"
-                      >
-                        <input
-                          type="radio"
-                          name="customer_type_radio"
-                          value={t}
-                          checked={newCustomerType === t}
-                          onChange={() => setNewCustomerType(t)}
-                          className="sr-only"
-                        />
-                        {t === "commercial" ? "Commercial" : "Domestic"}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div className="sm:col-span-2">
-                  <label htmlFor="bn-customer_name" className={labelClass}>
-                    Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    id="bn-customer_name"
-                    type="text"
-                    value={newCustomerName}
-                    onChange={(e) => setNewCustomerName(e.target.value)}
-                    required
-                    placeholder="Full name"
-                    className={inputClass}
-                  />
+                  )}
                   {errors.customer_name && (
                     <p className="mt-1 text-xs text-red-500">
                       {errors.customer_name}
                     </p>
                   )}
-                </div>
-                <div>
-                  <label htmlFor="bn-customer_company" className={labelClass}>
-                    Company
-                  </label>
-                  <input
-                    id="bn-customer_company"
-                    type="text"
-                    value={newCustomerCompany}
-                    onChange={(e) => setNewCustomerCompany(e.target.value)}
-                    placeholder="Optional"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="bn-customer_phone" className={labelClass}>
-                    Phone
-                  </label>
-                  <input
-                    id="bn-customer_phone"
-                    type="tel"
-                    value={newCustomerPhone}
-                    onChange={(e) => setNewCustomerPhone(e.target.value)}
-                    placeholder="Optional"
-                    className={inputClass}
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label htmlFor="bn-customer_email" className={labelClass}>
-                    Email
-                  </label>
-                  <input
-                    id="bn-customer_email"
-                    type="email"
-                    value={newCustomerEmail}
-                    onChange={(e) => setNewCustomerEmail(e.target.value)}
-                    placeholder="Optional"
-                    className={inputClass}
-                  />
-                  {errors.customer_email && (
-                    <p className="mt-1 text-xs text-red-500">
-                      {errors.customer_email}
-                    </p>
-                  )}
-                </div>
-                </div>
-              </div>
-            )}
+                </>
+              )}
+            </div>
           </section>
 
           {/* ─── SITE ──────────────────────────────────────────── */}
@@ -1146,7 +1050,7 @@ export function BookingModal({
               <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5 text-xs">
                 <button
                   type="button"
-                  disabled={customerMode === "new" || !selectedCustomer}
+                  disabled={!selectedCustomer}
                   onClick={() => {
                     setSiteMode("existing");
                     // Re-select the most-recent site if none is currently picked.
@@ -1178,7 +1082,7 @@ export function BookingModal({
 
             {siteMode === "existing" ? (
               <div className="mt-2">
-                {!selectedCustomer && customerMode === "existing" ? (
+                {!selectedCustomer ? (
                   <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
                     Pick a customer first.
                   </p>

@@ -3,16 +3,16 @@
  * (Track 2, Half 2).
  *
  * When the BookingModal opens in attach-to-draft mode (draftJobId set) it
- * reads the draft's captured caller name/phone and DEFAULTS the customer
- * step: "new" + prefilled, unless a local (Dexie) customer match says
- * otherwise. This suite pins:
+ * reads the draft's captured caller name into the SINGLE customer field
+ * (type-to-select-or-create) and runs a local (Dexie) match. This suite pins:
  *
- *   - prefill: new-customer name + phone seeded from the captured contact
+ *   - prefill: the captured name seeds the single field; the captured phone
+ *     flows to the new customer via the hidden input
  *   - strong match (exact name): switches to existing + preselected
  *   - strong match (phone): partial name + matching phone → existing
- *   - weak match (partial name): stays "new" (prefilled) + inline hint
- *   - no match: "new", prefilled, no hint
- *   - no captured contact: "new", blank, no hint
+ *   - weak match (partial name): single field stays prefilled + inline hint
+ *   - no match: single field prefilled, treated as new, no hint
+ *   - no captured contact: single field blank, no hint
  *
  * The match is a Dexie read (offline) — no server. createQuickBookingAction
  * + TimeWindowPicker are stubbed (the action drags in next/headers; the
@@ -86,36 +86,44 @@ beforeEach(async () => {
 });
 
 describe("Draft upgrade — customer-step smart default", () => {
-  it("no match → defaults to NEW, prefilled from the captured contact, no hint", async () => {
+  it("no match → captured name prefilled into the single field, treated as new, no hint", async () => {
     await db.customers.put(makeCustomer({ id: "c-1", name: "Bob Smith" }));
 
-    renderUpgrade({ name: "Sarah Jones", phone: "07700 900000" });
+    const { container } = renderUpgrade({
+      name: "Sarah Jones",
+      phone: "07700 900000",
+    });
 
-    // New-customer form is shown, prefilled. (Query the VISIBLE inputs by
-    // placeholder/label — the modal also mirrors state into hidden inputs,
-    // which getByDisplayValue would double-match.)
-    const nameInput = (await screen.findByPlaceholderText(
-      "Full name"
+    // The single customer field is prefilled with the captured name.
+    const field = (await screen.findByPlaceholderText(
+      /type a customer name/i
     )) as HTMLInputElement;
-    expect(nameInput.value).toBe("Sarah Jones");
-    expect((screen.getByLabelText("Phone") as HTMLInputElement).value).toBe(
-      "07700 900000"
-    );
-    expect(screen.getByText("Customer type")).toBeInTheDocument(); // new-mode only
-    // No existing-customer match → no hint.
+    expect(field.value).toBe("Sarah Jones");
+    // No match → not switched to an existing customer (no "Change"), no hint.
+    expect(screen.queryByRole("button", { name: /change/i })).toBeNull();
     expect(screen.queryByText(/Looks like an existing customer/i)).toBeNull();
+    // The captured phone still flows to the new customer via the hidden input.
+    expect(
+      (container.querySelector(
+        'input[name="customer_phone"]'
+      ) as HTMLInputElement).value
+    ).toBe("07700 900000");
   });
 
-  it("no captured contact → defaults to NEW, blank, no hint", async () => {
-    renderUpgrade({});
+  it("no captured contact → the single field is blank, no hint", async () => {
+    const { container } = renderUpgrade({});
 
-    const nameInput = (await screen.findByPlaceholderText(
-      "Full name"
+    const field = (await screen.findByPlaceholderText(
+      /type a customer name/i
     )) as HTMLInputElement;
-    expect(nameInput.value).toBe("");
-    const phoneInput = screen.getByLabelText("Phone") as HTMLInputElement;
-    expect(phoneInput.value).toBe("");
+    expect(field.value).toBe("");
+    expect(screen.queryByRole("button", { name: /change/i })).toBeNull();
     expect(screen.queryByText(/Looks like an existing customer/i)).toBeNull();
+    expect(
+      (container.querySelector(
+        'input[name="customer_phone"]'
+      ) as HTMLInputElement).value
+    ).toBe("");
   });
 
   it("strong match (exact name) → switches to EXISTING + preselected", async () => {
@@ -146,21 +154,23 @@ describe("Draft upgrade — customer-step smart default", () => {
     expect(screen.queryByText("Customer type")).toBeNull();
   });
 
-  it("weak match (partial name) → stays NEW (prefilled) + shows the hint; tapping uses them", async () => {
+  it("weak match (partial name) → single field prefilled + inline hint; tapping uses them", async () => {
     await db.customers.put(
       makeCustomer({ id: "c-1", name: "Acme Pest Co", company_name: "Acme Pest Co" })
     );
 
     renderUpgrade({ name: "Acme" });
 
-    // Hint surfaces the candidate; form stays new + prefilled.
+    // Hint surfaces the candidate; the single field stays prefilled and is
+    // NOT yet switched to an existing customer (no "Change").
     expect(
       await screen.findByText(/Looks like an existing customer/i)
     ).toBeInTheDocument();
-    expect(screen.getByText("Customer type")).toBeInTheDocument();
     expect(
-      (screen.getByPlaceholderText("Full name") as HTMLInputElement).value
+      (screen.getByPlaceholderText(/type a customer name/i) as HTMLInputElement)
+        .value
     ).toBe("Acme");
+    expect(screen.queryByRole("button", { name: /change/i })).toBeNull();
 
     // Tapping "Use them" switches to the existing customer.
     await userEvent.click(screen.getByRole("button", { name: /use them/i }));
@@ -169,6 +179,5 @@ describe("Draft upgrade — customer-step smart default", () => {
         screen.getByRole("button", { name: /change/i })
       ).toBeInTheDocument();
     });
-    expect(screen.queryByText("Customer type")).toBeNull();
   });
 });
