@@ -131,22 +131,6 @@ export function JobStatusActions({
     );
   }
 
-  // Q0: a draft is a phone jotting with no customer/site — it is NOT
-  // completable. The only forward action is to upgrade it to a real
-  // booking (attach customer + site). Render that, never the
-  // "Complete job →" link, which the fall-through below would
-  // otherwise show for any non-{completed,scheduled} status.
-  if (currentStatus === "draft") {
-    return (
-      <Link
-        href={`${ROUTES.jobDetail(jobId)}/upgrade`}
-        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white transition-all duration-75 hover:bg-brand-dark active:scale-95"
-      >
-        Upgrade to booking →
-      </Link>
-    );
-  }
-
   // L1: no direct status-to-completed write exists any more. The
   // completion affordance NAVIGATES to the service sheet — the only
   // route to completed, whose L0 invariant requires a filled sheet.

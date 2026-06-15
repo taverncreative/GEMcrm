@@ -2,12 +2,8 @@
  * Job detail — "Fill Service Sheet" link gating (1a hygiene fix).
  *
  * The detail page offers a "Fill Service Sheet" link for non-completed
- * jobs. A DRAFT (job_status='draft', null site/customer) is not a booking
- * yet — its only forward action is "Upgrade to booking" (rendered by
- * JobStatusActions). This suite pins the invariant that a draft is NEVER
- * shown the completion affordance:
+ * jobs only:
  *
- *   - draft      → NO "Fill Service Sheet"; "Upgrade to booking" instead
  *   - scheduled  → "Fill Service Sheet" present, pointing at /complete
  *   - completed  → NO "Fill Service Sheet" (job is done)
  *
@@ -164,31 +160,6 @@ beforeEach(async () => {
 });
 
 describe("JobDetailPage — Fill Service Sheet gating", () => {
-  it("does NOT show 'Fill Service Sheet' for a draft; offers Upgrade instead", async () => {
-    // A draft carries no site/customer (site_id null) and is not completable.
-    await db.jobs.put(
-      makeJob({
-        id: "job-1",
-        site_id: null,
-        job_status: "draft",
-        reference_number: null,
-        capture_note: "Sarah, Wasps, Folkestone",
-      })
-    );
-
-    render(<JobDetailPage />);
-
-    // Wait for the draft to render (its capture note appears nowhere on the
-    // page, so anchor on the Upgrade CTA from JobStatusActions instead).
-    const upgrade = await screen.findByRole("link", {
-      name: /upgrade to booking/i,
-    });
-    expect(upgrade).toHaveAttribute("href", "/jobs/job-1/upgrade");
-
-    // The completion affordance must be absent for a draft.
-    expect(screen.queryByText(/fill service sheet/i)).toBeNull();
-  });
-
   it("shows 'Fill Service Sheet' (→ /complete) for a scheduled booking", async () => {
     await db.customers.put(makeCustomer());
     await db.sites.put(makeSite());

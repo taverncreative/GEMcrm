@@ -29,7 +29,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ROUTES } from "@/lib/constants/routes";
 import { BookingModal } from "@/components/bookings/booking-modal";
-import { QuickJobCapture } from "@/components/jobs/quick-job-capture";
 
 type IconName = "home" | "jobs" | "customers" | "more";
 
@@ -65,7 +64,6 @@ export function BottomNav() {
   const [createOpen, setCreateOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [quickOpen, setQuickOpen] = useState(false);
 
   // Reuse the sidebar's exact active-state predicate.
   const isRouteActive = (href: string) =>
@@ -141,17 +139,9 @@ export function BottomNav() {
       {createOpen && (
         <Sheet title="Create" onClose={() => setCreateOpen(false)}>
           <SheetButton
-            icon={<BoltIcon />}
-            label="Quick job"
-            tone="brand"
-            onClick={() => {
-              setCreateOpen(false);
-              setQuickOpen(true);
-            }}
-          />
-          <SheetButton
             icon={<PlusIcon />}
             label="New Booking"
+            tone="brand"
             onClick={() => {
               setCreateOpen(false);
               setBookingOpen(true);
@@ -183,7 +173,6 @@ export function BottomNav() {
 
       {/* Create modal — reused unchanged. */}
       <BookingModal open={bookingOpen} onClose={() => setBookingOpen(false)} />
-      <QuickJobCapture open={quickOpen} onClose={() => setQuickOpen(false)} />
     </>
   );
 }
@@ -330,14 +319,6 @@ function PlusIcon() {
   return (
     <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-    </svg>
-  );
-}
-
-function BoltIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
     </svg>
   );
 }

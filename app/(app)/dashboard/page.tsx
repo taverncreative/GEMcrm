@@ -20,7 +20,6 @@ import { getReviewRequestCandidates } from "@/lib/data/reviews";
 import { DailySummary } from "@/components/dashboard/daily-summary";
 import { OverdueTasks } from "@/components/dashboard/overdue-tasks";
 import { ServiceSheetsToFill } from "@/components/dashboard/service-sheets-to-fill";
-import { DraftsToUpgrade } from "@/components/dashboard/drafts-to-upgrade";
 import { ExpiringAgreements } from "@/components/dashboard/expiring-agreements";
 import { JobsToday } from "@/components/dashboard/jobs-today";
 import { UpcomingVisits } from "@/components/dashboard/upcoming-visits";
@@ -168,16 +167,6 @@ async function DashboardWidgets() {
                 title="Service sheets to fill"
               >
                 <ServiceSheetsToFill jobs={sheetsToFill} />
-              </WidgetFrame>
-            ),
-          },
-          {
-            id: "drafts-to-upgrade",
-            node: (
-              <WidgetFrame id="drafts-to-upgrade" title="Drafts to upgrade">
-                {/* Client island — reads drafts from Dexie (offline-checkable),
-                    no server prop needed. */}
-                <DraftsToUpgrade />
               </WidgetFrame>
             ),
           },

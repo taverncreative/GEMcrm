@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
 import {
   searchCustomersLocal,
@@ -96,48 +90,17 @@ function parseBookingPests(formData: FormData): string[] {
 }
 
 /**
- * Build the local-first meta for the modal.
+ * Build the local-first meta for the modal (create-only New Booking).
  *
- * Two modes, one shared multi-entity machinery:
- *
- *   - CREATE (no `draftJobId`) — the original New Booking path. Mints a
- *     fresh job id, `op:"create"`, applyLocal INSERTs the job, entityIds
- *     lists every newly-created id (incl. the job) so a discard-revert is
- *     surgical.
- *
- *   - UPGRADE (`draftJobId` set, Q3) — attach-to-draft. The job already
- *     exists, so `jobId` IS the draft id, `op:"update"`, and applyLocal
- *     UPDATEs that row (sets the resolved site + booking fields, flips
- *     status draft → scheduled) instead of inserting. capture_note is
- *     left untouched (persists); reference_number stays null until the
- *     server computes it on replay. New-customer/new-site INSERTs are
- *     identical to the create path, so the proven FK ordering carries
- *     over wholesale (server-side the action creates customer → site →
- *     then UPDATEs the job).
- *
- * Fork A discard-revert safety: in upgrade mode `op` is "update", so
- * revertLocalCreate (which acts ONLY on op:"create") never fires on the
- * draft — the operator's original capture can't be deleted. `entityIds`
- * lists ONLY the newly-created customer/site (NOT the pre-existing draft
- * job), both for revert-set hygiene and so the pull-merge guard protects
- * them while the upgrade is pending.
- *
- * Accepted edge (Fork A, documented): if the operator upgrades a draft
- * while OFFLINE, creating a NEW customer + site, then discards that entry
- * from the conflict inbox BEFORE any sync, those new customer/site rows
- * linger in Dexie as unreferenced local orphans (the draft job is
- * separately reverted to draft by the next pull). Rare, low harm; the
- * fully-correct "update-with-children revert" (Fork B) is deliberately
- * deferred.
+ * Mints a fresh job id, `op:"create"`, applyLocal INSERTs the job, and
+ * entityIds lists every newly-created id (incl. the job) so a
+ * discard-revert is surgical. A booking with no site still mints a bare
+ * site so a quick add gets the optimistic Dexie write + offline sync (the
+ * server creates the same bare site on replay, addressed by site_id_new).
  */
-export function makeBookingMeta(
-  draftJobId?: string
-): WrapMeta<BookingWrapInput> {
-  const isUpgrade = !!draftJobId;
+export function makeBookingMeta(): WrapMeta<BookingWrapInput> {
   return {
-    actionName: isUpgrade
-      ? "upgradeDraftToBookingAction"
-      : "createQuickBookingAction",
+    actionName: "createQuickBookingAction",
     entityType: "job",
     parseInput: (formData) => {
       const modeCustomer = (s(formData, "mode_customer") || "existing") as
@@ -150,12 +113,10 @@ export function makeBookingMeta(
       const callType = s(formData, "call_type");
 
       const newCustomerId = modeCustomer === "new" ? newId() : null;
-      // A CREATE booking with no site still mints a bare site, so a quick
-      // add gets the optimistic Dexie write + offline sync (the server
-      // creates the same bare site on replay, addressed by site_id_new).
-      // Upgrade is unchanged (it always carries a resolved site).
-      const needNewSite =
-        modeSite === "new" || (!isUpgrade && !s(formData, "site_id"));
+      // A booking with no site still mints a bare site, so a quick add gets
+      // the optimistic Dexie write + offline sync (the server creates the
+      // same bare site on replay, addressed by site_id_new).
+      const needNewSite = modeSite === "new" || !s(formData, "site_id");
       const newSiteId = needNewSite ? newId() : null;
       const customerId =
         modeCustomer === "new" ? newCustomerId! : s(formData, "customer_id");
@@ -168,9 +129,7 @@ export function makeBookingMeta(
       if (!jobDate || !customerId || !siteId) return null;
 
       return {
-        // Upgrade reuses the draft's id (the row already exists); create
-        // mints a fresh one.
-        jobId: draftJobId ?? newId(),
+        jobId: newId(),
         newCustomerId,
         newSiteId,
         customerId,
@@ -247,86 +206,60 @@ export function makeBookingMeta(
           postcode: f.site_postcode.trim().toUpperCase() || null,
         } as Site);
       }
-      if (isUpgrade) {
-        // UPGRADE: mutate the existing draft in place. site_id null →
-        // resolved site, status draft → scheduled, booking fields filled.
-        // capture_note is deliberately NOT touched (persists); the server
-        // fills reference_number on replay (UI falls back to short id).
-        await db.jobs.update(input.jobId, {
-          site_id: input.siteId,
-          job_date: f.job_date,
-          job_time: f.job_time.trim() || null,
-          job_time_end: f.job_time_end.trim() || null,
-          call_type: (f.call_type || null) as Job["call_type"],
-          pest_species: f.pest_species,
-          report_notes: f.report_notes.trim() || null,
-          value: f.value.trim() ? Number(f.value) : null,
-          job_status: "scheduled",
-          updated_at: now,
-        });
-      } else {
-        // CREATE: insert the job. reference_number is null until the
-        // server computes it on sync (UI falls back to the short id).
-        await db.jobs.add({
-          id: input.jobId,
-          site_id: input.siteId,
-          created_at: now,
-          updated_at: now,
-          deleted_at: null,
-          job_date: f.job_date,
-          job_time: f.job_time.trim() || null,
-          job_time_end: f.job_time_end.trim() || null,
-          capture_note: null,
-          call_type: (f.call_type || null) as Job["call_type"],
-          pest_species: f.pest_species,
-          findings: null,
-          recommendations: null,
-          treatment: null,
-          pesticides_used: null,
-          risk_level: null,
-          risk_comments: null,
-          technician_signature_url: null,
-          client_signature_url: null,
-          job_status: "scheduled",
-          agreement_id: null,
-          environmental_risk: null,
-          environmental_comments: null,
-          protected_species_present: false,
-          method_used: [],
-          photo_urls: [],
-          client_present: false,
-          client_name: null,
-          report_notes: f.report_notes.trim() || null,
-          value: f.value.trim() ? Number(f.value) : null,
-          is_invoiced: false,
-          is_paid: false,
-          report_emailed_to: null,
-          report_emailed_at: null,
-          reference_number: null,
-          parent_job_id: null,
-          is_archived: false,
-        } as Job);
-      }
+      // Insert the job. reference_number is null until the server computes
+      // it on sync (UI falls back to the short id).
+      await db.jobs.add({
+        id: input.jobId,
+        site_id: input.siteId,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+        job_date: f.job_date,
+        job_time: f.job_time.trim() || null,
+        job_time_end: f.job_time_end.trim() || null,
+        capture_note: null,
+        call_type: (f.call_type || null) as Job["call_type"],
+        pest_species: f.pest_species,
+        findings: null,
+        recommendations: null,
+        treatment: null,
+        pesticides_used: null,
+        risk_level: null,
+        risk_comments: null,
+        technician_signature_url: null,
+        client_signature_url: null,
+        job_status: "scheduled",
+        agreement_id: null,
+        environmental_risk: null,
+        environmental_comments: null,
+        protected_species_present: false,
+        method_used: [],
+        photo_urls: [],
+        client_present: false,
+        client_name: null,
+        report_notes: f.report_notes.trim() || null,
+        value: f.value.trim() ? Number(f.value) : null,
+        is_invoiced: false,
+        is_paid: false,
+        report_emailed_to: null,
+        report_emailed_at: null,
+        reference_number: null,
+        parent_job_id: null,
+        is_archived: false,
+      } as Job);
     },
     entityId: (input) => input.jobId,
-    // CREATE: every newly-created id (incl. the job) so discard-revert is
-    // surgical. UPGRADE: ONLY the new customer/site — the draft job
-    // pre-exists, so it must NOT be in the revert set (and op:"update"
-    // means revertLocalCreate won't fire anyway — see the doc above).
+    // Every newly-created id (incl. the job) so discard-revert is surgical.
     entityIds: (input) =>
-      (isUpgrade
-        ? [input.newCustomerId, input.newSiteId]
-        : [input.newCustomerId, input.newSiteId, input.jobId]
-      ).filter((id): id is string => !!id),
-    op: isUpgrade ? "update" : "create",
-    // Carry every form field plus the generated ids, so the server
-    // (outbox replay) writes the same rows. Upgrade addresses the draft
-    // via `draft_job_id`; create injects the new job id as `job_id`.
+      [input.newCustomerId, input.newSiteId, input.jobId].filter(
+        (id): id is string => !!id
+      ),
+    op: "create",
+    // Carry every form field plus the generated ids, so the server (outbox
+    // replay) writes the same rows. Injects the new job id as `job_id`.
     replayArgs: (input, formData) => ({
       ...formDataToObject(formData),
-      ...(isUpgrade
-        ? { draft_job_id: input.jobId }
-        : { job_id: input.jobId }),
+      job_id: input.jobId,
       customer_id_new: input.newCustomerId ?? "",
       site_id_new: input.newSiteId ?? "",
     }),
@@ -350,73 +283,12 @@ const bookingLocalFirstOpts: LocalFirstOptions<ActionState, BookingWrapInput> =
     }),
   };
 
-// ─── Smart contact match for draft upgrades (Track 2, Half 2) ───────
-//
-// When a draft carries a captured caller name/phone, classify it against
-// the synced customers BEFORE defaulting the customer step. REUSES the
-// existing offline customer search (searchCustomersLocal — name/company
-// substring, soft-delete-excluded); no new lookup, no server call.
-//
-//   strong → an exact (case-insensitive) name match, OR a candidate whose
-//            phone/mobile matches the captured number — a returning caller.
-//            The upgrade preselects them so they're not duplicated.
-//   weak   → a partial name hit (substring, not exact) — kept as a "new"
-//            default but surfaced as a tappable hint.
-//   none   → nothing matched (or no contact captured) → "new", as-is.
-type ContactMatch =
-  | { kind: "none" }
-  | { kind: "weak"; customer: Customer }
-  | { kind: "strong"; customer: Customer };
-
-function digitsOnly(v: string | null | undefined): string {
-  return (v ?? "").replace(/\D/g, "");
-}
-
-async function matchCapturedContact(
-  name: string,
-  phone: string
-): Promise<ContactMatch> {
-  const nm = name.trim();
-  const ph = digitsOnly(phone);
-  if (!nm && !ph) return { kind: "none" };
-  // Name-driven (the everyday capture). Phone, when present, strengthens a
-  // partial name hit to a confident match among those candidates.
-  const candidates = nm ? await searchCustomersLocal(nm) : [];
-  if (candidates.length === 0) return { kind: "none" };
-  const lowerNm = nm.toLowerCase();
-  const strong =
-    candidates.find((c) => (c.name ?? "").trim().toLowerCase() === lowerNm) ??
-    (ph
-      ? candidates.find(
-          (c) => digitsOnly(c.phone) === ph || digitsOnly(c.mobile) === ph
-        )
-      : undefined);
-  if (strong) return { kind: "strong", customer: strong };
-  return { kind: "weak", customer: candidates[0] };
-}
-
 interface BookingModalProps {
   open: boolean;
   onClose: () => void;
   /** Optional — prefill customer / site (e.g. when opened from a site page). */
   presetCustomer?: Customer | null;
   presetSite?: Site | null;
-  /** Q3 attach-to-draft mode: the draft job's id. When set, the modal
-   *  UPGRADES this draft (UPDATE on the existing row) instead of creating
-   *  a new job, and the title / CTA / prefill switch to upgrade semantics. */
-  draftJobId?: string;
-  /** Read-only context shown at the top in upgrade mode — the operator's
-   *  original quick-capture phrase. Never written back (persists on the row). */
-  presetCaptureNote?: string;
-  /** Prefill the date from the draft (Q5). Create mode → today. */
-  presetJobDate?: string;
-  /** Prefill the arrival window from the draft (Q5). Create mode → blank. */
-  presetWindow?: { start: string; end: string };
-  /** Upgrade mode (Track 2 Half 2): the draft's captured caller name/phone.
-   *  Used ONLY to DEFAULT + PREFILL the customer step on open (smart match);
-   *  never written back as-is — the operator confirms the customer. */
-  presetContactName?: string;
-  presetContactPhone?: string;
 }
 
 type SiteMode = "existing" | "new";
@@ -439,12 +311,6 @@ export function BookingModal({
   onClose,
   presetCustomer,
   presetSite,
-  draftJobId,
-  presetCaptureNote,
-  presetJobDate,
-  presetWindow,
-  presetContactName,
-  presetContactPhone,
 }: BookingModalProps) {
   // ── Customer state (single type-to-select-or-create field) ──
   // No existing/new tabs: `customerQuery` is the field's text; picking a
@@ -484,11 +350,6 @@ export function BookingModal({
   // any server-returned errors for display.
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
 
-  // Smart-match hint (Track 2 Half 2): a possible existing customer for the
-  // captured contact, offered inline in "new" mode. Tapping it switches to
-  // that customer instead of creating a duplicate.
-  const [matchHint, setMatchHint] = useState<Customer | null>(null);
-
   const customerInputRef = useRef<HTMLInputElement>(null);
   const customerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOpenRef = useRef(false);
@@ -497,20 +358,14 @@ export function BookingModal({
   // customer/site) to Dexie immediately, enqueues one multi-entity
   // outbox entry, and — online — fires the server action with the
   // same client ids. Offline, the booking is queued and the modal
-  // closes via the localSuccessState option. Replaces the previous
-  // graceful-online-only wrap; a mid-submit connection loss now just
-  // queues the booking instead of erroring.
-  // Meta closes over draftJobId, so rebuild it only when that changes
-  // (wrap.ts requires a stable ref otherwise). The serverAction arg below
+  // closes via the localSuccessState option. The serverAction arg below
   // is UNUSED at submit: this modal is on the optimistic path
   // (localSuccessState set), so the server is reached only via the outbox
-  // registry keyed by meta.actionName — never this direct ref. Kept as
-  // createQuickBookingAction to avoid an extra import.
-  const meta = useMemo(() => makeBookingMeta(draftJobId), [draftJobId]);
+  // registry keyed by meta.actionName — never this direct ref.
   const [state, action, isPending] = useLocalFirstAction<
     ActionState,
     BookingWrapInput
-  >(createQuickBookingAction, initialState, meta, bookingLocalFirstOpts);
+  >(createQuickBookingAction, initialState, bookingMeta, bookingLocalFirstOpts);
 
   /** When a customer has no sites but the customer record itself has an
    *  address, swing the form into "new site" mode and pre-fill it from
@@ -556,8 +411,8 @@ export function BookingModal({
     // that the prefillSiteFromCustomer reorder just cleared.)
     //
     // No customer selected yet → there are no existing sites to pick, so
-    // default the (still-tabbed) Location field to "new". A preset customer
-    // (opened from a customer page) keeps "existing" and loads their sites.
+    // default the Location field to "new". A preset customer (opened from a
+    // customer page) keeps "existing" and loads their sites.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSiteMode(presetCustomer ? "existing" : "new");
     setCustomerQuery("");
@@ -566,57 +421,20 @@ export function BookingModal({
     setSites([]);
     setSelectedPests([]);
     setClientErrors({});
-    setMatchHint(null);
     setNewSiteLine1("");
     setNewSiteLine2("");
     setNewSiteTown("");
     setNewSiteCounty("");
     setNewSitePostcode("");
-    // Upgrade mode (Q5): hydrate date + arrival window from the draft so
-    // the operator doesn't re-enter them. Create mode → today + blank.
-    // call_type / pest_species stay blank in both (drafts carry neither).
-    // (setJobTimeEnd here also fixes a latent create-mode bug: the end
-    // time wasn't cleared on reopen, leaving a stale window.)
-    setJobDate(presetJobDate ?? todayIso());
-    setJobTime(presetWindow?.start ?? "");
-    setJobTimeEnd(presetWindow?.end ?? "");
+    // Fresh booking → today + blank window. (Clearing the end time here also
+    // fixes a latent bug where it wasn't reset on reopen, leaving a stale
+    // window.)
+    setJobDate(todayIso());
+    setJobTime("");
+    setJobTimeEnd("");
     setCallType("");
     setValue("");
     setReportNotes("");
-
-    // Upgrade (attach-to-draft, Track 2 Half 2): the everyday trigger is a
-    // usually-new caller, so DEFAULT to "new" and prefill from the captured
-    // contact. Then run a smart local match (Dexie, offline): a clear match
-    // switches to "existing" + preselect (no duplicate); a partial match is
-    // offered as an inline hint; no match stays "new". Takes precedence over
-    // the search-only / presetCustomer branches below.
-    if (draftJobId && !presetCustomer) {
-      setSiteMode("new");
-      // Prefill the single field from the draft's captured name; a strong
-      // local match preselects (no duplicate), a weak one shows as a hint,
-      // none stays as the typed name → a new customer on save. The captured
-      // phone (if any) flows to the new customer via the hidden input.
-      setCustomerQuery(presetContactName ?? "");
-      setCustomerResults([]);
-      setLoadingCustomers(false);
-      void matchCapturedContact(
-        presetContactName ?? "",
-        presetContactPhone ?? ""
-      ).then(async (m) => {
-        if (m.kind === "strong") {
-          // Returning caller — preselect, don't duplicate.
-          setSelectedCustomer(m.customer);
-          setSiteMode("existing");
-          const list = await getSitesForCustomerLocal(m.customer.id);
-          setSites(list);
-          if (list.length > 0) setSelectedSite(list[0]);
-          else prefillSiteFromCustomer(m.customer);
-        } else if (m.kind === "weak") {
-          setMatchHint(m.customer);
-        }
-      });
-      return;
-    }
 
     if (!presetCustomer) {
       // Search-only picker: no list until the user types (≥1 char). Just
@@ -640,16 +458,7 @@ export function BookingModal({
         }
       });
     }
-  }, [
-    open,
-    presetCustomer,
-    presetSite,
-    presetJobDate,
-    presetWindow,
-    draftJobId,
-    presetContactName,
-    presetContactPhone,
-  ]);
+  }, [open, presetCustomer, presetSite]);
 
   // Close on successful submission — and that's it. The post-save NEVER
   // touches the network. router.refresh() used to live here, but it's the
@@ -720,26 +529,14 @@ export function BookingModal({
   // as online. Returns a field→message map; empty means valid.
   function validateBooking(): Record<string, string> {
     const errs: Record<string, string> = {};
-    // Always required: a rough customer + a date.
-    // A customer is required: either a picked existing one, or typed text
-    // that becomes a new customer on save.
+    // A quick add needs only a rough customer + a date. A customer is
+    // required: either a picked existing one, or typed text that becomes a
+    // new customer on save. Site address + call type are optional — a bare
+    // site is created server-side when no address is given.
     if (!selectedCustomer && !customerQuery.trim()) {
       errs.customer_name = "Enter a customer name";
     }
     if (!jobDate) errs.job_date = "Pick a date";
-    // Site address + call type are required ONLY when upgrading a draft.
-    // A normal booking is a quick add — name + date is enough (Pass 1);
-    // a bare site is created server-side when no address is given.
-    if (draftJobId) {
-      if (siteMode === "existing") {
-        if (!selectedSite) errs.site_id = "Add a location";
-      } else {
-        if (!newSiteLine1.trim()) errs.site_line1 = "Add an address";
-        if (!newSiteTown.trim()) errs.site_town = "Add a town";
-        if (!newSitePostcode.trim()) errs.site_postcode = "Add a postcode";
-      }
-      if (!callType) errs.call_type = "Choose a call type";
-    }
     return errs;
   }
 
@@ -752,19 +549,18 @@ export function BookingModal({
       setClientErrors(errs);
       return;
     }
-    // Q3c — offline-checkable clash guard (covers create AND upgrade).
-    // Only an EXISTING site can clash; a brand-new site has no id yet, so
-    // it's impossible. Block inline BEFORE the optimistic write so a
-    // duplicate never becomes a stuck outbox entry. The conflict inbox
-    // stays as the server-side backstop for the rare offline race.
+    // Offline-checkable clash guard. Only an EXISTING site can clash; a
+    // brand-new site has no id yet, so it's impossible. Block inline BEFORE
+    // the optimistic write so a duplicate never becomes a stuck outbox
+    // entry. The conflict inbox stays as the server-side backstop for the
+    // rare offline race.
     const resolvedSiteId =
       siteMode === "existing" ? selectedSite?.id ?? "" : "";
     if (resolvedSiteId && callType && jobDate) {
       const clash = await findClashingJobLocal(
         resolvedSiteId,
         jobDate,
-        callType,
-        draftJobId // exclude the draft's own row (upgrade mode)
+        callType
       );
       if (clash) {
         setClientErrors({
@@ -800,7 +596,7 @@ export function BookingModal({
       <div className="relative flex h-full w-full flex-col bg-white shadow-xl sm:mx-4 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-2xl">
         <div className="flex shrink-0 items-center justify-between border-b px-5 py-4">
           <h2 className="text-base font-semibold text-gray-900">
-            {draftJobId ? "Upgrade to booking" : "New Booking"}
+            New Booking
           </h2>
           <button
             type="button"
@@ -829,24 +625,9 @@ export function BookingModal({
               state — that way a failed submit + re-submit doesn't wipe what
               the user typed. */}
           <div className="flex-1 space-y-5 overflow-y-auto p-5">
-          {/* Upgrade mode: addresses the draft to UPDATE. Empty in create
-              mode (the create action ignores it). replayArgs also injects
-              it, so replay works even without this field. */}
-          <input type="hidden" name="draft_job_id" value={draftJobId ?? ""} />
-          {/* Read-only context (Q4): the operator's original quick-capture
-              phrase, shown so they can read their own jotting while filling
-              in the real customer/site. Never written back — it persists
-              untouched on the upgraded row. */}
-          {draftJobId && presetCaptureNote && (
-            <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-800">
-              <span className="font-medium">From your note:</span>{" "}
-              “{presetCaptureNote}”
-            </div>
-          )}
           {/* Customer mode + ids are DERIVED from the single field: a picked
               customer → existing; otherwise the typed name → a new customer.
-              Company/email aren't collected in the quick flow; the captured
-              phone (draft upgrade), if any, still flows to the new customer. */}
+              Company/email/phone aren't collected in the quick flow. */}
           <input
             type="hidden"
             name="mode_customer"
@@ -866,11 +647,7 @@ export function BookingModal({
           />
           <input type="hidden" name="customer_company" value="" />
           <input type="hidden" name="customer_email" value="" />
-          <input
-            type="hidden"
-            name="customer_phone"
-            value={selectedCustomer ? "" : presetContactPhone ?? ""}
-          />
+          <input type="hidden" name="customer_phone" value="" />
           <input
             type="hidden"
             name="site_id"
@@ -911,29 +688,6 @@ export function BookingModal({
             </h3>
 
             <div className="mt-2">
-              {/* Smart-match hint (Track 2 Half 2): the captured contact
-                  partially matches an existing customer. Offer them inline so
-                  a returning caller isn't duplicated — tapping preselects. */}
-              {matchHint && !selectedCustomer && (
-                <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                  <p className="min-w-0 text-xs text-amber-800">
-                    Looks like an existing customer:{" "}
-                    <span className="font-medium">{matchHint.name}</span>
-                    {matchHint.company_name ? ` (${matchHint.company_name})` : ""}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const c = matchHint;
-                      setMatchHint(null);
-                      void pickCustomer(c);
-                    }}
-                    className="shrink-0 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700"
-                  >
-                    Use them
-                  </button>
-                </div>
-              )}
               {selectedCustomer ? (
                 <div className="flex items-center justify-between rounded-lg border border-brand bg-brand-soft px-3 py-2">
                   <div>
@@ -1179,9 +933,7 @@ export function BookingModal({
               <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <label htmlFor="bn-site_line1" className={labelClass}>
-                    Address Line 1
-                    {draftJobId && <span className="text-red-500"> *</span>}
-                  </label>
+                    Address Line 1                  </label>
                   <input
                     id="bn-site_line1"
                     type="text"
@@ -1198,9 +950,7 @@ export function BookingModal({
                 </div>
                 <div>
                   <label htmlFor="bn-site_town" className={labelClass}>
-                    Town
-                    {draftJobId && <span className="text-red-500"> *</span>}
-                  </label>
+                    Town                  </label>
                   <input
                     id="bn-site_town"
                     type="text"
@@ -1216,9 +966,7 @@ export function BookingModal({
                 </div>
                 <div>
                   <label htmlFor="bn-site_postcode" className={labelClass}>
-                    Postcode
-                    {draftJobId && <span className="text-red-500"> *</span>}
-                  </label>
+                    Postcode                  </label>
                   <input
                     id="bn-site_postcode"
                     type="text"
@@ -1279,7 +1027,6 @@ export function BookingModal({
               <div>
                 <label htmlFor="bn-call_type" className={labelClass}>
                   Call Type
-                  {draftJobId && <span className="text-red-500"> *</span>}
                 </label>
                 <select
                   id="bn-call_type"
@@ -1374,11 +1121,7 @@ export function BookingModal({
               disabled={isPending}
               className="min-h-[44px] rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50 sm:min-h-0"
             >
-              {isPending
-                ? "Saving…"
-                : draftJobId
-                  ? "Upgrade to booking"
-                  : "Add Booking"}
+              {isPending ? "Saving…" : "Add Booking"}
             </button>
           </div>
         </form>

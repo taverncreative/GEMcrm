@@ -4,21 +4,18 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 
 /**
- * Status segmentation for the Jobs page — three segments:
+ * Status segmentation for the Jobs page — two segments:
  *
  *   - Open      → job_status in {scheduled, in_progress} (the active queue)
  *   - Completed → job_status === completed (the done/archive view)
- *   - Drafts    → job_status === draft (quick captures awaiting upgrade)
  *
  * Open is the default — a field tech lands on their active work. "Open"
- * omits the `status` param (clean default URL); the others set
- * ?status=completed / ?status=draft. Each tab enumerates exactly the
- * status(es) it wants, so a draft only ever shows under Drafts.
+ * omits the `status` param (clean default URL); Completed sets
+ * ?status=completed. Each tab enumerates exactly the status(es) it wants.
  */
 const TABS = [
   { value: "open", label: "Open" },
   { value: "completed", label: "Completed" },
-  { value: "draft", label: "Drafts" },
 ] as const;
 
 export function JobsStatusTabs() {
@@ -26,12 +23,11 @@ export function JobsStatusTabs() {
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
   const param = searchParams.get("status");
-  const active =
-    param === "completed" ? "completed" : param === "draft" ? "draft" : "open";
+  const active = param === "completed" ? "completed" : "open";
 
   function setTab(value: string) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value === "completed" || value === "draft") params.set("status", value);
+    if (value === "completed") params.set("status", value);
     else params.delete("status");
     const qs = params.toString();
     startTransition(() => {

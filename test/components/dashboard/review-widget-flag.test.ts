@@ -37,6 +37,6 @@ describe("Request review widget — REVIEW_REQUESTS_ENABLED gate", () => {
     expect(ids).not.toContain("review-requests");
     // The rest of the registry is unaffected — only this id is gated.
     expect(ids).toContain("service-sheets-to-fill");
-    expect(ids).toContain("drafts-to-upgrade");
+    expect(ids).toContain("jobs-today");
   });
 });

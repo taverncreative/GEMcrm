@@ -38,11 +38,7 @@ import {
   createCustomerAction,
 } from "@/app/(app)/customers/actions";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
-import {
-  createQuickBookingAction,
-  captureQuickJobAction,
-  upgradeDraftToBookingAction,
-} from "@/app/(app)/bookings/actions";
+import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
 import type { ActionState } from "@/types/actions";
 
 /** Fresh initial state to satisfy the React `useActionState` calling
@@ -90,20 +86,6 @@ export const REGISTRY: Record<string, RegistryEntry> = {
   createQuickBookingAction: {
     kind: "form",
     invoke: (fd) => createQuickBookingAction(INITIAL_FORM_STATE, fd),
-  },
-  captureQuickJobAction: {
-    kind: "form",
-    invoke: (fd) => captureQuickJobAction(INITIAL_FORM_STATE, fd),
-  },
-  // Q3 draft → booking upgrade. Replayed from the id-enriched args the
-  // modal's upgrade meta persisted (draft_job_id / customer_id_new /
-  // site_id_new): the action creates any new customer/site then runs the
-  // guarded UPDATE on the existing draft. Idempotent on re-run — the
-  // guard (.eq job_status 'draft') makes a second drain a zero-row no-op;
-  // a real clash surfaces as a stuck entry in the conflict inbox.
-  upgradeDraftToBookingAction: {
-    kind: "form",
-    invoke: (fd) => upgradeDraftToBookingAction(INITIAL_FORM_STATE, fd),
   },
   completeServiceSheetAction: {
     kind: "form",

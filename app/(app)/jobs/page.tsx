@@ -100,78 +100,6 @@ interface JobWithContext extends Job {
   site: Site & { customer: Customer };
 }
 
-/**
- * The Open list holds two row shapes. A booking carries full site +
- * customer context (JobWithContext). A DRAFT (Q-series quick capture) is
- * just a phrase + date + arrival window with a null site_id — it can't be
- * forced into JobWithContext, so it gets its own row kind. The table
- * render branches on `kind`.
- *
- * This is also what keeps a draft un-completable BY CONSTRUCTION: the
- * draft branch renders no checkbox and no Start/Complete affordance — its
- * only action is "Upgrade to booking" (→ /jobs/[id]/upgrade). The lifecycle
- * gates (JobStatusActions' draft case, the complete-page FILLABLE_STATUSES
- * whitelist, the L4 DB CHECK) are unchanged and surface-independent.
- */
-type RollRow =
-  | { kind: "booking"; job: JobWithContext }
-  | { kind: "draft"; job: Job };
-
-/**
- * Drafts tab (Q2). Quick captures have no customer/site context — they
- * render straight from their phrase + date + arrival window. Each row
- * links to the job detail, where "Upgrade to booking →" lives (Q3).
- */
-function DraftsList({ drafts }: { drafts: Job[] | null }) {
-  if (drafts === null) return <JobsTableSkeleton />;
-  if (drafts.length === 0) {
-    return (
-      <div className="rounded-xl bg-white p-12 text-center shadow-sm">
-        <p className="text-sm text-gray-500">No draft jobs.</p>
-        <p className="mt-1 text-xs text-gray-400">
-          Use “Quick job” to jot a phone booking down in seconds — add the
-          customer and details later.
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className="overflow-hidden rounded-xl bg-white shadow-sm">
-      <ul className="divide-y divide-gray-100">
-        {drafts.map((d) => (
-          <li key={d.id}>
-            {/* A draft's only forward action is upgrade — route straight to
-                the upgrade flow (matches the dashboard "Drafts to upgrade"
-                card and the Open-tab draft rows), never the job detail page. */}
-            <Link
-              href={`${ROUTES.jobDetail(d.id)}/upgrade`}
-              className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-gray-50"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-gray-900">
-                  {d.capture_note || "(no description)"}
-                </p>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  {new Date(d.job_date).toLocaleDateString("en-GB", {
-                    weekday: "short",
-                    day: "numeric",
-                    month: "short",
-                  })}
-                  {" · "}
-                  {formatWindow(d.job_time, d.job_time_end)}
-                </p>
-              </div>
-              <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-                Draft
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function JobsTableSkeleton() {
   return (
     <div className="overflow-hidden rounded-xl bg-white shadow-sm">
@@ -280,9 +208,9 @@ function buildRows(args: {
   for (const j of jobs) {
     if (j.deleted_at) continue;
     if (j.is_archived) continue;
-    // Drafts (Q2) carry a null site_id — they have no site/customer
-    // context and never belong in the context-joined Open/Completed
-    // views. The Drafts tab renders them from the raw jobs list instead.
+    // Defensive: a job with no site_id has no site/customer context and
+    // can't render in the context-joined list. (Retired draft jobs were
+    // the only null-site rows; none are created any more.)
     if (!j.site_id) continue;
     const site = sitesById.get(j.site_id);
     if (!site) continue;
@@ -304,16 +232,12 @@ export default function JobsPage() {
   const filter: "today" | "upcoming" | "all" =
     filterParam === "today" || filterParam === "upcoming" ? filterParam : "all";
 
-  // Three-segment status: Open (scheduled + in_progress) is the default;
-  // Completed sets ?status=completed; Drafts (quick captures) sets
-  // ?status=draft. Each tab enumerates exactly the status(es) it wants.
+  // Two-segment status: Open (scheduled + in_progress) is the default;
+  // Completed sets ?status=completed. Each tab enumerates exactly the
+  // status(es) it wants.
   const statusParam = params.get("status");
-  const status: "open" | "completed" | "draft" =
-    statusParam === "completed"
-      ? "completed"
-      : statusParam === "draft"
-        ? "draft"
-        : "open";
+  const status: "open" | "completed" =
+    statusParam === "completed" ? "completed" : "open";
 
   // Date sort direction — presentational, local state (no need to deep-link
   // it). Default "asc" = soonest first, so the next/overdue job sits at the
@@ -397,67 +321,6 @@ export default function JobsPage() {
 
     return list.slice(0, JOBS_LIMIT);
   }, [jobs, sites, customers, filter, status, searchParam, today, sortDir]);
-
-  // Drafts (Q2) live outside the site/customer join — build them straight
-  // from the raw jobs list. Quick captures awaiting upgrade: phrase +
-  // date + window, newest date first.
-  const draftRows = useMemo<Job[] | null>(() => {
-    if (jobs === undefined) return null;
-    return jobs
-      .filter((j) => !j.deleted_at && !j.is_archived && j.job_status === "draft")
-      .sort((a, b) => {
-        const byDate = b.job_date.localeCompare(a.job_date);
-        return byDate !== 0 ? byDate : b.created_at.localeCompare(a.created_at);
-      });
-  }, [jobs]);
-
-  // ─── Open-tab roll: bookings + drafts merged (Track 1b) ────────────
-  // The Open tab is the operator's "job roll". Drafts (quick captures
-  // awaiting upgrade) must appear here interleaved by date so they don't
-  // get forgotten in a separate tab — but as a DISTINCT row kind, never a
-  // pseudo-booking. Completed (and any non-open tab) stays bookings-only:
-  // a draft is open work by definition.
-  const rollRows = useMemo<RollRow[] | null>(() => {
-    if (rows === null) return null;
-    const bookingRows: RollRow[] = rows.map((job) => ({ kind: "booking", job }));
-    if (status !== "open") return bookingRows;
-    // rows !== null already implies jobs is loaded, but guard for TS.
-    if (jobs === undefined) return null;
-
-    let drafts = jobs.filter(
-      (j) => !j.deleted_at && !j.is_archived && j.job_status === "draft"
-    );
-    // Same date filter bookings get (dashboard deep-links). Drafts carry job_date.
-    if (filter === "today") {
-      drafts = drafts.filter((d) => d.job_date === today);
-    } else if (filter === "upcoming") {
-      drafts = drafts.filter((d) => d.job_date >= today);
-    }
-    // Drafts carry no customer/site, so the phrase is the only text to
-    // match — keeps a draft findable by what the operator jotted.
-    const q = searchParam.trim().toLowerCase();
-    if (q.length > 0) {
-      drafts = drafts.filter((d) =>
-        (d.capture_note ?? "").toLowerCase().includes(q)
-      );
-    }
-    const draftRollRows: RollRow[] = drafts.map((job) => ({
-      kind: "draft",
-      job,
-    }));
-
-    // The SAME shared sort bookings already use — job_date, then created_at,
-    // sortDir toggles. Drafts interleave by date with no special-casing, so
-    // the soonest-first ordering of real bookings is untouched.
-    const merged = [...bookingRows, ...draftRollRows];
-    merged.sort((a, b) => {
-      const byDate = a.job.job_date.localeCompare(b.job.job_date);
-      if (byDate !== 0) return sortDir === "asc" ? byDate : -byDate;
-      const byCreated = a.job.created_at.localeCompare(b.job.created_at);
-      return sortDir === "asc" ? byCreated : -byCreated;
-    });
-    return merged.slice(0, JOBS_LIMIT);
-  }, [rows, jobs, status, filter, searchParam, today, sortDir]);
 
   // Selection only exists on the Completed tab — drop it when the tab
   // switches away. Render-time adjustment (the documented alternative
@@ -630,11 +493,9 @@ export default function JobsPage() {
       )}
 
       <div className="mt-4">
-        {status === "draft" ? (
-          <DraftsList drafts={draftRows} />
-        ) : rollRows === null ? (
+        {rows === null ? (
           <JobsTableSkeleton />
-        ) : rollRows.length === 0 ? (
+        ) : rows.length === 0 ? (
           <div className="rounded-xl bg-white p-12 text-center shadow-sm">
             <p className="text-sm text-gray-500">No jobs found.</p>
           </div>
@@ -681,84 +542,7 @@ export default function JobsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {rollRows.map((row) => {
-                    // Draft rows (Track 1b) — Open tab only. No site/customer,
-                    // so render the phrase + date + a grey "Draft" badge and
-                    // route the whole row to upgrade. NO checkbox, NO Start/
-                    // Complete affordance: a draft's only action is upgrade.
-                    if (row.kind === "draft") {
-                      const d = row.job;
-                      const upgradeHref = `${ROUTES.jobDetail(d.id)}/upgrade`;
-                      return (
-                        <tr
-                          key={d.id}
-                          className="bg-gray-50 hover:bg-gray-100/70"
-                        >
-                          <td className="px-4 py-3 whitespace-nowrap text-gray-300">
-                            —
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <Link href={upgradeHref} className="block">
-                              <span className="font-medium text-gray-700">
-                                {new Date(d.job_date).toLocaleDateString(
-                                  "en-GB",
-                                  {
-                                    day: "numeric",
-                                    month: "short",
-                                    year: "numeric",
-                                  }
-                                )}
-                              </span>
-                              <span
-                                className={`mt-0.5 block font-mono text-[11px] tabular-nums ${
-                                  d.job_time ? "text-gray-500" : "text-gray-400"
-                                }`}
-                              >
-                                {formatWindow(d.job_time, d.job_time_end)}
-                              </span>
-                            </Link>
-                          </td>
-                          <td className="px-4 py-3">
-                            <Link
-                              href={upgradeHref}
-                              className="flex items-center gap-2"
-                            >
-                              <span className="truncate italic text-gray-500">
-                                {d.capture_note || "(no description)"}
-                              </span>
-                              {/* The Status column carries the Draft badge on
-                                  md+, but is hidden below md — surface the
-                                  badge inline here so a draft is unmistakable
-                                  on mobile too. */}
-                              <span className="md:hidden">
-                                <JobStatusBadge status="draft" />
-                              </span>
-                            </Link>
-                          </td>
-                          <td className="px-4 py-3 hidden sm:table-cell text-gray-300">
-                            —
-                          </td>
-                          <td className="px-4 py-3 hidden md:table-cell text-gray-300">
-                            —
-                          </td>
-                          <td className="px-4 py-3 hidden md:table-cell">
-                            <div className="flex items-center gap-2">
-                              <JobStatusBadge status="draft" />
-                              <Link
-                                href={upgradeHref}
-                                className="inline-flex items-center gap-1 rounded-md bg-brand-soft px-2 py-0.5 text-xs font-medium text-brand-darker transition-colors hover:bg-brand-soft/70"
-                              >
-                                Upgrade →
-                              </Link>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-gray-300">
-                            —
-                          </td>
-                        </tr>
-                      );
-                    }
-                    const job = row.job;
+                  {rows.map((job) => {
                     // With a selection going, rows of other customers
                     // can't join this invoice — dim + disable them.
                     const crossCustomer =

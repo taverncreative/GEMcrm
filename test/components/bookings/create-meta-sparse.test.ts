@@ -11,9 +11,7 @@
  *   - a name + date booking with NO call type and NO site still returns a
  *     non-null input AND mints a bare site id (so it syncs like any other);
  *   - applyLocal writes the bare site (null address, "—" county) + a
- *     scheduled job with null call_type;
- *   - UPGRADE mode does NOT mint a bare site for a blank existing site
- *     (it returns null) — the bare-site convenience is create-only.
+ *     scheduled job with null call_type.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { makeBookingMeta } from "@/components/bookings/booking-modal";
@@ -89,20 +87,5 @@ describe("makeBookingMeta — sparse create (offline parity)", () => {
     expect(job!.job_status).toBe("scheduled");
     expect(job!.call_type).toBeNull();
     expect(job!.site_id).toBe(input.newSiteId);
-  });
-
-  it("UPGRADE mode does NOT mint a bare site for a blank existing site", () => {
-    const upgradeMeta = makeBookingMeta("33333333-3333-4333-8333-333333333333");
-    const input = upgradeMeta.parseInput!(
-      fd({
-        mode_customer: "existing",
-        mode_site: "existing",
-        customer_id: "cust-1",
-        job_date: "2026-07-01",
-        call_type: "routine",
-        // no site_id — upgrade must NOT silently invent one
-      })
-    );
-    expect(input).toBeNull();
   });
 });

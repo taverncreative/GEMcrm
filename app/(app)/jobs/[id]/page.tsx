@@ -374,15 +374,9 @@ export default function JobDetailPage() {
               · {new Date(job.job_date).toLocaleDateString()}
             </h1>
             <JobStatusActions jobId={job.id} currentStatus={job.job_status} />
-            {/* "Fill Service Sheet" is a completion affordance — show it only
-                for a real, fillable booking. A draft (job_status='draft', no
-                site/customer) is NOT a booking yet: its sole forward action is
-                "Upgrade to booking", rendered by JobStatusActions above.
-                Without the draft exclusion this link dead-ended a draft on the
-                view-only complete page (FILLABLE_STATUSES omits 'draft'), and —
-                more importantly — must never offer a draft a path toward
-                completion. Completed → done (no link). */}
-            {job.job_status !== "completed" && job.job_status !== "draft" && (
+            {/* "Fill Service Sheet" is a completion affordance — show it for a
+                fillable booking only. Completed → done (no link). */}
+            {job.job_status !== "completed" && (
               <Link
                 href={`${ROUTES.jobDetail(job.id)}/complete`}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all duration-75 hover:bg-brand-dark active:scale-95"
