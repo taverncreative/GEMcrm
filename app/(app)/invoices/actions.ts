@@ -201,6 +201,47 @@ export async function markInvoicePaidAction(
 }
 
 /**
+ * Generate (or regenerate) an invoice's PDF and store it in the public
+ * reports bucket — the same render → store path the creation flow uses.
+ *
+ * Backfills rows that landed without a PDF: chiefly the legacy
+ * auto-invoice path (createInvoiceForJob, fired on job completion), which
+ * never renders one, plus any draft whose generation failed at creation.
+ * `uploadPdf` upserts, so a re-run simply overwrites — this doubles as a
+ * stale-PDF refresh after a template change.
+ */
+export async function generateInvoicePdfAction(
+  invoiceId: string
+): Promise<{ success: boolean; message?: string; pdfUrl?: string }> {
+  await requireUser();
+  if (!invoiceId) return { success: false, message: "Missing invoice id" };
+  try {
+    const detail = await getInvoiceWithCustomer(invoiceId);
+    if (!detail) return { success: false, message: "Invoice not found" };
+
+    const buf = await generateInvoicePdf({
+      invoice: detail,
+      customer: detail.customer,
+    });
+    const pdfUrl = await uploadPdf(buf, `invoices/${invoiceId}/invoice.pdf`);
+    await setInvoicePdfUrl(invoiceId, pdfUrl);
+
+    revalidatePath(ROUTES.DASHBOARD);
+    revalidatePath(ROUTES.JOBS);
+    revalidatePath(ROUTES.CUSTOMERS);
+    revalidatePath(ROUTES.customerDetail(detail.customer_id));
+    revalidatePath(ROUTES.REPORTS);
+    return { success: true, pdfUrl };
+  } catch (err) {
+    console.error("[generateInvoicePdfAction]", err);
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to generate PDF",
+    };
+  }
+}
+
+/**
  * Resend an invoice — used as the "Send follow-up" action for overdue
  * invoices. Re-sends the original PDF with a chasing tone in the email.
  */

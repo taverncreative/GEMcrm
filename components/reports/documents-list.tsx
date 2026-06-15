@@ -7,6 +7,7 @@ import { ROUTES } from "@/lib/constants/routes";
 import {
   markInvoicePaidAction,
   sendInvoiceFollowUpAction,
+  generateInvoicePdfAction,
 } from "@/app/(app)/invoices/actions";
 import type { DocumentItem } from "@/lib/data/documents";
 
@@ -176,6 +177,8 @@ export function DocumentsList({ items }: DocumentsListProps) {
                             />
                           </svg>
                         </a>
+                      ) : item.kind === "invoice" && item.invoiceId ? (
+                        <GenerateInvoicePdfButton invoiceId={item.invoiceId} />
                       ) : (
                         <span className="text-xs text-gray-300">No PDF</span>
                       )}
@@ -275,5 +278,42 @@ function InvoiceActions({ item }: { item: DocumentItem }) {
         {busy === "paid" ? "Saving…" : "Mark paid"}
       </button>
     </>
+  );
+}
+
+/**
+ * Backfill trigger for an invoice with no stored PDF — the legacy
+ * auto-invoice path (createInvoiceForJob) never renders one. Generates
+ * and stores it server-side, then refreshes so the row's "Open" link
+ * appears. Online-only like the sibling pay/chase actions.
+ */
+function GenerateInvoicePdfButton({ invoiceId }: { invoiceId: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [failed, setFailed] = useState(false);
+
+  function handleGenerate() {
+    setFailed(false);
+    startTransition(async () => {
+      const res = await generateInvoicePdfAction(invoiceId);
+      if (res.success) router.refresh();
+      else setFailed(true);
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleGenerate}
+      disabled={isPending}
+      title={
+        failed
+          ? "Generation failed — try again"
+          : "Generate the invoice PDF"
+      }
+      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+    >
+      {isPending ? "Generating…" : failed ? "Retry PDF" : "Generate PDF"}
+    </button>
   );
 }
