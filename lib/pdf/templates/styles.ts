@@ -41,70 +41,10 @@ export const PDF_STYLES = `
     padding: 0;
   }
 
-  /* ─── Typography ─── */
-  .title {
-    font-size: 26px;
-    font-weight: 700;
-    color: #111827;
-    letter-spacing: -0.3px;
-    line-height: 1.15;
-  }
-  .subtitle {
-    font-size: 13px;
-    font-weight: 400;
-    color: #6b7280;
-    margin-top: 2px;
-  }
-
-  /* ─── Header ─── */
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding-bottom: 20px;
-    margin-bottom: 28px;
-    border-bottom: 2.5px solid var(--brand-rule);
-  }
-  .header-brand {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-  .header-icon {
-    width: 44px;
-    height: 44px;
-    background: var(--brand-rule);
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-size: 22px;
-    font-weight: 700;
-    flex-shrink: 0;
-  }
-  .header-text .company {
-    font-size: 22px;
-    font-weight: 700;
-    color: #111827;
-    line-height: 1.2;
-  }
-  .header-text .doc-type {
-    font-size: 12px;
-    color: #6b7280;
-    font-weight: 400;
-    margin-top: 1px;
-  }
-  .header-meta {
-    text-align: right;
-    font-size: 10px;
-    color: #6b7280;
-    line-height: 1.7;
-  }
-  .header-meta strong {
-    color: #374151;
-    font-weight: 600;
-  }
+  /* The old "G"-square .header lockup and its .title/.subtitle typography were
+     removed once the invoice and agreement moved onto renderDocHeader (the
+     shared .doc-header lockup). All three documents now share one branded
+     header. */
 
   /* ─── Section ─── */
   .section {

@@ -1,5 +1,6 @@
 import type { Agreement, Site, Customer } from "@/types/database";
 import { PDF_STYLES } from "./styles";
+import { renderDocHeader } from "./partials";
 
 function escape(val: string | null | undefined): string {
   if (!val) return "";
@@ -53,6 +54,14 @@ export function renderAgreementHtml({
   const addr = [site.address_line_1, site.address_line_2, site.town, site.county, site.postcode]
     .filter(Boolean)
     .join(", ");
+  const ref = agreement.reference_number ?? agreement.id.slice(0, 8).toUpperCase();
+  const headerMeta = [
+    { label: "Agreement Date", value: formatDate(agreement.start_date) },
+    ...(agreement.signed_date
+      ? [{ label: "Signed", value: formatDate(agreement.signed_date) }]
+      : []),
+    { label: "Reference", value: ref },
+  ];
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -63,23 +72,11 @@ export function renderAgreementHtml({
 <body>
 <div class="page">
 
-  <!-- Header -->
-  <div class="header">
-    <div class="header-brand">
-      <div class="header-icon">G</div>
-      <div class="header-text">
-        <div class="company">GEM Services</div>
-        <div class="doc-type">Pest Management Agreement</div>
-      </div>
-    </div>
-    <div class="header-meta">
-      <strong>Agreement Date</strong><br />
-      ${formatDate(agreement.start_date)}<br /><br />
-      ${agreement.signed_date ? `<strong>Signed</strong><br />${formatDate(agreement.signed_date)}<br /><br />` : ""}
-      <strong>GEM Services Reference</strong><br />
-      ${escape(agreement.reference_number ?? agreement.id.slice(0, 8).toUpperCase())}
-    </div>
-  </div>
+  <!-- Header (shared branded partial) -->
+  ${renderDocHeader({
+    docType: "Service Specification & Contract",
+    meta: headerMeta,
+  })}
 
   <!-- Client Details -->
   <div class="section avoid-break">

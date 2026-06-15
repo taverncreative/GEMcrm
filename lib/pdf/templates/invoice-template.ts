@@ -1,5 +1,6 @@
 import type { Customer, Invoice } from "@/types/database";
 import { PDF_STYLES } from "./styles";
+import { renderDocHeader } from "./partials";
 
 function escape(val: string | number | null | undefined): string {
   if (val === null || val === undefined) return "";
@@ -94,24 +95,15 @@ export function renderInvoiceHtml({
 <body>
 <div class="page">
 
-  <!-- Header -->
-  <div class="header">
-    <div class="header-brand">
-      <div class="header-icon">G</div>
-      <div class="header-text">
-        <div class="company">GEM Services</div>
-        <div class="doc-type">Invoice</div>
-      </div>
-    </div>
-    <div class="header-meta">
-      <strong>Invoice number</strong><br />
-      ${escape(ref)}<br /><br />
-      <strong>Date issued</strong><br />
-      ${formatDate(issued)}<br /><br />
-      <strong>Date due</strong><br />
-      ${formatDate(invoice.due_date)}
-    </div>
-  </div>
+  <!-- Header (shared branded partial) -->
+  ${renderDocHeader({
+    docType: "Invoice",
+    meta: [
+      { label: "Invoice Number", value: ref },
+      { label: "Date Issued", value: formatDate(issued) },
+      { label: "Date Due", value: formatDate(invoice.due_date) },
+    ],
+  })}
 
   <!-- Bill to -->
   <div class="section avoid-break">
