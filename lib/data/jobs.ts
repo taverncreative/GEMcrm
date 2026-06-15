@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { todayUk } from "@/lib/utils/today-uk";
 import { newId } from "@/lib/utils/id";
 import type { Job, Site, Customer, JobStatus } from "@/types/database";
-import type { BookingInput } from "@/lib/validation/booking";
+import type { BookingInput, BookingCreateInput } from "@/lib/validation/booking";
 import type { ServiceSheetInput } from "@/lib/validation/service-sheet";
 import { uploadBase64Image } from "@/lib/storage/upload";
 import {
@@ -297,7 +297,9 @@ export class JobClashError extends Error {
  * {@link completeServiceSheet}.
  */
 export async function createBooking(
-  input: BookingInput,
+  // Accepts the lenient create input (call_type may be ""); the strict
+  // BookingInput from other callers is assignable to it.
+  input: BookingCreateInput,
   opts?: { id?: string }
 ): Promise<Job> {
   const supabase = await createClient();
@@ -345,7 +347,9 @@ export async function createBooking(
         job_date: input.job_date,
         job_time: emptyToNull(input.job_time),
         job_time_end: emptyToNull(input.job_time_end),
-        call_type: input.call_type,
+        // "" (quick add, no call type chosen) → null (the column's CHECK
+        // allows null but rejects ""). Valid enum values pass through.
+        call_type: input.call_type || null,
         pest_species: input.pest_species,
         value: input.value ?? null,
         report_notes: emptyToNull(input.report_notes),

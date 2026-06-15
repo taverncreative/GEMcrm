@@ -62,11 +62,15 @@ export async function createSite(
     .upsert({
       id: opts?.id ?? newId(),
       customer_id: customerId,
-      address_line_1: input.address_line_1.trim(),
+      // Blank address fields → null (a bare site is just customer_id +
+      // a blank address, created for a quick-add booking).
+      address_line_1: emptyToNull(input.address_line_1),
       address_line_2: emptyToNull(input.address_line_2),
-      town: input.town.trim(),
-      county: input.county.trim(),
-      postcode: input.postcode.trim().toUpperCase(),
+      town: emptyToNull(input.town),
+      county: emptyToNull(input.county),
+      postcode: input.postcode.trim()
+        ? input.postcode.trim().toUpperCase()
+        : null,
     })
     .select()
     .single();

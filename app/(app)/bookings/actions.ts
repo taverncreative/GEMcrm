@@ -14,7 +14,7 @@ import {
 } from "@/lib/data/jobs";
 import { CustomerSchema } from "@/lib/validation/customer";
 import { SiteSchema } from "@/lib/validation/site";
-import { BookingSchema } from "@/lib/validation/booking";
+import { BookingSchema, BookingCreateSchema } from "@/lib/validation/booking";
 import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
@@ -70,9 +70,12 @@ const BookingPayloadSchema = z.object({
   job_date: z.string().min(1, "Date is required"),
   job_time: z.string().optional().default(""),
   job_time_end: z.string().optional().default(""),
-  call_type: z.enum(["routine", "callout", "followup", "survey", "other"], {
-    message: "Select a call type",
-  }),
+  // Optional for a quick-add booking (Pass 1) — blank → null in createBooking.
+  call_type: z
+    .enum(["routine", "callout", "followup", "survey", "other"])
+    .or(z.literal(""))
+    .optional()
+    .default(""),
   pest_species: z.array(z.string()).default([]),
   value: z.string().optional().default(""),
   report_notes: z.string().optional().default(""),
@@ -198,45 +201,27 @@ export async function createQuickBookingAction(
   // Step 2 — resolve site
   let siteId = data.site_id;
   try {
-    if (data.mode_site === "new") {
-      const siteResult = SiteSchema.safeParse({
-        address_line_1: data.site_line1,
-        address_line_2: data.site_line2,
-        town: data.site_town,
-        county: data.site_county || "—", // county is technically required in the
-        // schema; use an em-dash placeholder if the user skipped it so
-        // quick bookings don't fail for an optional UK-centric field.
-        postcode: data.site_postcode,
-      });
-      if (!siteResult.success) {
-        const errors: Record<string, string> = {};
-        for (const issue of siteResult.error.issues) {
-          const key = issue.path[0];
-          if (typeof key === "string") {
-            const map: Record<string, string> = {
-              address_line_1: "site_line1",
-              address_line_2: "site_line2",
-              town: "site_town",
-              county: "site_county",
-              postcode: "site_postcode",
-            };
-            errors[map[key] ?? `site_${key}`] = issue.message;
-          }
-        }
-        return { success: false, errors, message: null };
-      }
-      const created = await createSite(customerId, siteResult.data, {
-        id: siteIdNew,
-      });
+    // Create a (possibly bare) site when the operator added a new one OR
+    // gave no site at all — a quick-add booking needs only customer_id, so
+    // the job → site → customer chain still holds with a blank address.
+    if (data.mode_site === "new" || !siteId) {
+      // Lenient by design — this is the ONLY place a bare site is allowed.
+      // No SiteSchema (strict) here: a quick-add booking needs only
+      // customer_id, with a "—" county placeholder so the address still
+      // reads sensibly on documents. createSite stores blank fields as null.
+      const created = await createSite(
+        customerId,
+        {
+          address_line_1: data.site_line1,
+          address_line_2: data.site_line2,
+          town: data.site_town,
+          county: data.site_county || "—",
+          postcode: data.site_postcode,
+        },
+        { id: siteIdNew }
+      );
       siteId = created.id;
     } else {
-      if (!siteId) {
-        return {
-          success: false,
-          errors: { site_id: "Select a site" },
-          message: null,
-        };
-      }
       const exists = await getSiteById(siteId);
       if (!exists || exists.customer_id !== customerId) {
         return {
@@ -254,8 +239,9 @@ export async function createQuickBookingAction(
     };
   }
 
-  // Step 3 — booking
-  const bookingResult = BookingSchema.safeParse({
+  // Step 3 — booking. Lenient create schema: call_type may be blank
+  // (→ null in createBooking). Other fields keep their normal validation.
+  const bookingResult = BookingCreateSchema.safeParse({
     site_id: siteId,
     job_date: data.job_date,
     job_time: data.job_time,

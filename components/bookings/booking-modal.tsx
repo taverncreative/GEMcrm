@@ -150,17 +150,22 @@ export function makeBookingMeta(
       const callType = s(formData, "call_type");
 
       const newCustomerId = modeCustomer === "new" ? newId() : null;
-      const newSiteId = modeSite === "new" ? newId() : null;
+      // A CREATE booking with no site still mints a bare site, so a quick
+      // add gets the optimistic Dexie write + offline sync (the server
+      // creates the same bare site on replay, addressed by site_id_new).
+      // Upgrade is unchanged (it always carries a resolved site).
+      const needNewSite =
+        modeSite === "new" || (!isUpgrade && !s(formData, "site_id"));
+      const newSiteId = needNewSite ? newId() : null;
       const customerId =
         modeCustomer === "new" ? newCustomerId! : s(formData, "customer_id");
-      const siteId = modeSite === "new" ? newSiteId! : s(formData, "site_id");
+      const siteId = needNewSite ? newSiteId! : s(formData, "site_id");
 
-      // Light guard so an incomplete offline submit doesn't write a
-      // broken local booking. The server still does full Zod validation
-      // online (and the modal's own UI requires these). Returning null
-      // skips local write + enqueue; online the server call still runs
-      // and surfaces field errors.
-      if (!jobDate || !callType || !customerId || !siteId) return null;
+      // Minimum for a local booking: a customer + a date (the site is always
+      // resolved above). call_type and the other now-optional fields no
+      // longer gate the local write, so a sparse quick add is written
+      // locally and queued for sync exactly like a full booking.
+      if (!jobDate || !customerId || !siteId) return null;
 
       return {
         // Upgrade reuses the draft's id (the row already exists); create
@@ -720,20 +725,26 @@ export function BookingModal({
   // as online. Returns a field→message map; empty means valid.
   function validateBooking(): Record<string, string> {
     const errs: Record<string, string> = {};
+    // Always required: a rough customer + a date.
     if (customerMode === "existing") {
       if (!selectedCustomer) errs.customer_id = "Choose a customer";
     } else if (!newCustomerName.trim()) {
       errs.customer_name = "Enter the customer's name";
     }
-    if (siteMode === "existing") {
-      if (!selectedSite) errs.site_id = "Add a location";
-    } else {
-      if (!newSiteLine1.trim()) errs.site_line1 = "Add an address";
-      if (!newSiteTown.trim()) errs.site_town = "Add a town";
-      if (!newSitePostcode.trim()) errs.site_postcode = "Add a postcode";
-    }
     if (!jobDate) errs.job_date = "Pick a date";
-    if (!callType) errs.call_type = "Choose a call type";
+    // Site address + call type are required ONLY when upgrading a draft.
+    // A normal booking is a quick add — name + date is enough (Pass 1);
+    // a bare site is created server-side when no address is given.
+    if (draftJobId) {
+      if (siteMode === "existing") {
+        if (!selectedSite) errs.site_id = "Add a location";
+      } else {
+        if (!newSiteLine1.trim()) errs.site_line1 = "Add an address";
+        if (!newSiteTown.trim()) errs.site_town = "Add a town";
+        if (!newSitePostcode.trim()) errs.site_postcode = "Add a postcode";
+      }
+      if (!callType) errs.call_type = "Choose a call type";
+    }
     return errs;
   }
 
@@ -1264,14 +1275,14 @@ export function BookingModal({
               <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <label htmlFor="bn-site_line1" className={labelClass}>
-                    Address Line 1 <span className="text-red-500">*</span>
+                    Address Line 1
+                    {draftJobId && <span className="text-red-500"> *</span>}
                   </label>
                   <input
                     id="bn-site_line1"
                     type="text"
                     value={newSiteLine1}
                     onChange={(e) => setNewSiteLine1(e.target.value)}
-                    required
                     placeholder="Street address"
                     className={inputClass}
                   />
@@ -1283,14 +1294,14 @@ export function BookingModal({
                 </div>
                 <div>
                   <label htmlFor="bn-site_town" className={labelClass}>
-                    Town <span className="text-red-500">*</span>
+                    Town
+                    {draftJobId && <span className="text-red-500"> *</span>}
                   </label>
                   <input
                     id="bn-site_town"
                     type="text"
                     value={newSiteTown}
                     onChange={(e) => setNewSiteTown(e.target.value)}
-                    required
                     className={inputClass}
                   />
                   {errors.site_town && (
@@ -1301,14 +1312,14 @@ export function BookingModal({
                 </div>
                 <div>
                   <label htmlFor="bn-site_postcode" className={labelClass}>
-                    Postcode <span className="text-red-500">*</span>
+                    Postcode
+                    {draftJobId && <span className="text-red-500"> *</span>}
                   </label>
                   <input
                     id="bn-site_postcode"
                     type="text"
                     value={newSitePostcode}
                     onChange={(e) => setNewSitePostcode(e.target.value)}
-                    required
                     placeholder="e.g. SW1A 1AA"
                     className={inputClass}
                   />
@@ -1363,18 +1374,16 @@ export function BookingModal({
               </div>
               <div>
                 <label htmlFor="bn-call_type" className={labelClass}>
-                  Call Type <span className="text-red-500">*</span>
+                  Call Type
+                  {draftJobId && <span className="text-red-500"> *</span>}
                 </label>
                 <select
                   id="bn-call_type"
                   value={callType}
                   onChange={(e) => setCallType(e.target.value)}
-                  required
                   className={inputClass}
                 >
-                  <option value="" disabled>
-                    Select…
-                  </option>
+                  <option value="">Not set</option>
                   {CALL_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {CALL_TYPE_LABELS[t]}

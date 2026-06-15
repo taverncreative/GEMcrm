@@ -70,7 +70,9 @@ describe("bookingMeta.parseInput", () => {
     expect(input!.siteId).toBe(input!.newSiteId);
   });
 
-  it("returns null on an incomplete submit (missing call_type)", () => {
+  it("ACCEPTS a sparse submit (missing call_type) into the optimistic path", () => {
+    // call_type is optional now (quick add) — a missing one must NOT drop
+    // the booking to the online-only path; it still writes locally + syncs.
     const input = bookingMeta.parseInput!(
       fd({
         mode_customer: "existing",
@@ -79,6 +81,20 @@ describe("bookingMeta.parseInput", () => {
         site_id: "s",
         job_date: "2026-07-01",
         // call_type missing
+      })
+    );
+    expect(input).not.toBeNull();
+    expect(input!.fields.call_type).toBe("");
+  });
+
+  it("returns null on a genuinely incomplete submit (no date)", () => {
+    const input = bookingMeta.parseInput!(
+      fd({
+        mode_customer: "existing",
+        mode_site: "existing",
+        customer_id: "c",
+        site_id: "s",
+        // job_date missing — still the booking minimum
       })
     );
     expect(input).toBeNull();

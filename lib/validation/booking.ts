@@ -26,4 +26,18 @@ export const BookingSchema = z.object({
 });
 
 export type BookingInput = z.infer<typeof BookingSchema>;
+
+/**
+ * Lenient variant for the quick-add booking CREATE path only
+ * (createQuickBookingAction): call_type may be blank ("" → null in
+ * createBooking). Everything else matches BookingSchema. The strict
+ * BookingSchema stays the contract for the site-page form and the
+ * draft-upgrade flow, so those still reject a missing call type server-side.
+ */
+export const BookingCreateSchema = BookingSchema.extend({
+  call_type: z.enum(CALL_TYPES).or(z.literal("")).optional().default(""),
+});
+
+export type BookingCreateInput = z.infer<typeof BookingCreateSchema>;
+
 export { CALL_TYPES };
