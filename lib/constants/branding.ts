@@ -10,6 +10,22 @@
 export const BUSINESS = {
   /** Display name used in emails, headers, signatures. */
   name: "GEM Services",
+  /**
+   * Whether GEM is VAT-registered. Currently FALSE — turnover is under the
+   * threshold, so invoices charge NO VAT (the gross amount is the total, no
+   * breakdown, no VAT number shown). This is the single switch: flip to
+   * true when GEM registers and every path starts applying the 20%
+   * standard-rated split + showing the VAT number — no rebuild, just config.
+   */
+  vatRegistered: false,
+  /**
+   * HMRC VAT registration number, shown on invoices ONLY when
+   * vatRegistered is true. Pest control is standard-rated 20%, so a
+   * compliant VAT invoice MUST display this. EMPTY until supplied — once
+   * registered, the template renders a "[ADD VAT No.]" placeholder so it
+   * can't be issued blank. Set this when GEM registers.
+   */
+  vatNumber: "",
   /** Person who signs off invoice / reminder emails. */
   signoffName: "Nate Green",
   /** Catch-all contact email for developer/support requests (used by the

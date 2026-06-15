@@ -4,6 +4,7 @@ import { getCustomerById } from "@/lib/data/customers";
 import { getSiteById } from "@/lib/data/sites";
 import { getReportByJobId } from "@/lib/data/reports";
 import { createInvoiceForJob, getInvoiceByJobId } from "@/lib/data/invoices";
+import { renderAndStoreInvoicePdf } from "@/lib/services/invoice-pdf";
 import { sendServiceReport } from "@/lib/services/email";
 import { todayUk, dateUk } from "@/lib/utils/today-uk";
 import { REVIEW_REQUESTS_ENABLED } from "@/lib/constants/feature-flags";
@@ -108,11 +109,24 @@ export async function onJobCompleted(
       }
     }
 
-    // Auto-create invoice if job has a value and isn't already invoiced
+    // Auto-create invoice if job has a value and isn't already invoiced.
+    // Render its PDF inline so the auto-invoice comes out complete (number
+    // + 20% VAT + PDF) like a manual one — best-effort: a render failure
+    // never blocks completion; the Documents "Generate PDF" button is the
+    // recovery.
     if (job.value && job.value > 0 && !job.is_invoiced) {
       const existingInvoice = await getInvoiceByJobId(job.id);
       if (!existingInvoice) {
-        await createInvoiceForJob(job.id, context.customerId, job.value);
+        const inv = await createInvoiceForJob(
+          job.id,
+          context.customerId,
+          job.value
+        );
+        try {
+          await renderAndStoreInvoicePdf(inv.id);
+        } catch (pdfErr) {
+          console.error("[onJobCompleted] invoice PDF generation:", pdfErr);
+        }
       }
     }
   } catch (err) {

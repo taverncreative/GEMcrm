@@ -4,14 +4,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   createStandaloneInvoice,
-  setInvoicePdfUrl,
   getInvoiceWithCustomer,
   getInvoiceStatusByJobIds,
   markInvoiceSent,
   markInvoicePaid,
 } from "@/lib/data/invoices";
-import { generateInvoicePdf } from "@/lib/pdf/generate-invoice-pdf";
-import { uploadPdf } from "@/lib/storage/upload";
+import { renderAndStoreInvoicePdf } from "@/lib/services/invoice-pdf";
 import { sendInvoiceEmail } from "@/lib/services/invoice-email";
 import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
@@ -131,15 +129,8 @@ export async function createInvoiceDraftAction(
     invoiceCustomerId = inv.customer_id;
 
     try {
-      const detail = await getInvoiceWithCustomer(invoiceId);
-      if (detail) {
-        const buf = await generateInvoicePdf({
-          invoice: detail,
-          customer: detail.customer,
-        });
-        pdfUrl = await uploadPdf(buf, `invoices/${invoiceId}/invoice.pdf`);
-        await setInvoicePdfUrl(invoiceId, pdfUrl);
-      }
+      const res = await renderAndStoreInvoicePdf(invoiceId);
+      pdfUrl = res?.pdfUrl ?? null;
     } catch (pdfErr) {
       console.error("[createInvoiceDraftAction] PDF generation:", pdfErr);
       // PDF can be regenerated later — the invoice row still exists.
@@ -216,22 +207,15 @@ export async function generateInvoicePdfAction(
   await requireUser();
   if (!invoiceId) return { success: false, message: "Missing invoice id" };
   try {
-    const detail = await getInvoiceWithCustomer(invoiceId);
-    if (!detail) return { success: false, message: "Invoice not found" };
-
-    const buf = await generateInvoicePdf({
-      invoice: detail,
-      customer: detail.customer,
-    });
-    const pdfUrl = await uploadPdf(buf, `invoices/${invoiceId}/invoice.pdf`);
-    await setInvoicePdfUrl(invoiceId, pdfUrl);
+    const res = await renderAndStoreInvoicePdf(invoiceId);
+    if (!res) return { success: false, message: "Invoice not found" };
 
     revalidatePath(ROUTES.DASHBOARD);
     revalidatePath(ROUTES.JOBS);
     revalidatePath(ROUTES.CUSTOMERS);
-    revalidatePath(ROUTES.customerDetail(detail.customer_id));
+    revalidatePath(ROUTES.customerDetail(res.customerId));
     revalidatePath(ROUTES.REPORTS);
-    return { success: true, pdfUrl };
+    return { success: true, pdfUrl: res.pdfUrl };
   } catch (err) {
     console.error("[generateInvoicePdfAction]", err);
     return {

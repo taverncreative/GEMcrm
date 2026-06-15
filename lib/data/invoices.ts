@@ -1,31 +1,16 @@
 import { createClient } from "@/lib/supabase/server";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { newId } from "@/lib/utils/id";
+import { invoiceVatFields } from "@/lib/utils/vat";
+import { BUSINESS } from "@/lib/constants/branding";
 import type { Invoice, InvoiceStatus, Customer } from "@/types/database";
 
-/**
- * Generate a human-readable invoice number.
- * Format: INV-{YYYY}-{4-digit-padded-counter}.
- *
- * Strategy: read the highest existing invoice_number, parse its suffix and
- * increment. Not strictly race-safe under concurrent inserts but fine for
- * single-operator CRM scale; the DB-level unique index on invoice_number
- * will reject any duplicate that does slip through.
- */
-async function nextInvoiceNumber(): Promise<string> {
-  const supabase = await createClient();
-  const { data: row } = await supabase
-    .from("invoices")
-    .select("invoice_number")
-    .not("invoice_number", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const match = row?.invoice_number?.match(/-(\d+)$/);
-  const counter = match ? Number(match[1]) + 1 : 1001;
-  const year = new Date().getFullYear();
-  return `INV-${year}-${String(counter).padStart(4, "0")}`;
-}
+// Invoice numbering is assigned by the assign_invoice_number DB trigger
+// (migration 037): one unified INV-YYYY-NNNN series sourced from the
+// invoice_number_seq sequence, applied to every creation path. The old
+// app-side nextInvoiceNumber() (JS max+1, race-prone) and the single-job
+// job-ref reuse are both gone — the register is now its own sequential
+// series, which a VAT invoice register must be.
 
 /**
  * Create an invoice for a completed job.
@@ -38,13 +23,23 @@ export async function createInvoiceForJob(
 ): Promise<Invoice> {
   const supabase = await createClient();
 
+  // job.value is the gross price. VAT is flag-gated (BUSINESS.vatRegistered):
+  // not registered → no VAT, amount is the total; registered → 20% split.
+  // due_date + numbering (DB trigger) now match a manual invoice, so an
+  // auto-invoice comes out complete instead of bare.
+  const vat = invoiceVatFields(amount, BUSINESS.vatRegistered);
+
   const { data, error } = await supabase
     .from("invoices")
     .insert({
       id: newId(),
       job_id: jobId,
       customer_id: customerId,
-      amount,
+      amount: vat.amount,
+      subtotal_amount: vat.subtotal_amount,
+      vat_amount: vat.vat_amount,
+      vat_rate: vat.vat_rate,
+      due_date: dateUkOffset(30),
       status: "draft",
     })
     .select()
@@ -217,8 +212,10 @@ export async function getInvoiceStatusByJobIds(
 /**
  * Standalone invoice creation — covers zero, one, or MANY jobs.
  *
- * Stores VAT broken out (subtotal / vat / total) so the PDF can render a
- * proper breakdown and reports can sum either net or gross figures.
+ * VAT is derived from the gross `total`, gated on BUSINESS.vatRegistered
+ * (not registered → no VAT; registered → 20% standard-rated split) — the
+ * caller's `subtotal` / `vat_amount` / `vat_rate` are advisory only, so
+ * every creation path is identical.
  *
  * Jobs: `job_ids` is the canonical input (031); `job_id` is the deprecated
  * single-job path, still honoured for legacy callers. When jobs are
@@ -226,9 +223,8 @@ export async function getInvoiceStatusByJobIds(
  * customer) and a mixed-customer selection is rejected — the
  * client-supplied `customer_id` is only used for the no-job path.
  *
- * Invoice number: exactly one job → the invoice adopts the job's
- * reference_number (e.g. 00037-BSK). Zero or several jobs fall back to
- * INV-YYYY-NNNN.
+ * Invoice number: assigned by the assign_invoice_number DB trigger
+ * (migration 037) — one unified INV-YYYY-NNNN series across all paths.
  */
 export interface StandaloneInvoiceInput {
   /** Required when no jobs are supplied; ignored (derived) otherwise. */
@@ -325,51 +321,16 @@ export async function createStandaloneInvoice(
     throw new Error("Customer is required");
   }
 
-  // Reuse the job's reference as the invoice number when invoicing exactly
-  // one job. If the job pre-dates migration 021 and is still missing a
-  // reference, generate one now via the same scheme used for new bookings,
-  // save it back to the job row, and use it. This guarantees we never fall
-  // through to a raw UUID stub like "77500CEF". Multi-job invoices skip
-  // this — no single job owns the invoice — and use INV-YYYY-NNNN.
-  let invoiceNumber: string | null = null;
-  if (jobIds.length === 1) {
-    const job = jobRows[0];
-    if (job.reference_number) {
-      invoiceNumber = job.reference_number;
-    } else {
-      // Look up the customer via the site so generateJobReference can pick
-      // the right format (domestic vs commercial with company suffix).
-      const { data: siteRow } = await supabase
-        .from("sites")
-        .select("customer:customers!inner(customer_type, company_name, name)")
-        .eq("id", job.site_id)
-        .single();
-      const customer = (
-        siteRow as unknown as {
-          customer: {
-            customer_type: "commercial" | "domestic";
-            company_name: string | null;
-            name: string;
-          };
-        } | null
-      )?.customer;
-      if (customer) {
-        const { generateJobReference } = await import(
-          "@/lib/data/job-references"
-        );
-        const newRef = await generateJobReference({ customer });
-        await supabase
-          .from("jobs")
-          .update({ reference_number: newRef })
-          .eq("id", job.id);
-        invoiceNumber = newRef;
-      }
-    }
-  }
-  if (!invoiceNumber) {
-    invoiceNumber = await nextInvoiceNumber();
-  }
-
+  // Numbering: insert with no invoice_number — the assign_invoice_number
+  // DB trigger fills it from the unified INV-YYYY-NNNN series (migration
+  // 037), and .select() below reads it back. Job references stay on the
+  // job and are no longer reused as the invoice number.
+  //
+  // VAT is flag-gated on BUSINESS.vatRegistered and recomputed from the
+  // gross total so every path is identical (the caller's subtotal/vat
+  // fields are advisory). Not registered → no VAT; registered → 20%
+  // standard-rated split.
+  const vat = invoiceVatFields(input.total, BUSINESS.vatRegistered);
   const issuedAt = input.status === "sent" ? new Date().toISOString() : null;
   const dueDate = input.due_date ?? dateUkOffset(30);
 
@@ -383,13 +344,13 @@ export async function createStandaloneInvoice(
       // fallback) keep working. Multi-job invoices have no single
       // owner — null; invoice_jobs is the canonical link either way.
       job_id: jobIds.length === 1 ? jobIds[0] : null,
-      amount: input.total,
-      subtotal_amount: input.subtotal,
-      vat_amount: input.vat_amount,
-      vat_rate: input.vat_rate,
+      amount: vat.amount,
+      subtotal_amount: vat.subtotal_amount,
+      vat_amount: vat.vat_amount,
+      vat_rate: vat.vat_rate,
       description: input.description?.trim() || null,
       due_date: dueDate,
-      invoice_number: invoiceNumber,
+      // invoice_number omitted — assigned by the assign_invoice_number trigger.
       status: input.status ?? "draft",
       issued_at: issuedAt,
     })

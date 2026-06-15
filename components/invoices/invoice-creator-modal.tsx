@@ -213,7 +213,9 @@ export function InvoiceCreatorModal({
       }
 
       if (selectedCustomer) {
-        const breakdown = computeBreakdown(Number(amount), vatMode);
+        const breakdown = BUSINESS.vatRegistered
+          ? computeBreakdown(Number(amount), vatMode)
+          : { subtotal: Number(amount) || 0, vat: 0, total: Number(amount) || 0 };
         const draftSummary = buildInvoiceEmailDraft(selectedCustomer, {
           id: draftState.invoiceId,
           customer_id: selectedCustomer.id,
@@ -223,7 +225,7 @@ export function InvoiceCreatorModal({
           amount: breakdown.total,
           subtotal_amount: breakdown.subtotal,
           vat_amount: breakdown.vat,
-          vat_rate: vatMode === "zero" ? 0 : VAT_RATE,
+          vat_rate: BUSINESS.vatRegistered ? (vatMode === "zero" ? 0 : VAT_RATE) : 0,
           description: description || null,
           due_date: dueDate || null,
           invoice_number: null,
@@ -285,7 +287,12 @@ export function InvoiceCreatorModal({
     "mt-1 block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand";
   const labelClass = "block text-xs font-medium text-gray-600";
 
-  const breakdown = computeBreakdown(Number(amount), vatMode);
+  // VAT is gated on registration (branding.ts). Not registered → the
+  // amount IS the total, no VAT, and the VAT-mode controls are hidden.
+  const vatRegistered = BUSINESS.vatRegistered;
+  const breakdown = vatRegistered
+    ? computeBreakdown(Number(amount), vatMode)
+    : { subtotal: Number(amount) || 0, vat: 0, total: Number(amount) || 0 };
 
   return (
     // Full-screen on mobile; centered dialog capped at 90vh on tablet/desktop.
@@ -347,7 +354,7 @@ export function InvoiceCreatorModal({
             <input
               type="hidden"
               name="vat_rate"
-              value={vatMode === "zero" ? 0 : VAT_RATE}
+              value={vatRegistered ? (vatMode === "zero" ? 0 : VAT_RATE) : 0}
             />
             <input type="hidden" name="description" value={description} />
             <input type="hidden" name="due_date" value={dueDate} />
@@ -485,44 +492,57 @@ export function InvoiceCreatorModal({
               </div>
             </div>
 
-            {/* VAT mode */}
+            {/* VAT treatment — only when VAT-registered (else the modes
+                are moot; the amount is simply the total). */}
             <div>
-              <p className={labelClass}>VAT treatment</p>
-              <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <VatChoice
-                  label="Add VAT (20%)"
-                  hint="Amount is net; VAT added on top"
-                  active={vatMode === "standard_exclusive"}
-                  onClick={() => setVatMode("standard_exclusive")}
-                />
-                <VatChoice
-                  label="VAT included (20%)"
-                  hint="Amount is gross; split out"
-                  active={vatMode === "standard_inclusive"}
-                  onClick={() => setVatMode("standard_inclusive")}
-                />
-                <VatChoice
-                  label="Zero rate"
-                  hint="No VAT charged"
-                  active={vatMode === "zero"}
-                  onClick={() => setVatMode("zero")}
-                />
-              </div>
+              {vatRegistered && (
+                <>
+                  <p className={labelClass}>VAT treatment</p>
+                  <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <VatChoice
+                      label="Add VAT (20%)"
+                      hint="Amount is net; VAT added on top"
+                      active={vatMode === "standard_exclusive"}
+                      onClick={() => setVatMode("standard_exclusive")}
+                    />
+                    <VatChoice
+                      label="VAT included (20%)"
+                      hint="Amount is gross; split out"
+                      active={vatMode === "standard_inclusive"}
+                      onClick={() => setVatMode("standard_inclusive")}
+                    />
+                    <VatChoice
+                      label="Zero rate"
+                      hint="No VAT charged"
+                      active={vatMode === "zero"}
+                      onClick={() => setVatMode("zero")}
+                    />
+                  </div>
+                </>
+              )}
 
               <dl className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <dt className="text-gray-500">Subtotal</dt>
-                  <dd className="text-gray-900">
-                    {formatGbp(breakdown.subtotal)}
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between">
-                  <dt className="text-gray-500">
-                    VAT {vatMode === "zero" ? "(Zero rated)" : `(${VAT_RATE}%)`}
-                  </dt>
-                  <dd className="text-gray-900">{formatGbp(breakdown.vat)}</dd>
-                </div>
-                <div className="mt-1 flex items-center justify-between border-t border-gray-200 pt-2">
+                {vatRegistered && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <dt className="text-gray-500">Subtotal</dt>
+                      <dd className="text-gray-900">
+                        {formatGbp(breakdown.subtotal)}
+                      </dd>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <dt className="text-gray-500">
+                        VAT {vatMode === "zero" ? "(Zero rated)" : `(${VAT_RATE}%)`}
+                      </dt>
+                      <dd className="text-gray-900">{formatGbp(breakdown.vat)}</dd>
+                    </div>
+                  </>
+                )}
+                <div
+                  className={`flex items-center justify-between ${
+                    vatRegistered ? "mt-1 border-t border-gray-200 pt-2" : ""
+                  }`}
+                >
                   <dt className="font-semibold text-gray-900">Total due</dt>
                   <dd className="font-semibold text-gray-900">
                     {formatGbp(breakdown.total)}

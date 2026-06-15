@@ -1,6 +1,7 @@
 import type { Customer, Invoice } from "@/types/database";
 import { PDF_STYLES } from "./styles";
 import { renderDocHeader } from "./partials";
+import { BUSINESS } from "@/lib/constants/branding";
 
 function escape(val: string | number | null | undefined): string {
   if (val === null || val === undefined) return "";
@@ -41,6 +42,13 @@ export function renderInvoiceHtml({
   const description =
     invoice.description?.trim() ||
     "Pest control service as agreed with the customer.";
+
+  // Render as-issued: VAT display follows THIS invoice's own stored VAT
+  // state, never the current global BUSINESS.vatRegistered flag. So
+  // regenerating a pre-registration (no-VAT) invoice after GEM registers
+  // never retro-adds VAT rows it was never issued with, and a VAT invoice
+  // always shows its breakdown even if the flag were later turned off.
+  const hasVat = invoice.vat_amount != null && Number(invoice.vat_rate) > 0;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -102,6 +110,11 @@ export function renderInvoiceHtml({
       { label: "Invoice Number", value: ref },
       { label: "Date Issued", value: formatDate(issued) },
       { label: "Date Due", value: formatDate(invoice.due_date) },
+      // VAT number — shown only when THIS invoice carries VAT (as-issued).
+      // Empty number on a VAT invoice → [ADD VAT No.] placeholder guard.
+      ...(hasVat
+        ? [{ label: "VAT No.", value: BUSINESS.vatNumber || "[ADD VAT No.]" }]
+        : []),
     ],
   })}
 
@@ -135,7 +148,8 @@ export function renderInvoiceHtml({
     const subtotal = Number(invoice.subtotal_amount ?? total);
     const vatAmt = Number(invoice.vat_amount ?? 0);
     const vatRate = Number(invoice.vat_rate ?? 20);
-    const zeroRated = vatAmt === 0;
+    // No stored VAT → single line + total, no VAT row, no breakdown.
+    // Stored VAT → the split shown in full. Gated on the invoice itself.
     return `
   <div class="section">
     <div class="section-title">Services</div>
@@ -150,24 +164,26 @@ export function renderInvoiceHtml({
         <tbody>
           <tr>
             <td>${escape(description)}</td>
-            <td class="amount">${formatCurrency(subtotal)}</td>
+            <td class="amount">${formatCurrency(hasVat ? subtotal : total)}</td>
           </tr>
+          ${hasVat ? `
           <tr>
-            <td style="color:#6b7280;">VAT ${zeroRated ? "(Zero rated)" : `(${vatRate}%)`}</td>
+            <td style="color:#6b7280;">VAT (${vatRate}%)</td>
             <td class="amount" style="color:#6b7280;">${formatCurrency(vatAmt)}</td>
-          </tr>
+          </tr>` : ""}
         </tbody>
       </table>
 
       <div style="margin-top:16px;">
+        ${hasVat ? `
         <div class="total-row">
           <span>Subtotal</span>
           <span>${formatCurrency(subtotal)}</span>
         </div>
         <div class="total-row">
-          <span>VAT ${zeroRated ? "(Zero rated)" : `(${vatRate}%)`}</span>
+          <span>VAT (${vatRate}%)</span>
           <span>${formatCurrency(vatAmt)}</span>
-        </div>
+        </div>` : ""}
         <div class="total-row grand">
           <span>Total due</span>
           <span>${formatCurrency(total)}</span>

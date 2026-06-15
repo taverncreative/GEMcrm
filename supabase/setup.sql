@@ -745,6 +745,64 @@ alter table jobs add column if not exists draft_contact_phone text;
 
 
 -- ============================================================
+-- 037: unified sequential invoice numbering
+-- ============================================================
+-- ONE sequential INV-YYYY-NNNN register across every creation path via a
+-- BEFORE INSERT trigger off invoice_number_seq (the app no longer assigns
+-- numbers; the single-job job-ref reuse is dropped). VAT is NOT touched
+-- here — GEM is not VAT-registered yet, so invoices carry no VAT; that is
+-- gated in the app behind BUSINESS.vatRegistered (a flag flip when GEM
+-- registers, not a migration). See supabase/migrations/037_invoice_numbering.sql.
+
+create sequence if not exists invoice_number_seq start 1000;
+
+select setval(
+  'invoice_number_seq',
+  greatest(
+    (select last_value from invoice_number_seq),
+    (select coalesce(
+       max((regexp_match(invoice_number, '^INV-\d{4}-(\d+)$'))[1]::int), 1000)
+     from invoices)
+  ),
+  true
+);
+
+update invoices
+set invoice_number = 'INV-' || to_char(coalesce(created_at, now()), 'YYYY') || '-' ||
+  lpad(nextval('invoice_number_seq')::text, 4, '0')
+where invoice_number is null;
+
+create or replace function assign_invoice_number()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.invoice_number is null then
+    new.invoice_number := 'INV-' || to_char(coalesce(new.created_at, now()), 'YYYY')
+      || '-' || lpad(nextval('invoice_number_seq')::text, 4, '0');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_assign_invoice_number on invoices;
+create trigger trg_assign_invoice_number
+  before insert on invoices
+  for each row
+  execute function assign_invoice_number();
+
+do $$ begin
+  if not exists (
+    select 1 from pg_indexes
+    where schemaname = 'public' and indexname = 'invoices_invoice_number_unique'
+  ) then
+    create unique index invoices_invoice_number_unique
+      on invoices (invoice_number) where invoice_number is not null;
+  end if;
+end $$;
+
+
+-- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
 insert into storage.buckets (id, name, public)
