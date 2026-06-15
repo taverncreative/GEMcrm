@@ -8,10 +8,12 @@ import {
   setGoogleReviewReceived,
   updateCustomerType,
   updateCustomerEmail,
+  updateCustomerDocDetails,
   getCustomerDetail,
   deleteCustomer,
   getDeleteImpact,
 } from "@/lib/data/customers";
+import type { CustomerDocDetails } from "@/lib/data/customers";
 import { getInvoiceCountsByCustomer } from "@/lib/data/invoices";
 import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
@@ -303,6 +305,37 @@ export async function setCustomerEmailAction(
     return {
       success: false,
       message: err instanceof Error ? err.message : "Failed to save email",
+    };
+  }
+}
+
+/**
+ * Document-completeness gate (Pass 2): persist the email and/or postal
+ * address captured by the inline readiness prompt. Wrapped client-side
+ * (applyLocal + outbox), so it must stay a (customerId, details) direct
+ * action — the registry replays it with the same args. Email format is
+ * validated here when present; the address is free-form and optional.
+ */
+export async function setCustomerDocDetailsAction(
+  customerId: string,
+  details: CustomerDocDetails
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!customerId) return { success: false, message: "Missing customer id" };
+  if (details.email !== undefined) {
+    const trimmed = details.email.trim();
+    if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      return { success: false, message: "Enter a valid email address" };
+    }
+  }
+  try {
+    await updateCustomerDocDetails(customerId, details);
+    revalidatePath(ROUTES.CUSTOMERS);
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to save details",
     };
   }
 }

@@ -7,6 +7,7 @@ import { QuickActions } from "@/components/dashboard/quick-actions";
 import { BottomNav } from "@/components/bottom-nav";
 import { SessionExpiredBanner } from "@/components/sync/session-expired-banner";
 import { SyncBoot } from "@/components/sync/sync-boot";
+import { DocReadyProvider } from "@/components/documents/doc-ready-provider";
 
 const SIDEBAR_KEY = "gemcrm-sidebar-collapsed";
 
@@ -39,6 +40,9 @@ export function AppShell({
   }
 
   return (
+    // DocReadyProvider (Pass 2): mounts the document-completeness prompt once
+    // here so any document action under the shell can `await` readiness.
+    <DocReadyProvider>
     <div className="flex h-full">
       {/* SyncBoot is invisible when idle — only paints the initial
           sync overlay when a full pull is in progress. Mounted here
@@ -78,5 +82,6 @@ export function AppShell({
       {/* Mobile bottom tab bar — self-hides at md:. */}
       <BottomNav />
     </div>
+    </DocReadyProvider>
   );
 }

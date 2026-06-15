@@ -324,6 +324,57 @@ export async function updateCustomerEmail(
   }
 }
 
+/** Contact details the document-completeness prompt can persist: an email
+ *  and/or a postal address. Every field is optional — only the ones the
+ *  prompt collected are written. */
+export interface CustomerDocDetails {
+  email?: string;
+  address_line_1?: string;
+  address_line_2?: string;
+  town?: string;
+  county?: string;
+  postcode?: string;
+}
+
+const DOC_ADDRESS_FIELDS = [
+  "address_line_1",
+  "address_line_2",
+  "town",
+  "county",
+  "postcode",
+] as const;
+
+/**
+ * Persist the contact details captured by the document-completeness gate
+ * (Pass 2). Only the PROVIDED fields are written, so saving just an email
+ * never clobbers an existing address (and vice-versa). Email is normalised
+ * lower/trimmed; blank address fields store as null.
+ */
+export async function updateCustomerDocDetails(
+  customerId: string,
+  details: CustomerDocDetails
+): Promise<void> {
+  const patch: Record<string, string | null> = {};
+  if (details.email !== undefined) {
+    patch.email = details.email.trim().toLowerCase();
+  }
+  for (const key of DOC_ADDRESS_FIELDS) {
+    if (details[key] !== undefined) patch[key] = details[key]!.trim() || null;
+  }
+  if (Object.keys(patch).length === 0) return;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("customers")
+    .update(patch)
+    .eq("id", customerId);
+
+  if (error) {
+    console.error("[updateCustomerDocDetails]", error.code, error.message);
+    throw new Error(`Failed to update customer details: ${error.message}`);
+  }
+}
+
 /**
  * Update a customer's commercial/domestic classification.
  */

@@ -35,6 +35,7 @@ import {
   setReviewReceivedAction,
   setCustomerTypeAction,
   setCustomerEmailAction,
+  setCustomerDocDetailsAction,
   createCustomerAction,
 } from "@/app/(app)/customers/actions";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
@@ -126,6 +127,16 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     kind: "direct",
     invoke: (...args) =>
       setCustomerEmailAction(args[0] as string, args[1] as string),
+  },
+  // Document-completeness gate (Pass 2): replays the email/address the
+  // readiness prompt captured, with the same (customerId, details) args.
+  setCustomerDocDetailsAction: {
+    kind: "direct",
+    invoke: (...args) =>
+      setCustomerDocDetailsAction(
+        args[0] as string,
+        args[1] as Parameters<typeof setCustomerDocDetailsAction>[1]
+      ),
   },
 
   // ─── agreement ──────────────────────────────────────────────
