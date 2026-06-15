@@ -1,4 +1,8 @@
-import { getInvoiceWithCustomer, setInvoicePdfUrl } from "@/lib/data/invoices";
+import {
+  getInvoiceWithCustomer,
+  getInvoiceSite,
+  setInvoicePdfUrl,
+} from "@/lib/data/invoices";
 import { generateInvoicePdf } from "@/lib/pdf/generate-invoice-pdf";
 import { uploadPdf } from "@/lib/storage/upload";
 
@@ -24,9 +28,12 @@ export async function renderAndStoreInvoicePdf(
   const detail = await getInvoiceWithCustomer(invoiceId);
   if (!detail) return null;
 
+  // Site is only needed as a fallback bill-to address; null is fine.
+  const site = await getInvoiceSite(invoiceId);
   const buf = await generateInvoicePdf({
     invoice: detail,
     customer: detail.customer,
+    site,
   });
   const pdfUrl = await uploadPdf(buf, `invoices/${invoiceId}/invoice.pdf`);
   await setInvoicePdfUrl(invoiceId, pdfUrl);

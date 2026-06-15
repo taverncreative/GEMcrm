@@ -29,10 +29,8 @@ import {
   type ServiceSheetDraft,
 } from "@/lib/db/drafts";
 import { useLiveQuery } from "dexie-react-hooks";
-import {
-  wrappedSetCustomerEmail,
-  EMAIL_RE,
-} from "@/components/customers/add-email-inline";
+import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
+import { getCustomerDetailAction } from "@/app/(app)/customers/actions";
 
 /** Sheet input + the combined-finalize flag (offline-pwa pass B) and
  *  the amend flag (L2). The flags ride along so applyLocal knows
@@ -369,12 +367,9 @@ function ServiceSheetFormBody({
   // online and offline (no connectivity branch). The email/follow-up
   // choices live here; confirm enqueues the combined entry.
   const [reviewOpen, setReviewOpen] = useState(false);
-  // L3: inline email capture inside the review modal when the customer
-  // has no address on file ("Add email & send").
-  const [modalEmail, setModalEmail] = useState("");
-  const [modalEmailError, setModalEmailError] = useState<string | null>(null);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   const formRef = useRef<HTMLFormElement | null>(null);
+  const ensureReady = useEnsureCustomerDocReady();
 
   // Server-fallback errors can still arrive (edge: parseInput returned
   // null and the legacy online path ran) — merge both sources for
@@ -433,30 +428,26 @@ function ServiceSheetFormBody({
     }
     fd.set("send_email", opts.sendEmail ? "true" : "");
     // schedule_follow_up / follow_up_date ride along as hidden inputs.
-    void formAction(fd);
-    // The modal stays open with a pending label; the success effect
-    // above navigates away the moment the local write + enqueue land.
-  }
+    const dispatch = () => void formAction(fd);
 
-  /** L3 "Add email & send": save the address (wrapped — Dexie + outbox,
-   *  enqueued BEFORE the completion entry so the FIFO replay lands the
-   *  email first), then submit with the email choice on. */
-  function handleAddEmailAndSend() {
-    if (!customerId) return;
-    const email = modalEmail.trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) {
-      setModalEmailError("Enter a valid email address");
+    // Gate ONLY the send intent: if the operator opts to email but the
+    // customer has no email, prompt for it (and save it server-side) first.
+    // Completion ALWAYS proceeds — on cancel the dispatch still runs with
+    // send_email on, and the server skips the send and creates the no-email
+    // follow-up task (its existing path, kept as the backstop).
+    if (opts.sendEmail && customerId) {
+      void (async () => {
+        const detail = await getCustomerDetailAction(customerId);
+        if (detail?.customer) {
+          await ensureReady(detail.customer, { verb: "send", doc: "report" });
+        }
+        dispatch();
+      })();
       return;
     }
-    setModalEmailError(null);
-    void (async () => {
-      const res = await wrappedSetCustomerEmail(customerId, email);
-      if (!res.success) {
-        setModalEmailError(res.error ?? "Failed to save email");
-        return;
-      }
-      handleConfirmComplete({ sendEmail: true });
-    })();
+    dispatch();
+    // The modal stays open with a pending label; the success effect
+    // above navigates away the moment the local write + enqueue land.
   }
 
   useEffect(() => {
@@ -1180,57 +1171,33 @@ function ServiceSheetFormBody({
                   ? amend ? "Saving…" : "Completing…"
                   : amend ? "Save changes" : "Complete"}
               </button>
-              {customerEmail ? (
-                <button
-                  type="button"
-                  onClick={() => handleConfirmComplete({ sendEmail: true })}
-                  disabled={isPending}
-                  className={`rounded-lg px-5 py-2 text-sm font-semibold shadow-sm disabled:opacity-50 ${
-                    amend
-                      ? "border border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-50"
-                      : "bg-brand text-white hover:bg-brand-dark"
-                  }`}
-                >
-                  {isPending
-                    ? amend ? "Saving…" : "Completing…"
-                    : amend ? "Save & Email" : "Complete & Email"}
-                </button>
-              ) : (
-                customerId && (
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      value={modalEmail}
-                      onChange={(e) => setModalEmail(e.target.value)}
-                      placeholder="Email address"
-                      disabled={isPending}
-                      className="w-48 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:opacity-50"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddEmailAndSend}
-                      disabled={isPending}
-                      className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
-                    >
-                      {isPending
-                        ? amend ? "Saving…" : "Completing…"
-                        : "Add email & send"}
-                    </button>
-                  </div>
-                )
-              )}
+              {/* Always offered now: if the customer has no email, the
+                  document-completeness gate prompts for one (and saves it)
+                  before sending. */}
+              <button
+                type="button"
+                onClick={() => handleConfirmComplete({ sendEmail: true })}
+                disabled={isPending}
+                className={`rounded-lg px-5 py-2 text-sm font-semibold shadow-sm disabled:opacity-50 ${
+                  amend
+                    ? "border border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-50"
+                    : "bg-brand text-white hover:bg-brand-dark"
+                }`}
+              >
+                {isPending
+                  ? amend ? "Saving…" : "Completing…"
+                  : amend ? "Save & Email" : "Complete & Email"}
+              </button>
             </div>
           </div>
 
           {!customerEmail && (
             <div className="px-6 pb-4 text-right">
-              {modalEmailError && (
-                <p className="mb-1 text-xs text-red-500">{modalEmailError}</p>
-              )}
               {/* Statement of fact, not a warning — neutral tone. */}
               <p className="text-xs text-gray-500">
-                Tapping {amend ? "Save changes" : "Complete"} saves the report
-                to the job without emailing it (no address on file).
+                {amend ? "Save changes" : "Complete"} saves the report without
+                emailing; {amend ? "Save & Email" : "Complete & Email"} will
+                ask for an email first.
               </p>
             </div>
           )}

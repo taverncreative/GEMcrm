@@ -1,7 +1,27 @@
-import type { Customer, Invoice } from "@/types/database";
+import type { Customer, Invoice, Site } from "@/types/database";
 import { PDF_STYLES } from "./styles";
 import { renderDocHeader } from "./partials";
 import { BUSINESS } from "@/lib/constants/branding";
+
+/** Single-line postal address from the structured fields, blank-safe (drops
+ *  empty lines) — the same pattern the report/agreement templates use. */
+function joinAddress(
+  source: Pick<
+    Customer | Site,
+    "address_line_1" | "address_line_2" | "town" | "county" | "postcode"
+  > | null
+): string {
+  if (!source) return "";
+  return [
+    source.address_line_1,
+    source.address_line_2,
+    source.town,
+    source.county,
+    source.postcode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
 
 function escape(val: string | number | null | undefined): string {
   if (val === null || val === undefined) return "";
@@ -31,12 +51,20 @@ function formatCurrency(value: number): string {
 interface InvoiceTemplateData {
   invoice: Invoice;
   customer: Customer;
+  /** The job's site, used only as a fallback bill-to address when the
+   *  customer has no address of their own. */
+  site?: Site | null;
 }
 
 export function renderInvoiceHtml({
   invoice,
   customer,
+  site,
 }: InvoiceTemplateData): string {
+  // Bill-to address: prefer the customer's saved address, fall back to the
+  // site address if there is one, and omit the line entirely when both are
+  // blank (self-omitting via the blank-safe join).
+  const billToAddress = joinAddress(customer) || joinAddress(site ?? null);
   const issued = invoice.issued_at ?? invoice.created_at;
   const ref = invoice.invoice_number ?? invoice.id.slice(0, 8).toUpperCase();
   const description =
@@ -128,6 +156,11 @@ export function renderInvoiceHtml({
       ${customer.company_name ? `
       <div class="field">
         <div class="field-value">${escape(customer.company_name)}</div>
+      </div>` : ""}
+      ${billToAddress ? `
+      <div class="field">
+        <div class="field-label">Address</div>
+        <div class="field-value">${escape(billToAddress)}</div>
       </div>` : ""}
       ${customer.email ? `
       <div class="field">

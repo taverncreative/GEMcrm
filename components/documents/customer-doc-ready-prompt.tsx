@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Customer } from "@/types/database";
-import type { DocAction, DocReadiness } from "@/lib/documents/doc-readiness";
+import type { DocTarget, DocReadiness } from "@/lib/documents/doc-readiness";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -30,13 +30,13 @@ export interface DocDetailsDraft {
  */
 export function CustomerDocReadyPrompt({
   customer,
-  action,
+  target,
   readiness,
   onSubmit,
   onCancel,
 }: {
   customer: Customer;
-  action: DocAction;
+  target: DocTarget;
   readiness: DocReadiness;
   onSubmit: (details: DocDetailsDraft) => Promise<{ success: boolean; error?: string }>;
   onCancel: () => void;
@@ -87,7 +87,7 @@ export function CustomerDocReadyPrompt({
   const inputClass =
     "mt-1 block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand";
   const labelClass = "block text-xs font-medium text-gray-600";
-  const cta = action === "send" ? "Save and send" : "Save and continue";
+  const cta = target.verb === "send" ? "Save and send" : "Save and continue";
 
   return (
     <div className="fixed inset-0 z-[60] flex items-stretch justify-center sm:items-center sm:p-4">

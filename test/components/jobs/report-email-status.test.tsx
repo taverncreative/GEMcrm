@@ -3,8 +3,9 @@
  *
  *   1. report_emailed_to set → "Report emailed to …" (and no Send-now)
  *   2. queued outbox completion carrying send_email → "queued"
- *   3. no customer address → "no email address on file" + inline add
- *   4. address, never sent → "Send report now"
+ *   3. no customer email → "Send report now" (the shared gate asks for an
+ *      email on click — no bespoke inline capture any more)
+ *   4. email on file, never sent → "Send report now to …"
  *
  * The truth column is server-written; this component must never claim
  * a send that isn't recorded.
@@ -98,15 +99,18 @@ describe("ReportEmailStatus states", () => {
     );
   });
 
-  it("no address → 'no email address on file' + inline add-email", async () => {
+  it("no email → 'Send report now' offered (gate asks for the email on click)", async () => {
     render(
       <ServiceSheetViewOnly job={baseJob} site={null} customer={customerNoEmail} />
     );
+    // The no-email state still offers the send button; clicking it runs the
+    // shared completeness gate (which prompts for the email).
+    expect(await screen.findByText(/no email on file/i)).toBeTruthy();
     expect(
-      await screen.findByText(/no email address on file/i)
+      screen.getByRole("button", { name: /Send report now/ })
     ).toBeTruthy();
-    // The inline capture renders (email input present).
-    expect(document.querySelector('input[type="email"]')).toBeTruthy();
+    // No bespoke inline email input any more — the shared gate handles it.
+    expect(document.querySelector('input[type="email"]')).toBeNull();
   });
 
   it("address on file, never sent → Send report now offered", async () => {

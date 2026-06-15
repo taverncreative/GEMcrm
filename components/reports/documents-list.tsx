@@ -9,6 +9,8 @@ import {
   sendInvoiceFollowUpAction,
   generateInvoicePdfAction,
 } from "@/app/(app)/invoices/actions";
+import { getCustomerDetailAction } from "@/app/(app)/customers/actions";
+import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import type { DocumentItem } from "@/lib/data/documents";
 
 interface DocumentsListProps {
@@ -226,6 +228,7 @@ function InvoiceActions({ item }: { item: DocumentItem }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [busy, setBusy] = useState<"paid" | "chase" | null>(null);
+  const ensureReady = useEnsureCustomerDocReady();
 
   if (item.invoiceStatus === "paid") {
     return (
@@ -249,11 +252,30 @@ function InvoiceActions({ item }: { item: DocumentItem }) {
   function handleChase() {
     if (!item.invoiceId) return;
     setBusy("chase");
-    startTransition(async () => {
-      const res = await sendInvoiceFollowUpAction(item.invoiceId!);
-      setBusy(null);
-      if (res.success) router.refresh();
-    });
+    // Gate the chase email: a follow-up is on an already-sent invoice (so the
+    // email is usually present and the gate passes silently), but if it's
+    // since been cleared, prompt for it. The row only carries {id,name}, so
+    // fetch the full customer for the readiness check.
+    void (async () => {
+      if (item.customer) {
+        const detail = await getCustomerDetailAction(item.customer.id);
+        if (detail?.customer) {
+          const gate = await ensureReady(detail.customer, {
+            verb: "send",
+            doc: "invoice",
+          });
+          if (!gate.proceed) {
+            setBusy(null);
+            return;
+          }
+        }
+      }
+      startTransition(async () => {
+        const res = await sendInvoiceFollowUpAction(item.invoiceId!);
+        setBusy(null);
+        if (res.success) router.refresh();
+      });
+    })();
   }
 
   return (

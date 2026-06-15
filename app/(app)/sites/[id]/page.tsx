@@ -215,7 +215,7 @@ export default async function SiteDetailPage({ params }: SiteDetailPageProps) {
                 ))}
               </ul>
             )}
-            <AddAgreementForm siteId={id} />
+            <AddAgreementForm siteId={id} customer={customer} />
           </SectionCard>
         </div>
       </div>

@@ -23,7 +23,7 @@ import {
 } from "@/components/documents/doc-ready-provider";
 import { db } from "@/lib/db";
 import type { Customer } from "@/types/database";
-import type { DocAction } from "@/lib/documents/doc-readiness";
+import type { DocTarget } from "@/lib/documents/doc-readiness";
 
 function makeCustomer(overrides: Partial<Customer> = {}): Customer {
   return {
@@ -56,16 +56,21 @@ function makeCustomer(overrides: Partial<Customer> = {}): Customer {
 
 function Harness({
   customer,
-  action,
+  target,
   onResult,
 }: {
   customer: Customer;
-  action: DocAction;
+  target: DocTarget;
   onResult: (proceed: boolean) => void;
 }) {
   const ensureReady = useEnsureCustomerDocReady();
   return (
-    <button onClick={async () => onResult(await ensureReady(customer, action))}>
+    <button
+      onClick={async () => {
+        const res = await ensureReady(customer, target);
+        onResult(res.proceed);
+      }}
+    >
       run
     </button>
   );
@@ -83,7 +88,7 @@ describe("ensureCustomerDocReady (imperative API)", () => {
       <DocReadyProvider>
         <Harness
           customer={makeCustomer({ email: "ops@acme.co.uk" })}
-          action="send"
+          target={{ verb: "send", doc: "invoice" }}
           onResult={onResult}
         />
       </DocReadyProvider>
@@ -103,7 +108,7 @@ describe("ensureCustomerDocReady (imperative API)", () => {
       <DocReadyProvider>
         <Harness
           customer={makeCustomer({ id: "c-1", email: null })}
-          action="send"
+          target={{ verb: "send", doc: "invoice" }}
           onResult={onResult}
         />
       </DocReadyProvider>
@@ -129,7 +134,7 @@ describe("ensureCustomerDocReady (imperative API)", () => {
       <DocReadyProvider>
         <Harness
           customer={makeCustomer({ id: "c-1", email: null })}
-          action="send"
+          target={{ verb: "send", doc: "invoice" }}
           onResult={onResult}
         />
       </DocReadyProvider>

@@ -2,11 +2,13 @@
 
 import { useActionState, useState, useEffect, useRef } from "react";
 import { createAgreementAction } from "@/app/(app)/sites/[id]/agreements/actions";
+import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { PMA_PESTS } from "@/lib/constants/job-labels";
 import { DEFAULT_TERMS } from "@/lib/constants/agreement-terms";
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { todayUk, dateUk } from "@/lib/utils/today-uk";
 import type { ActionState } from "@/types/actions";
+import type { Customer } from "@/types/database";
 
 const initialState: ActionState = {
   success: false,
@@ -39,12 +41,31 @@ function getErrorStep(errors: Record<string, string>): number | null {
   return null;
 }
 
-export function AddAgreementForm({ siteId }: { siteId: string }) {
+export function AddAgreementForm({
+  siteId,
+  customer,
+}: {
+  siteId: string;
+  customer?: Customer | null;
+}) {
   const [state, action, isPending] = useActionState(
     createAgreementAction,
     initialState
   );
+  const ensureReady = useEnsureCustomerDocReady();
   const [step, setStep] = useState(1);
+
+  // Form action: offer the document-completeness gate first (so the
+  // customer's email can be added before the server action's send leg runs),
+  // then dispatch either way — the agreement always generates; only the SEND
+  // is conditional on the email being present server-side. This lives on the
+  // FORM (not a button onClick) so an Enter-key submit can't bypass the gate.
+  async function handleSubmit(formData: FormData) {
+    if (customer) {
+      await ensureReady(customer, { verb: "send", doc: "agreement" });
+    }
+    action(formData);
+  }
   const [selectedPests, setSelectedPests] = useState<string[]>([]);
   const [clientSig, setClientSig] = useState("");
   const [gemSig, setGemSig] = useState("");
@@ -102,7 +123,7 @@ export function AddAgreementForm({ siteId }: { siteId: string }) {
   const labelClass = "block text-sm font-medium text-gray-700 mb-0.5";
 
   return (
-    <form action={action}>
+    <form action={handleSubmit}>
       <input type="hidden" name="site_id" value={siteId} />
       <input type="hidden" name="pest_species" value={JSON.stringify(selectedPests)} />
       <input type="hidden" name="client_signature" value={clientSig} />

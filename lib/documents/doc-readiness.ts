@@ -6,21 +6,31 @@ import type { Customer } from "@/types/database";
  *
  * A document action needs only what that action actually requires:
  *
- *   - "send"               → emails the document to the customer, so it
- *                            needs an email address.
- *   - "generate"/"download"→ only renders the PDF (or hands back the file).
- *                            That needs only the customer's NAME, which a
- *                            booking always has — so it never prompts.
+ *   - verb "send"               → emails the document to the customer, so it
+ *                                 needs an email address.
+ *   - verb "generate"/"download"→ only renders the PDF (or hands back the
+ *                                 file). That needs only the customer's NAME,
+ *                                 which a booking always has — so it never
+ *                                 prompts.
  *
- * The postal ADDRESS is always optional: it's offered (while a prompt is
- * already open for a required field) but never required, and the document
- * templates omit a blank address line. The address never gates an action.
+ * The postal ADDRESS is offered (while a prompt is already open for a
+ * required field) but never required, and ONLY for the invoice — that's the
+ * one document with a customer bill-to block. Reports and agreements show
+ * the site address, so they never collect a customer address. The address
+ * never gates an action.
  *
  * This module is pure — no IO, no React — so the rule can be unit-tested in
  * isolation and reused by the imperative prompt API and any call site.
  */
 
-export type DocAction = "send" | "generate" | "download";
+export type DocVerb = "send" | "generate" | "download";
+export type DocType = "invoice" | "report" | "agreement";
+
+/** A (verb, document-type) pair — what the call site is about to do. */
+export interface DocTarget {
+  verb: DocVerb;
+  doc: DocType;
+}
 
 /** A field the readiness prompt can collect. */
 export type DocField = "email" | "address";
@@ -31,12 +41,11 @@ export interface DocReadiness {
    *  email is already on file. */
   ready: boolean;
   /** Required-but-blank fields that MUST be collected before the action can
-   *  proceed. ("send" → ["email"] when the email is absent;
-   *  "generate"/"download" → always []). */
+   *  proceed. ("send" → ["email"] when the email is absent; otherwise []). */
   required: DocField[];
-  /** Skippable fields worth offering WHILE a prompt is already open for a
-   *  required field — never gates the action, and empty when `ready` (since
-   *  no prompt is shown). ("address" when the customer has none on file). */
+  /** Skippable fields worth offering WHILE a prompt is already open — never
+   *  gates the action, empty when `ready`. Only the INVOICE collects an
+   *  address (its bill-to block); reports/agreements never do. */
   optional: DocField[];
 }
 
@@ -60,35 +69,38 @@ function hasAddress(customer: CustomerDocFields | null): boolean {
 }
 
 /**
- * Decide, for a (customer, action) pair, whether the completeness prompt is
+ * Decide, for a (customer, target) pair, whether the completeness prompt is
  * needed and which fields it should collect.
  *
- * Send requires an email when absent; generate/download require nothing;
- * the address is never required (only offered).
+ * Send requires an email when absent; generate/download require nothing.
+ * The address is never required — only offered, and only when prompting for
+ * an invoice send whose customer has no address on file.
  */
 export function customerDocReadiness(
   customer: CustomerDocFields | null,
-  action: DocAction
+  target: DocTarget
 ): DocReadiness {
   // Only sending reaches out to the customer, so only sending needs contact
   // details. Generating/downloading needs only the name (always present).
-  const needsEmail = action === "send" && isBlank(customer?.email);
+  const needsEmail = target.verb === "send" && isBlank(customer?.email);
 
   const required: DocField[] = needsEmail ? ["email"] : [];
   const ready = required.length === 0;
 
   // The address is only ever offered ALONGSIDE a prompt we're already
-  // showing — never on its own, and never once the action is ready.
-  const optional: DocField[] =
-    !ready && !hasAddress(customer) ? ["address"] : [];
+  // showing, only for the invoice (the one doc with a customer bill-to),
+  // and only when there's no address on file to put in it.
+  const offerAddress =
+    !ready && target.doc === "invoice" && !hasAddress(customer);
+  const optional: DocField[] = offerAddress ? ["address"] : [];
 
   return { ready, required, optional };
 }
 
-/** Convenience predicate: does this (customer, action) pair need the prompt? */
+/** Convenience predicate: does this (customer, target) pair need the prompt? */
 export function needsDocReadyPrompt(
   customer: CustomerDocFields | null,
-  action: DocAction
+  target: DocTarget
 ): boolean {
-  return !customerDocReadiness(customer, action).ready;
+  return !customerDocReadiness(customer, target).ready;
 }

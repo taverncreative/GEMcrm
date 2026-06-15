@@ -13,9 +13,11 @@ import { useRouter } from "next/navigation";
 import {
   createInvoiceDraftAction,
   sendInvoiceAction,
+  generateInvoicePdfAction,
   type CreateDraftResult,
 } from "@/app/(app)/invoices/actions";
 import { searchCustomersAction } from "@/app/(app)/bookings/actions";
+import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { buildInvoiceEmailDraft } from "@/lib/services/invoice-email";
 import { dateUkOffset } from "@/lib/utils/today-uk";
 import { BUSINESS } from "@/lib/constants/branding";
@@ -264,21 +266,42 @@ export function InvoiceCreatorModal({
     }, 200);
   }, []);
 
+  const ensureReady = useEnsureCustomerDocReady();
+
   function handleSend() {
     if (!draftInvoice) return;
     setSendError(null);
-    startSendTransition(async () => {
-      const res = await sendInvoiceAction(draftInvoice.id, {
-        subject: emailSubject,
-        body: emailBody,
-      });
-      if (res.success) {
-        setSendSuccess(true);
-        router.refresh();
-      } else {
-        setSendError(res.message ?? "Failed to send");
+    // Run the document-completeness gate FIRST (outside the transition, so the
+    // prompt isn't competing with the "Sending…" state). If the customer has
+    // no email, this prompts for it (+ optional bill-to address) and saves it
+    // server-side before we send.
+    void (async () => {
+      let saved = false;
+      if (selectedCustomer) {
+        const gate = await ensureReady(selectedCustomer, {
+          verb: "send",
+          doc: "invoice",
+        });
+        if (!gate.proceed) return; // cancelled
+        setSelectedCustomer(gate.customer); // fresh email for the "To" field
+        saved = gate.saved;
       }
-    });
+      startSendTransition(async () => {
+        // If the gate just saved a new email/address, regenerate the PDF so
+        // the bill-to reflects it before this first send.
+        if (saved) await generateInvoicePdfAction(draftInvoice.id);
+        const res = await sendInvoiceAction(draftInvoice.id, {
+          subject: emailSubject,
+          body: emailBody,
+        });
+        if (res.success) {
+          setSendSuccess(true);
+          router.refresh();
+        } else {
+          setSendError(res.message ?? "Failed to send");
+        }
+      });
+    })();
   }
 
   if (!open) return null;
@@ -607,14 +630,9 @@ export function InvoiceCreatorModal({
                   type="email"
                   value={selectedCustomer?.email ?? ""}
                   readOnly
+                  placeholder="Added when you send"
                   className={`${inputClass} bg-gray-50`}
                 />
-                {!selectedCustomer?.email && (
-                  <p className="mt-1 text-xs text-amber-700">
-                    This customer has no email on file. Add one to enable
-                    sending.
-                  </p>
-                )}
               </div>
               <div>
                 <label htmlFor="ic-subject" className={labelClass}>
@@ -678,7 +696,7 @@ export function InvoiceCreatorModal({
                   <button
                     type="button"
                     onClick={handleSend}
-                    disabled={isSending || !selectedCustomer?.email}
+                    disabled={isSending}
                     className="min-h-[44px] rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50 sm:min-h-0"
                   >
                     {isSending ? "Sending…" : "Approve & send"}

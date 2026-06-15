@@ -92,7 +92,9 @@ export async function createAgreementAction(
     const agreement = await createAgreement(result.data);
     await generateAgreementJobs(agreement);
 
-    // Generate contract PDF
+    // Generate the contract PDF (name-only — always proceeds). A render
+    // failure is non-fatal: the agreement is still created and the PDF is
+    // backfillable, so it stays fenced.
     try {
       const customer = await getCustomerById(site.customer_id);
       if (customer) {
@@ -112,11 +114,19 @@ export async function createAgreementAction(
           .update({ contract_pdf_url: pdfUrl })
           .eq("id", agreement.id);
 
-        // Send agreement email to customer
-        await sendAgreement(customer, pdfUrl);
+        // Send only when there's an email. No email → generated, NOT sent —
+        // an explicit skip, not a swallowed sendAgreement({success:false}).
+        // The client gate offers to add an email before submitting, so a
+        // willing operator reaches here with one on file.
+        if (customer.email) {
+          await sendAgreement(customer, pdfUrl);
+        }
       }
     } catch (pdfErr) {
-      console.error("[createAgreementAction] PDF generation failed:", pdfErr);
+      console.error(
+        "[createAgreementAction] PDF generate/send failed:",
+        pdfErr
+      );
     }
   } catch (err) {
     return {

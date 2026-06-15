@@ -74,3 +74,54 @@ describe("renderInvoiceHtml — renders as-issued, not per the global flag", () 
     expect(html).toContain("GB123456789");
   });
 });
+
+describe("renderInvoiceHtml — bill-to address (customer → site → omit)", () => {
+  const custWithAddress = {
+    id: "c1",
+    name: "Natalie Feild",
+    company_name: null,
+    email: null,
+    phone: null,
+    address_line_1: "12 Customer Way",
+    address_line_2: null,
+    town: "Folkestone",
+    county: "Kent",
+    postcode: "CT20 1AA",
+  } as never;
+
+  const site = {
+    id: "s1",
+    address_line_1: "9 Site Road",
+    address_line_2: null,
+    town: "Dover",
+    county: "Kent",
+    postcode: "CT16 1AA",
+  } as never;
+
+  it("renders the customer's saved address when present", () => {
+    const html = renderInvoiceHtml({ invoice: inv(), customer: custWithAddress });
+    expect(html).toContain("Address");
+    expect(html).toContain("12 Customer Way, Folkestone, Kent, CT20 1AA");
+  });
+
+  it("prefers the customer address over the site address", () => {
+    const html = renderInvoiceHtml({
+      invoice: inv(),
+      customer: custWithAddress,
+      site,
+    });
+    expect(html).toContain("12 Customer Way, Folkestone, Kent, CT20 1AA");
+    expect(html).not.toContain("9 Site Road");
+  });
+
+  it("falls back to the site address when the customer has none", () => {
+    const html = renderInvoiceHtml({ invoice: inv(), customer, site });
+    expect(html).toContain("9 Site Road, Dover, Kent, CT16 1AA");
+  });
+
+  it("omits the address block entirely when both are blank", () => {
+    const html = renderInvoiceHtml({ invoice: inv(), customer, site: null });
+    // No "Address" field label in the bill-to.
+    expect(html).not.toMatch(/field-label">Address</);
+  });
+});

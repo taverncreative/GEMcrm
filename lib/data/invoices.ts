@@ -3,7 +3,7 @@ import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { newId } from "@/lib/utils/id";
 import { invoiceVatFields } from "@/lib/utils/vat";
 import { BUSINESS } from "@/lib/constants/branding";
-import type { Invoice, InvoiceStatus, Customer } from "@/types/database";
+import type { Invoice, InvoiceStatus, Customer, Site } from "@/types/database";
 
 // Invoice numbering is assigned by the assign_invoice_number DB trigger
 // (migration 037): one unified INV-YYYY-NNNN series sourced from the
@@ -448,6 +448,44 @@ export async function getInvoiceCountsByCustomer(
  */
 export interface InvoiceWithCustomer extends Invoice {
   customer: Customer;
+}
+
+/**
+ * The site behind an invoice — for the PDF bill-to's site-address fallback.
+ * An invoice covers one customer but may span several jobs; any one site is
+ * a fine fallback address, so we take the first linked job's site. Resolves
+ * via invoice_jobs (031, canonical) and falls back to the legacy
+ * invoices.job_id for pre-031 rows. Null for a standalone (no-job) invoice.
+ */
+export async function getInvoiceSite(invoiceId: string): Promise<Site | null> {
+  const supabase = await createClient();
+
+  const { data: link } = await supabase
+    .from("invoice_jobs")
+    .select("job_id")
+    .eq("invoice_id", invoiceId)
+    .limit(1)
+    .maybeSingle();
+
+  let jobId = link?.job_id as string | undefined;
+  if (!jobId) {
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("job_id")
+      .eq("id", invoiceId)
+      .maybeSingle();
+    jobId = (inv?.job_id as string | null) ?? undefined;
+  }
+  if (!jobId) return null;
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("site:sites(*)")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  const site = (job as { site?: Site | null } | null)?.site ?? null;
+  return site;
 }
 
 export async function getInvoiceWithCustomer(
