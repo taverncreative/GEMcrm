@@ -73,11 +73,19 @@ export interface PushResult {
 export async function drainOutbox(): Promise<PushResult> {
   const now = new Date().toISOString();
   const eligible = (
-    await db.outbox
-      .where("next_attempt_at")
-      .belowOrEqual(now)
-      .sortBy("created_at")
-  ).filter((e) => !e.stuck);
+    await db.outbox.where("next_attempt_at").belowOrEqual(now).toArray()
+  )
+    .filter((e) => !e.stuck)
+    // FIFO by insertion order: created_at primary, the auto-increment `id`
+    // as a DETERMINISTIC tiebreaker. Two entries queued in the same
+    // millisecond — e.g. an offline email capture immediately followed by
+    // the completion it belongs to — always replay in the order they were
+    // enqueued, never reordered. (Enqueue order guarantees the email entry
+    // gets the lower id, so it always drains, and lands, first.)
+    .sort(
+      (a, b) =>
+        a.created_at.localeCompare(b.created_at) || (a.id ?? 0) - (b.id ?? 0)
+    );
 
   const result: PushResult = {
     attempted: 0,

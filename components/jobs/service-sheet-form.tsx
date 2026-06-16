@@ -30,7 +30,6 @@ import {
 } from "@/lib/db/drafts";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
-import { getCustomerDetailAction } from "@/app/(app)/customers/actions";
 
 /** Sheet input + the combined-finalize flag (offline-pwa pass B) and
  *  the amend flag (L2). The flags ride along so applyLocal knows
@@ -431,15 +430,27 @@ function ServiceSheetFormBody({
     const dispatch = () => void formAction(fd);
 
     // Gate ONLY the send intent: if the operator opts to email but the
-    // customer has no email, prompt for it (and save it server-side) first.
-    // Completion ALWAYS proceeds — on cancel the dispatch still runs with
+    // customer has no email, prompt for it (and capture it) first. The
+    // customer is read from Dexie so this works OFFLINE in the field — the
+    // gate captures the email optimistically + queues it for sync. Completion
+    // ALWAYS proceeds — best-effort, so a read/gate hiccup never blocks it.
+    // On cancel (or offline-deferred capture) the dispatch still runs with
     // send_email on, and the server skips the send and creates the no-email
-    // follow-up task (its existing path, kept as the backstop).
+    // follow-up task (its existing path, kept as the backstop); once the
+    // email syncs, send-now goes through without re-prompting.
     if (opts.sendEmail && customerId) {
       void (async () => {
-        const detail = await getCustomerDetailAction(customerId);
-        if (detail?.customer) {
-          await ensureReady(detail.customer, { verb: "send", doc: "report" });
+        try {
+          const customer = await db.customers.get(customerId);
+          if (customer) {
+            // AWAIT the gate before dispatching: an offline capture enqueues
+            // its email-save here, so it lands in the outbox BEFORE the
+            // completion entry below (lower id). FIFO drain then replays the
+            // email first, and the completion's replay finds it → auto-sends.
+            await ensureReady(customer, { verb: "send", doc: "report" });
+          }
+        } catch {
+          // Opportunistic — never block completion on a capture failure.
         }
         dispatch();
       })();

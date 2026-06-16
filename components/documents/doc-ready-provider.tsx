@@ -13,54 +13,27 @@ import {
   type DocTarget,
   type DocReadiness,
 } from "@/lib/documents/doc-readiness";
-import { setCustomerDocDetailsAction } from "@/app/(app)/customers/actions";
-import { db } from "@/lib/db";
+import { captureDocDetails } from "@/lib/documents/capture-doc-details";
+import { useIsOnline } from "@/lib/hooks/use-is-online";
 import {
   CustomerDocReadyPrompt,
   type DocDetailsDraft,
 } from "./customer-doc-ready-prompt";
-
-const ADDRESS_KEYS = [
-  "address_line_1",
-  "address_line_2",
-  "town",
-  "county",
-  "postcode",
-] as const;
-
-/** Merge the prompt's draft onto a customer object (for the returned, fresh
- *  customer) and into a Dexie patch (for the optimistic local mirror). */
-function applyDraft(customer: Customer, details: DocDetailsDraft) {
-  const merged: Customer = { ...customer };
-  const patch: Record<string, string | null> = {
-    updated_at: new Date().toISOString(),
-  };
-  if (details.email !== undefined) {
-    const email = details.email.trim().toLowerCase();
-    merged.email = email;
-    patch.email = email;
-  }
-  for (const key of ADDRESS_KEYS) {
-    if (details[key] !== undefined) {
-      const value = details[key]!.trim() || null;
-      merged[key] = value;
-      patch[key] = value;
-    }
-  }
-  return { merged, patch };
-}
 
 /**
  * What the gate resolves with. `proceed` says whether to run the action;
  * `customer` is the FRESH customer (with any saved email/address merged in)
  * so the caller never fires on the stale pre-prompt record; `saved` is true
  * when the prompt actually persisted something (the invoice send uses it to
- * regenerate the PDF so the new bill-to lands before sending).
+ * regenerate the PDF so the new bill-to lands before sending); `deferred` is
+ * true when that save was captured OFFLINE (optimistic — not on the server
+ * yet) so the caller knows a send must wait for it to sync.
  */
 export interface EnsureDocReadyResult {
   proceed: boolean;
   customer: Customer;
   saved: boolean;
+  deferred: boolean;
 }
 
 export type EnsureCustomerDocReady = (
@@ -81,16 +54,24 @@ interface PendingPrompt {
  * Document-completeness gate provider (Pass 2). Mounted once at the app
  * shell; exposes {@link useEnsureCustomerDocReady}. Holds the single prompt
  * instance + the pending promise resolver, so any call site can `await`
- * readiness with no modal plumbing of its own.
+ * readiness with no modal plumbing of its own. The save is offline-aware
+ * (see {@link captureDocDetails}) so a field operator can capture the email
+ * at completion even with no signal.
  */
 export function DocReadyProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingPrompt | null>(null);
+  const online = useIsOnline();
 
   const ensure = useCallback<EnsureCustomerDocReady>((customer, target) => {
     const readiness = customerDocReadiness(customer, target);
     // Already complete → no prompt, proceed straight away on the same record.
     if (readiness.ready) {
-      return Promise.resolve({ proceed: true, customer, saved: false });
+      return Promise.resolve({
+        proceed: true,
+        customer,
+        saved: false,
+        deferred: false,
+      });
     }
     // Otherwise show the prompt and hand the resolver to its buttons.
     return new Promise<EnsureDocReadyResult>((resolve) => {
@@ -100,26 +81,27 @@ export function DocReadyProvider({ children }: { children: ReactNode }) {
 
   async function handleSubmit(details: DocDetailsDraft) {
     if (!pending) return { success: false, error: "No prompt open" };
-    const { merged, patch } = applyDraft(pending.customer, details);
-
-    // Persist SERVER-side and await it, so the very next thing the caller
-    // does (a send action that re-reads the customer) sees the fresh email —
-    // not the stale pre-prompt row. The prompt only ever appears for a SEND,
-    // which is online-only, so a direct awaited write is the right contract.
-    const res = await setCustomerDocDetailsAction(pending.customer.id, details);
+    const res = await captureDocDetails(pending.customer, details, online);
     if (!res.success) {
-      return { success: false, error: res.message };
+      return { success: false, error: res.error };
     }
-    // Mirror into Dexie so offline-first UIs (useLiveQuery) refresh too.
-    await db.customers.update(pending.customer.id, patch);
-
-    pending.resolve({ proceed: true, customer: merged, saved: true });
+    pending.resolve({
+      proceed: true,
+      customer: res.customer,
+      saved: true,
+      deferred: res.deferred,
+    });
     setPending(null);
     return { success: true };
   }
 
   function handleCancel() {
-    pending?.resolve({ proceed: false, customer: pending.customer, saved: false });
+    pending?.resolve({
+      proceed: false,
+      customer: pending.customer,
+      saved: false,
+      deferred: false,
+    });
     setPending(null);
   }
 
@@ -145,7 +127,7 @@ export function DocReadyProvider({ children }: { children: ReactNode }) {
 // a wired component standalone) and leans on the server-side guards — which
 // stay in place as backstops — to catch a genuinely missing email.
 const PROCEED_FALLBACK: EnsureCustomerDocReady = (customer) =>
-  Promise.resolve({ proceed: true, customer, saved: false });
+  Promise.resolve({ proceed: true, customer, saved: false, deferred: false });
 
 /**
  * Hook for call sites: `const ensureReady = useEnsureCustomerDocReady()`,
