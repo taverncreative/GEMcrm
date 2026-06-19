@@ -1,8 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { updateJobStatus } from "@/lib/data/jobs";
-import { getJobById } from "@/lib/data/jobs";
+import {
+  updateJobStatus,
+  getJobById,
+  deleteJob,
+  getJobDeleteImpact,
+} from "@/lib/data/jobs";
+import type { JobDeleteImpact } from "@/lib/data/jobs";
 import { getReportByJobId } from "@/lib/data/reports";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
@@ -78,5 +83,40 @@ export async function getReportByJobIdAction(
     return await getReportByJobId(jobId);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Impact preview for the delete-job confirm dialog — whether the job is on
+ * an invoice (which will stand) and how many follow-up jobs link to it.
+ */
+export async function getJobDeleteImpactAction(
+  jobId: string
+): Promise<JobDeleteImpact> {
+  await requireUser();
+  return getJobDeleteImpact(jobId);
+}
+
+/**
+ * Soft-delete a job. Online-only (mirrors customer delete); `requireUser`
+ * gates it. The job's invoice/report/follow-ups are left in place — the job
+ * just stops surfacing once `deleted_at` is set (see {@link deleteJob}).
+ */
+export async function deleteJobAction(
+  jobId: string
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!jobId) return { success: false, message: "Missing job id" };
+  try {
+    await deleteJob(jobId);
+    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath("/jobs");
+    revalidatePath("/dashboard");
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to delete job",
+    };
   }
 }

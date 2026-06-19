@@ -77,6 +77,7 @@ export async function getAllJobs(
   let query = supabase
     .from("jobs")
     .select("*, site:sites!inner(*, customer:customers!inner(*))")
+    .is("deleted_at", null)
     .order("job_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(100);
@@ -118,6 +119,7 @@ export async function getOverdueJobs(
   const { data, error } = await supabase
     .from("jobs")
     .select("*, site:sites!inner(*, customer:customers!inner(*))")
+    .is("deleted_at", null)
     .lt("job_date", today)
     .in("job_status", ["scheduled", "in_progress"])
     .order("job_date", { ascending: true })
@@ -140,6 +142,7 @@ export async function getJobsToday(
   const { data, error } = await supabase
     .from("jobs")
     .select("*, site:sites!inner(*, customer:customers!inner(*))")
+    .is("deleted_at", null)
     .eq("job_date", today)
     .in("job_status", ["scheduled", "in_progress"])
     .order("created_at", { ascending: true })
@@ -167,6 +170,7 @@ export async function getUpcomingJobs(
   const { data, error } = await supabase
     .from("jobs")
     .select("*, site:sites!inner(*, customer:customers!inner(*))")
+    .is("deleted_at", null)
     .gte("job_date", today)
     .in("job_status", ["scheduled", "in_progress"])
     .eq("is_archived", false)
@@ -190,6 +194,7 @@ export async function getRecentJobs(
   const { data, error } = await supabase
     .from("jobs")
     .select("*, site:sites!inner(*, customer:customers!inner(*))")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -207,6 +212,7 @@ export async function getJobsBySite(siteId: string): Promise<Job[]> {
     .from("jobs")
     .select("*")
     .eq("site_id", siteId)
+    .is("deleted_at", null)
     .order("job_date", { ascending: false })
     .order("created_at", { ascending: false });
 
@@ -224,6 +230,7 @@ export async function getJobById(id: string): Promise<Job | null> {
     .from("jobs")
     .select("*")
     .eq("id", id)
+    .is("deleted_at", null)
     .single();
 
   if (error) {
@@ -235,6 +242,78 @@ export async function getJobById(id: string): Promise<Job | null> {
   }
 
   return data;
+}
+
+/**
+ * Soft-delete a job — sets `deleted_at = now()`. A direct update (not an
+ * RPC like the customer one): the jobs RLS is `using(true) / with check(true)`,
+ * so the self-hiding update isn't rejected the way customers' was. The job
+ * row + its dependents (any invoice link, generated report, follow-up
+ * children) are LEFT in place — soft delete doesn't cascade — but the job
+ * stops surfacing everywhere the reads filter `deleted_at IS NULL` (the
+ * server reads above + the Dexie reads).
+ */
+export async function deleteJob(jobId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("jobs")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", jobId);
+  if (error) {
+    console.error("[deleteJob]", error.code, error.message);
+    throw new Error(`Failed to delete job: ${error.message}`);
+  }
+}
+
+/**
+ * What a job delete leaves behind, for the confirm dialog. If the job is on
+ * an invoice that invoice STANDS (soft-deleting the job doesn't touch it),
+ * and any follow-up child jobs keep their parent link.
+ */
+export interface JobDeleteImpact {
+  /** Invoice number if this job is on an invoice, else null. */
+  invoiceNumber: string | null;
+  /** Count of still-live follow-up jobs whose parent is this job. */
+  followUps: number;
+}
+
+export async function getJobDeleteImpact(
+  jobId: string
+): Promise<JobDeleteImpact> {
+  const supabase = await createClient();
+
+  // Invoice link — canonical invoice_jobs first, then the legacy
+  // invoices.job_id column for pre-031 rows.
+  const { data: link } = await supabase
+    .from("invoice_jobs")
+    .select("invoice:invoices(invoice_number)")
+    .eq("job_id", jobId)
+    .maybeSingle();
+  // The invoice_jobs→invoices embed is to-one at runtime, but PostgREST's
+  // generated types widen it to an array — normalise both shapes.
+  const invoiceRel = link?.invoice as unknown as
+    | { invoice_number: string | null }
+    | { invoice_number: string | null }[]
+    | null
+    | undefined;
+  const invoiceObj = Array.isArray(invoiceRel) ? invoiceRel[0] : invoiceRel;
+  let invoiceNumber: string | null = invoiceObj?.invoice_number ?? null;
+  if (!invoiceNumber) {
+    const { data: legacy } = await supabase
+      .from("invoices")
+      .select("invoice_number")
+      .eq("job_id", jobId)
+      .maybeSingle();
+    invoiceNumber = (legacy?.invoice_number as string | null) ?? null;
+  }
+
+  const { count } = await supabase
+    .from("jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("parent_job_id", jobId)
+    .is("deleted_at", null);
+
+  return { invoiceNumber, followUps: count ?? 0 };
 }
 
 /**
@@ -633,6 +712,7 @@ export async function getLastJobForSite(siteId: string): Promise<Job | null> {
     .from("jobs")
     .select("*")
     .eq("site_id", siteId)
+    .is("deleted_at", null)
     .eq("is_archived", false)
     .eq("job_status", "completed")
     .order("job_date", { ascending: false })

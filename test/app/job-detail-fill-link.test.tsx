@@ -42,6 +42,13 @@ vi.mock("@/app/(app)/jobs/[id]/actions", () => ({
     errors: {},
     message: null,
   })),
+  // Pulled in via DeleteJobConfirm (header delete control). Not under test
+  // here, but the page imports the module at the top so they must exist.
+  getJobDeleteImpactAction: vi.fn(async () => ({
+    invoiceNumber: null,
+    followUps: 0,
+  })),
+  deleteJobAction: vi.fn(async () => ({ success: true })),
 }));
 
 // Leaf components not under test — render nothing.
