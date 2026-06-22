@@ -82,3 +82,44 @@ export async function createSite(
 
   return data;
 }
+
+/**
+ * Edit an existing site's address — a plain `.update().eq("id")`, ONLINE
+ * ONLY (no RPC). A normal field update never touches `deleted_at`, so the
+ * post-update RETURNING row still satisfies the SELECT policy
+ * `USING (deleted_at IS NULL)` and there's no 42501 catch-22 — same as
+ * {@link updateCustomer}. Sites were create-only until now; this is the
+ * surface that lets an operator fix a bare/quick-add site's address.
+ *
+ * Field normalisation mirrors {@link createSite} (blank → null, postcode
+ * uppercased). Returns the updated row so the caller can refresh the local
+ * (Dexie) cache without waiting for the next sync pull.
+ */
+export async function updateSite(
+  siteId: string,
+  input: SiteInput
+): Promise<Site> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("sites")
+    .update({
+      address_line_1: emptyToNull(input.address_line_1),
+      address_line_2: emptyToNull(input.address_line_2),
+      town: emptyToNull(input.town),
+      county: emptyToNull(input.county),
+      postcode: input.postcode.trim()
+        ? input.postcode.trim().toUpperCase()
+        : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", siteId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[updateSite]", error.code, error.message);
+    throw new Error(`Failed to update site: ${error.message}`);
+  }
+
+  return data;
+}

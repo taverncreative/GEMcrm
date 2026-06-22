@@ -15,5 +15,6 @@ export const ROUTES = {
   customerDetail: (id: string) => `/customers/${id}` as const,
   customerEdit: (id: string) => `/customers/${id}/edit` as const,
   siteDetail: (id: string) => `/sites/${id}` as const,
+  siteEdit: (id: string) => `/sites/${id}/edit` as const,
   jobDetail: (id: string) => `/jobs/${id}` as const,
 } as const;
