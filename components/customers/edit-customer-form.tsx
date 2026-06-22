@@ -9,6 +9,7 @@ import { CustomerFormFields } from "@/components/customers/customer-form-fields"
 import { db } from "@/lib/db";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { ROUTES } from "@/lib/constants/routes";
+import { safeInternalPath } from "@/lib/utils/safe-return-to";
 import type { Customer } from "@/types/database";
 
 /**
@@ -27,7 +28,16 @@ import type { Customer } from "@/types/database";
  * pull (which then reconciles to the same values, idempotently). Then we
  * navigate back to the customer's side panel.
  */
-export function EditCustomerForm({ customer }: { customer: Customer }) {
+export function EditCustomerForm({
+  customer,
+  returnTo,
+}: {
+  customer: Customer;
+  /** Optional internal path to land on after save/cancel (validated) — e.g.
+   *  the service-sheet gate sends the operator back to /jobs/[id]/complete.
+   *  Defaults to the customer's side panel. */
+  returnTo?: string | null;
+}) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement | null>(null);
   const online = useIsOnline();
@@ -41,6 +51,8 @@ export function EditCustomerForm({ customer }: { customer: Customer }) {
   const backToCustomer = `${ROUTES.CUSTOMERS}?customer=${encodeURIComponent(
     customer.id
   )}`;
+  // Honour a whitelisted returnTo, else the default side-panel destination.
+  const dest = safeInternalPath(returnTo) ?? backToCustomer;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -61,7 +73,7 @@ export function EditCustomerForm({ customer }: { customer: Customer }) {
     if (result.success && result.customer) {
       // Refresh the local cache so the change is visible at once.
       await db.customers.put(result.customer);
-      router.push(backToCustomer);
+      router.push(dest);
       return;
     }
 
@@ -94,7 +106,7 @@ export function EditCustomerForm({ customer }: { customer: Customer }) {
 
       <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
         <Link
-          href={backToCustomer}
+          href={dest}
           className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
         >
           Cancel

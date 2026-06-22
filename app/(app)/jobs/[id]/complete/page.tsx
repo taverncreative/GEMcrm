@@ -61,7 +61,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { ServiceSheetForm } from "@/components/jobs/service-sheet-form";
 import { ServiceSheetViewOnly } from "@/components/jobs/service-sheet-view-only";
-import { AddCustomerEmailInline } from "@/components/customers/add-email-inline";
+import { ServiceSheetGate } from "@/components/jobs/service-sheet-gate";
+import { customerServiceSheetReadiness } from "@/lib/documents/service-sheet-readiness";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { SmartBackButton } from "@/components/smart-back-button";
 import { ROUTES } from "@/lib/constants/routes";
@@ -237,6 +238,54 @@ export default function CompleteServiceSheetPage() {
     );
   }
 
+  // ─── Completeness gate ──────────────────────────────────────────────
+  // Before the form mounts, the job's customer + site must carry the
+  // details the printed sheet needs (name/phone/email + a usable site
+  // address). An under-filled (relaxed-booking) customer is blocked with
+  // the missing items and routed to fix them; a fully-filled one falls
+  // straight through. Gated at the page (not the button) so a direct
+  // navigation to /complete is caught too. Supersedes the old soft
+  // "no email" banner — the gate now requires email outright.
+  // By this point the loading gates above guarantee customer/site are
+  // resolved (or genuinely absent → null); coerce undefined → null so the
+  // pure rule and the gate see a clean shape.
+  const gateCustomer = customer ?? null;
+  const gateSite = site ?? null;
+  const readiness = customerServiceSheetReadiness(gateCustomer, gateSite);
+  if (!readiness.ready) {
+    return (
+      <div>
+        <div className="flex items-start gap-3">
+          <SmartBackButton
+            fallbackHref={ROUTES.jobDetail(id)}
+            label="Back to job"
+            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-semibold text-gray-900">
+                Service Sheet
+              </h1>
+              <SyncStatePill />
+            </div>
+            <p className="text-sm text-gray-500">
+              {customer ? customer.name : "Customer"}
+              {" · "}
+              {formatDate(job.job_date)}
+            </p>
+          </div>
+        </div>
+
+        <ServiceSheetGate
+          customer={gateCustomer}
+          site={gateSite}
+          missing={readiness.missing}
+          jobId={id}
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex items-start gap-3">
@@ -262,21 +311,6 @@ export default function CompleteServiceSheetPage() {
           </p>
         </div>
       </div>
-
-      {customer && !customer.email && (
-        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-medium text-amber-900">
-            No email on file for {customer.name}
-          </p>
-          <p className="mt-0.5 text-xs text-amber-800">
-            The report can&apos;t be emailed until an address is added.
-            You can still fill in and complete the sheet.
-          </p>
-          <div className="mt-3 max-w-sm">
-            <AddCustomerEmailInline customerId={customer.id} />
-          </div>
-        </div>
-      )}
 
       <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
         <ServiceSheetForm

@@ -123,8 +123,12 @@ function makeCustomer(overrides: Partial<Customer> = {}): Customer {
     deleted_at: null,
     name: "Test Customer",
     company_name: null,
-    email: null,
-    phone: null,
+    // Complete by default so the whitelist-gate tests isolate STATUS from
+    // the service-sheet completeness gate (which needs name/phone/email +
+    // a usable site address). Tests that exercise the completeness gate
+    // override phone/email back to null.
+    email: "test@example.com",
+    phone: "01234 567890",
     address_line_1: null,
     address_line_2: null,
     town: null,
@@ -258,6 +262,49 @@ describe("complete page — whitelist gate", () => {
       expect(
         screen.getByText("Sheet content from in-progress save")
       ).toBeInTheDocument();
+    }
+  );
+
+  it(
+    "completeness gate: an under-filled customer is blocked with the missing " +
+      "items instead of the form",
+    async () => {
+      // A relaxed-booking customer: fillable status, but no phone/email.
+      await db.jobs.put(makeJob({ job_status: "scheduled" }));
+      await db.sites.put(makeSite());
+      await db.customers.put(makeCustomer({ phone: null, email: null }));
+
+      render(<CompleteServiceSheetPage />);
+
+      // The blocking panel shows, listing the missing contact details…
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Before filling the service sheet/i)
+        ).toBeInTheDocument();
+      });
+      expect(screen.getByText(/a phone number/i)).toBeInTheDocument();
+      expect(screen.getByText(/an email address/i)).toBeInTheDocument();
+      // …and the editable form is NOT mounted.
+      expect(screen.queryByLabelText(/^Findings/i)).toBeNull();
+    }
+  );
+
+  it(
+    "completeness gate: a bare site (no address) is blocked on the site address",
+    async () => {
+      await db.jobs.put(makeJob({ job_status: "scheduled" }));
+      await db.sites.put(makeSite({ address_line_1: null, town: null }));
+      await db.customers.put(makeCustomer());
+
+      render(<CompleteServiceSheetPage />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Before filling the service sheet/i)
+        ).toBeInTheDocument();
+      });
+      expect(screen.getByText(/a site address/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/^Findings/i)).toBeNull();
     }
   );
 

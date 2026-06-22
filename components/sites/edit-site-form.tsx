@@ -8,6 +8,7 @@ import { SiteFormFields } from "@/components/sites/site-form-fields";
 import { db } from "@/lib/db";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { ROUTES } from "@/lib/constants/routes";
+import { safeInternalPath } from "@/lib/utils/safe-return-to";
 import type { Site } from "@/types/database";
 
 /**
@@ -25,7 +26,16 @@ import type { Site } from "@/types/database";
  * site detail page is refreshed by the action's revalidatePath. Then we
  * navigate back to the site.
  */
-export function EditSiteForm({ site }: { site: Site }) {
+export function EditSiteForm({
+  site,
+  returnTo,
+}: {
+  site: Site;
+  /** Optional internal path to land on after save/cancel (validated) — e.g.
+   *  the service-sheet gate sends the operator back to /jobs/[id]/complete.
+   *  Defaults to the site detail page. */
+  returnTo?: string | null;
+}) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement | null>(null);
   const online = useIsOnline();
@@ -34,6 +44,8 @@ export function EditSiteForm({ site }: { site: Site }) {
   const [saving, setSaving] = useState(false);
 
   const back = ROUTES.siteDetail(site.id);
+  // Honour a whitelisted returnTo, else the default site-detail destination.
+  const dest = safeInternalPath(returnTo) ?? back;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -46,7 +58,7 @@ export function EditSiteForm({ site }: { site: Site }) {
     if (result.success && result.site) {
       // Refresh the local cache so the new address is visible at once.
       await db.sites.put(result.site);
-      router.push(back);
+      router.push(dest);
       return;
     }
 
@@ -74,7 +86,7 @@ export function EditSiteForm({ site }: { site: Site }) {
 
       <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
         <Link
-          href={back}
+          href={dest}
           className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
         >
           Cancel

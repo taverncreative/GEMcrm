@@ -54,7 +54,9 @@ type CustomerDocFields = Pick<
   "email" | "address_line_1" | "town" | "postcode"
 >;
 
-function isBlank(value: string | null | undefined): boolean {
+/** True for null/undefined/whitespace-only. Shared with the
+ *  service-sheet readiness rule. */
+export function isBlank(value: string | null | undefined): boolean {
   return !value || value.trim() === "";
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import Link from "next/link";
 import { db } from "@/lib/db";
@@ -20,6 +20,9 @@ import type { Site } from "@/types/database";
 export default function EditSitePage() {
   const params = useParams<{ id: string }>();
   const id = typeof params.id === "string" ? params.id : "";
+  // Optional round-trip target (e.g. the service-sheet gate). Validated in
+  // the form before any redirect.
+  const returnTo = useSearchParams().get("returnTo");
 
   const site = useLiveQuery<Site | null>(
     async () => {
@@ -61,7 +64,7 @@ export default function EditSitePage() {
     <div>
       <h1 className="text-2xl font-semibold text-gray-900">Edit site</h1>
       <div className="mt-6 max-w-lg rounded-xl bg-white p-6 shadow-sm">
-        <EditSiteForm site={site} />
+        <EditSiteForm site={site} returnTo={returnTo} />
       </div>
     </div>
   );
