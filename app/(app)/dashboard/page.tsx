@@ -81,7 +81,11 @@ async function DashboardWidgets() {
     calendarTasks,
   ] = await Promise.all([
     getJobsToday(),
-    getUpcomingJobs(5),
+    // Upcoming visits is now a single internally-scrolling list (not a
+    // 5-cap), so fetch a bounded-high planning horizon. 500 covers Nate's
+    // hundreds-of-bookings route planning while keeping the RSC payload
+    // bounded — tune if booking volume ever pushes past it.
+    getUpcomingJobs(500),
     getRecentJobs(5),
     getRecentCustomers(5),
     getTasksDueToday(),

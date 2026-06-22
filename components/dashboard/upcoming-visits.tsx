@@ -51,13 +51,8 @@ const BAR: Record<NonNullable<DueTone>, { cls: string; title: string }> = {
 export function UpcomingVisits({ jobs }: UpcomingVisitsProps) {
   return (
     <section className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-      <div className="mb-4 flex items-baseline justify-between">
+      <div className="mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Upcoming visits</h2>
-        {jobs.length > 0 && (
-          <span className="text-xs font-medium text-gray-400">
-            Next {jobs.length}
-          </span>
-        )}
       </div>
 
       {jobs.length === 0 ? (
@@ -71,7 +66,11 @@ export function UpcomingVisits({ jobs }: UpcomingVisitsProps) {
           </Link>
         </div>
       ) : (
-        <ul className="space-y-2">
+        // Single internally-scrolling list of ALL upcoming jobs (was a
+        // 5-cap): max-h shows ~7 rows and scrolls the rest, so the widget
+        // never grows the page at hundreds-of-bookings volume. `pr-1` keeps
+        // the scrollbar clear of the row content.
+        <ul className="max-h-96 space-y-2 overflow-y-auto pr-1">
           {jobs.map((job) => {
             const tone = dueTone(job.job_date);
             const bar = tone ? BAR[tone] : null;
