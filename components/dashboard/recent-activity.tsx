@@ -2,6 +2,7 @@ import { WidgetCard } from "./widget-card";
 import { ROUTES } from "@/lib/constants/routes";
 import type { JobWithContext } from "@/lib/data/jobs";
 import type { Customer } from "@/types/database";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import Link from "next/link";
 
 interface RecentActivityProps {
@@ -39,13 +40,13 @@ export function RecentActivity({
   const activities: ActivityItem[] = [
     ...recentJobs.map((job) => ({
       id: `job-${job.id}`,
-      description: `Job created for ${job.site.customer.name}`,
+      description: `Job created for ${customerDisplayName(job.site.customer)}`,
       href: ROUTES.jobDetail(job.id),
       time: new Date(job.created_at),
     })),
     ...recentCustomers.map((c) => ({
       id: `cust-${c.id}`,
-      description: `New customer: ${c.name}`,
+      description: `New customer: ${customerDisplayName(c)}`,
       href: ROUTES.customerDetail(c.id),
       time: new Date(c.created_at),
     })),

@@ -8,6 +8,7 @@ import { QuickBookingForm } from "@/components/jobs/quick-booking-form";
 import { AddAgreementForm } from "@/components/agreements/add-agreement-form";
 import { ROUTES } from "@/lib/constants/routes";
 import { CALL_TYPE_LABELS, AGREEMENT_STATUS_LABELS, AGREEMENT_STATUS_COLORS } from "@/lib/constants/job-labels";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 
 interface SiteDetailPageProps {
@@ -96,11 +97,11 @@ export default async function SiteDetailPage({ params }: SiteDetailPageProps) {
                 href={ROUTES.customerDetail(customer.id)}
                 className="text-sm font-medium text-gray-900 hover:underline"
               >
-                {customer.name}
+                {customerDisplayName(customer)}
               </Link>
-              {customer.company_name && (
+              {customerDisplayName(customer) !== customer.name && (
                 <p className="mt-0.5 text-sm text-gray-500">
-                  {customer.company_name}
+                  {customer.name}
                 </p>
               )}
             </SectionCard>

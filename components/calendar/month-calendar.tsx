@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ROUTES } from "@/lib/constants/routes";
 import { JOB_STATUS_COLORS } from "@/lib/constants/job-labels";
 import { formatAddress } from "@/lib/utils/format-address";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import type { JobWithContext } from "@/lib/data/jobs";
 import type { JobStatus, Task } from "@/types/database";
 
@@ -199,13 +200,13 @@ export function MonthCalendar({ year, month, jobs, tasks }: MonthCalendarProps) 
                       key={job.id}
                       href={ROUTES.jobDetail(job.id)}
                       className={`flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[11px] font-medium hover:opacity-80 ${iconClass}`}
-                      title={`${job.site.customer.name} — ${formatAddress(job.site)}${serviceSheetMissing ? " · service sheet not filled" : ""}`}
+                      title={`${customerDisplayName(job.site.customer)} — ${formatAddress(job.site)}${serviceSheetMissing ? " · service sheet not filled" : ""}`}
                     >
                       <span aria-hidden="true" className="font-bold">
                         {icon}
                       </span>
                       <span className="truncate">
-                        {job.site.customer.name}
+                        {customerDisplayName(job.site.customer)}
                       </span>
                     </Link>
                   );

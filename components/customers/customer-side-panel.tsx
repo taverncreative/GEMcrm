@@ -63,6 +63,7 @@ import { AddSiteForm } from "@/components/sites/add-site-form";
 import { InvoiceCreatorModal } from "@/components/invoices/invoice-creator-modal";
 import { DeleteCustomerConfirm } from "@/components/customers/delete-customer-confirm";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { ROUTES } from "@/lib/constants/routes";
 import {
   CALL_TYPE_LABELS,
@@ -331,7 +332,7 @@ export function CustomerSidePanel({
               <>
                 <div className="flex items-center gap-2">
                   <h2 className="truncate text-lg font-semibold text-gray-900">
-                    {detail.name}
+                    {customerDisplayName(detail)}
                   </h2>
                   {/* SyncStatePill — visual parity with Surfaces 1 + 2.
                       Sits next to the customer name so the operator's
@@ -339,9 +340,12 @@ export function CustomerSidePanel({
                       who they're working with. */}
                   <SyncStatePill />
                 </div>
-                {detail.company_name && (
+                {/* Headline is the company when set → show the contact name
+                    beneath it. Domestic (no company) headlines the name and
+                    needs no secondary line. */}
+                {customerDisplayName(detail) !== detail.name && (
                   <p className="truncate text-sm text-gray-500">
-                    {detail.company_name}
+                    {detail.name}
                   </p>
                 )}
               </>

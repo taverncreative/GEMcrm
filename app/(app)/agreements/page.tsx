@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getAllAgreements } from "@/lib/data/agreements";
 import { formatAddress } from "@/lib/utils/format-address";
 import { ROUTES } from "@/lib/constants/routes";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import {
   AGREEMENT_STATUS_LABELS,
   AGREEMENT_STATUS_COLORS,
@@ -95,11 +96,12 @@ async function AgreementsTable({
                     href={`${ROUTES.AGREEMENTS}/${agreement.id}`}
                     className="font-medium text-gray-900 hover:underline"
                   >
-                    {agreement.customer.name}
+                    {customerDisplayName(agreement.customer)}
                   </Link>
-                  {agreement.customer.company_name && (
+                  {customerDisplayName(agreement.customer) !==
+                    agreement.customer.name && (
                     <div className="text-xs text-gray-400">
-                      {agreement.customer.company_name}
+                      {agreement.customer.name}
                     </div>
                   )}
                 </td>

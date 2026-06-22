@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ROUTES } from "@/lib/constants/routes";
 import type { JobWithContext } from "@/lib/data/jobs";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 
 interface ServiceSheetsToFillProps {
   jobs: JobWithContext[];
@@ -44,7 +45,7 @@ export function ServiceSheetsToFill({ jobs }: ServiceSheetsToFillProps) {
               className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 px-3 py-2.5 transition-colors hover:bg-gray-50"
             >
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">
-                {job.site.customer.name}
+                {customerDisplayName(job.site.customer)}
               </span>
               <ChevronRight />
             </Link>

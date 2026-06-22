@@ -18,6 +18,7 @@ import {
 } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
 import { newId } from "@/lib/utils/id";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { TimeWindowPicker } from "@/components/ui/time-window-picker";
 import type { ActionState } from "@/types/actions";
 import type { Customer, CustomerType, Job, Site } from "@/types/database";
@@ -692,11 +693,12 @@ export function BookingModal({
                 <div className="flex items-center justify-between rounded-lg border border-brand bg-brand-soft px-3 py-2">
                   <div>
                     <p className="text-sm font-medium text-brand-darker">
-                      {selectedCustomer.name}
+                      {customerDisplayName(selectedCustomer)}
                     </p>
-                    {selectedCustomer.company_name && (
+                    {customerDisplayName(selectedCustomer) !==
+                      selectedCustomer.name && (
                       <p className="text-xs text-brand-darker">
-                        {selectedCustomer.company_name}
+                        {selectedCustomer.name}
                       </p>
                     )}
                   </div>
@@ -747,15 +749,15 @@ export function BookingModal({
                               className="flex w-full items-center gap-3 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50"
                             >
                               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand-darker">
-                                {c.name.charAt(0).toUpperCase()}
+                                {customerDisplayName(c).charAt(0).toUpperCase()}
                               </div>
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-medium text-gray-900">
-                                  {c.name}
+                                  {customerDisplayName(c)}
                                 </p>
-                                {c.company_name && (
+                                {customerDisplayName(c) !== c.name && (
                                   <p className="truncate text-xs text-gray-500">
-                                    {c.company_name}
+                                    {c.name}
                                   </p>
                                 )}
                               </div>

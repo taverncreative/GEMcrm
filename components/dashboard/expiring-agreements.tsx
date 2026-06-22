@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ROUTES } from "@/lib/constants/routes";
 import type { AgreementWithContext } from "@/lib/data/agreements";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 
 interface ExpiringAgreementsProps {
   agreements: AgreementWithContext[];
@@ -72,7 +73,9 @@ export function ExpiringAgreements({ agreements }: ExpiringAgreementsProps) {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-medium text-gray-900">
-                    {agreement.customer?.name ?? "Unknown"}
+                    {agreement.customer
+                      ? customerDisplayName(agreement.customer)
+                      : "Unknown"}
                   </span>
                   {badgeText && (
                     <span

@@ -20,6 +20,7 @@ import { searchCustomersAction } from "@/app/(app)/bookings/actions";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { buildInvoiceEmailDraft } from "@/lib/services/invoice-email";
 import { dateUkOffset } from "@/lib/utils/today-uk";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { BUSINESS } from "@/lib/constants/branding";
 import type { Customer, Invoice } from "@/types/database";
 import { wrapFormActionGracefully } from "@/lib/actions/graceful";
@@ -395,11 +396,12 @@ export function InvoiceCreatorModal({
                 <div className="mt-1 flex items-center justify-between rounded-lg border border-brand bg-brand-soft px-3 py-2">
                   <div>
                     <p className="text-sm font-medium text-brand-darker">
-                      {selectedCustomer.name}
+                      {customerDisplayName(selectedCustomer)}
                     </p>
-                    {selectedCustomer.company_name && (
+                    {customerDisplayName(selectedCustomer) !==
+                      selectedCustomer.name && (
                       <p className="text-xs text-brand-darker">
-                        {selectedCustomer.company_name}
+                        {selectedCustomer.name}
                       </p>
                     )}
                   </div>
@@ -440,11 +442,11 @@ export function InvoiceCreatorModal({
                           className="flex w-full items-center gap-3 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50"
                         >
                           <span className="text-sm font-medium text-gray-900">
-                            {c.name}
+                            {customerDisplayName(c)}
                           </span>
-                          {c.company_name && (
+                          {customerDisplayName(c) !== c.name && (
                             <span className="truncate text-xs text-gray-500">
-                              ({c.company_name})
+                              ({c.name})
                             </span>
                           )}
                         </button>

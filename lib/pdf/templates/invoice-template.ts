@@ -1,4 +1,5 @@
 import type { Customer, Invoice, Site } from "@/types/database";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { PDF_STYLES } from "./styles";
 import { renderDocHeader } from "./partials";
 import { BUSINESS } from "@/lib/constants/branding";
@@ -151,11 +152,11 @@ export function renderInvoiceHtml({
     <div class="section-title">Bill to</div>
     <div class="section-card">
       <div class="field">
-        <div class="field-value-large">${escape(customer.name)}</div>
+        <div class="field-value-large">${escape(customerDisplayName(customer))}</div>
       </div>
-      ${customer.company_name ? `
+      ${customerDisplayName(customer) !== customer.name ? `
       <div class="field">
-        <div class="field-value">${escape(customer.company_name)}</div>
+        <div class="field-value">${escape(customer.name)}</div>
       </div>` : ""}
       ${billToAddress ? `
       <div class="field">

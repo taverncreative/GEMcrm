@@ -5,7 +5,7 @@ export interface DocumentItem {
   kind: "invoice" | "service_sheet" | "agreement";
   title: string;
   reference: string | null;
-  customer: { id: string; name: string } | null;
+  customer: { id: string; name: string; company_name: string | null } | null;
   url: string;
   date: string;
   /** Subtitle for the document, e.g. amount for an invoice. */
@@ -55,14 +55,14 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
   // there's a draft that needs the PDF re-generated.
   const { data: invoices } = await supabase
     .from("invoices")
-    .select("id, invoice_number, amount, pdf_url, created_at, customer:customers(id, name)")
+    .select("id, invoice_number, amount, pdf_url, created_at, customer:customers(id, name, company_name)")
     .order("created_at", { ascending: false })
     .limit(200);
 
   // Service reports — only those with a generated PDF.
   const { data: reports } = await supabase
     .from("reports")
-    .select("id, job_id, pdf_url, created_at, job:jobs(reference_number, job_date, site:sites(customer:customers(id, name)))")
+    .select("id, job_id, pdf_url, created_at, job:jobs(reference_number, job_date, site:sites(customer:customers(id, name, company_name)))")
     .not("pdf_url", "is", null)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -70,7 +70,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
   // Agreements — only those with a generated PDF.
   const { data: agreements } = await supabase
     .from("agreements")
-    .select("id, reference_number, contract_pdf_url, created_at, end_date, customer:customers(id, name)")
+    .select("id, reference_number, contract_pdf_url, created_at, end_date, customer:customers(id, name, company_name)")
     .not("contract_pdf_url", "is", null)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -88,7 +88,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
 
   for (const inv of invoices ?? []) {
     const cust = one(
-      (inv as unknown as { customer: Joined<{ id: string; name: string }> })
+      (inv as unknown as { customer: Joined<{ id: string; name: string; company_name: string | null }> })
         .customer
     );
     // Surface invoice metadata so the documents list can render
@@ -120,7 +120,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
         job: Joined<{
           reference_number: string | null;
           job_date: string;
-          site: Joined<{ customer: Joined<{ id: string; name: string }> }>;
+          site: Joined<{ customer: Joined<{ id: string; name: string; company_name: string | null }> }>;
         }>;
       }).job
     );
@@ -147,7 +147,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
 
   for (const a of agreements ?? []) {
     const cust = one(
-      (a as unknown as { customer: Joined<{ id: string; name: string }> })
+      (a as unknown as { customer: Joined<{ id: string; name: string; company_name: string | null }> })
         .customer
     );
     const endDate = (a as unknown as { end_date?: string | null }).end_date ?? null;

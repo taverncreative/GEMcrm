@@ -5,6 +5,7 @@ import { StartJobButton } from "@/components/jobs/start-job-button";
 import { ROUTES } from "@/lib/constants/routes";
 import { JOB_STATUS_LABELS } from "@/lib/constants/job-labels";
 import { formatAddress } from "@/lib/utils/format-address";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { dateUk } from "@/lib/utils/today-uk";
 import type { JobStatus } from "@/types/database";
 
@@ -200,7 +201,7 @@ export default async function CalendarPage({
                         })}
                       </p>
                       <p className="truncate text-xs text-gray-500">
-                        {job.site.customer.name} · {formatAddress(job.site)}
+                        {customerDisplayName(job.site.customer)} · {formatAddress(job.site)}
                       </p>
                     </Link>
                   </li>

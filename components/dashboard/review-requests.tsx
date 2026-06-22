@@ -9,6 +9,7 @@ import {
 import { buildReviewEmail } from "@/lib/services/review-email";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
 import type { ReviewCandidate } from "@/lib/data/reviews";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import type { CallType, Customer } from "@/types/database";
 
 interface ReviewRequestsProps {
@@ -91,7 +92,7 @@ export function ReviewRequests({ candidates }: ReviewRequestsProps) {
               {isConfirming ? (
                 <div>
                   <p className="text-sm text-gray-900">
-                    Don&apos;t ask {c.customer.name} again?
+                    Don&apos;t ask {customerDisplayName(c.customer)} again?
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
@@ -140,7 +141,7 @@ export function ReviewRequests({ candidates }: ReviewRequestsProps) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-gray-900">
-                      {c.customer.name}
+                      {customerDisplayName(c.customer)}
                     </p>
                     {c.lastJob && (
                       <p className="mt-0.5 truncate text-xs text-gray-500">

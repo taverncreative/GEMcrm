@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ROUTES } from "@/lib/constants/routes";
 import { CompleteTaskButton } from "@/components/dashboard/complete-task-button";
 import type { TaskWithCustomer } from "@/lib/data/tasks";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import type { TaskType } from "@/types/database";
 
 interface CustomersToContactProps {
@@ -52,7 +53,7 @@ export function CustomersToContact({ tasks }: CustomersToContactProps) {
                         href={ROUTES.customerDetail(task.customer.id)}
                         className="truncate text-sm font-medium text-gray-900 hover:underline"
                       >
-                        {task.customer.name}
+                        {customerDisplayName(task.customer)}
                       </Link>
                     )}
                   </div>

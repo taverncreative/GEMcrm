@@ -12,6 +12,7 @@ import {
 import { getCustomerDetailAction } from "@/app/(app)/customers/actions";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import type { DocumentItem } from "@/lib/data/documents";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 
 interface DocumentsListProps {
   items: DocumentItem[];
@@ -120,7 +121,7 @@ export function DocumentsList({ items }: DocumentsListProps) {
                         href={ROUTES.customerDetail(item.customer.id)}
                         className="hover:underline"
                       >
-                        {item.customer.name}
+                        {customerDisplayName(item.customer)}
                       </Link>
                     ) : (
                       <span className="text-gray-400">—</span>

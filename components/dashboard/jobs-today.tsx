@@ -2,6 +2,7 @@ import { WidgetCard } from "./widget-card";
 import { formatWindow } from "@/lib/utils/format-time";
 import { ROUTES } from "@/lib/constants/routes";
 import type { JobWithContext } from "@/lib/data/jobs";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import Link from "next/link";
 
 interface JobsTodayProps {
@@ -52,7 +53,7 @@ export function JobsToday({ jobs }: JobsTodayProps) {
                     </span>
                   )}
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">
-                    {job.site.customer.name}
+                    {customerDisplayName(job.site.customer)}
                   </span>
                 </Link>
               </li>

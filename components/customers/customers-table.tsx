@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CustomerSidePanel } from "@/components/customers/customer-side-panel";
 import { formatAddress } from "@/lib/utils/format-address";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
 import { ROUTES } from "@/lib/constants/routes";
 import { setReviewReceivedAction } from "@/app/(app)/customers/actions";
@@ -85,11 +86,16 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
           const upcoming = c.upcomingJob
             ? `Next ${formatDate(c.upcomingJob.job_date)}`
             : null;
-          const subtitle = isCommercial
-            ? c.company_name ?? null
-            : c.primarySite
-            ? formatAddress(c.primarySite)
-            : null;
+          const headline = customerDisplayName(c);
+          // Headline is the company when set; the contact name then drops to
+          // the secondary line. Domestic (no company) keeps name as headline
+          // and shows the address as before.
+          const subtitle =
+            headline !== c.name
+              ? c.name
+              : !isCommercial && c.primarySite
+              ? formatAddress(c.primarySite)
+              : null;
           return (
             <button
               key={c.id}
@@ -99,7 +105,7 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
             >
               <div className="flex items-start justify-between gap-2">
                 <span className="truncate text-base font-semibold text-gray-900">
-                  {c.name}
+                  {headline}
                 </span>
                 <span
                   className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
@@ -188,7 +194,6 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
               <tr className="border-b border-gray-100 text-xs font-medium uppercase tracking-wider text-gray-500">
                 <th className="whitespace-nowrap px-4 py-3">Name</th>
                 <th className="whitespace-nowrap px-4 py-3">Type</th>
-                <th className="whitespace-nowrap px-4 py-3">Company</th>
                 <th className="whitespace-nowrap px-4 py-3">Location</th>
                 <th className="whitespace-nowrap px-4 py-3 text-center">Jobs</th>
                 <th className="whitespace-nowrap px-4 py-3 text-center">
@@ -211,11 +216,6 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
             <tbody className="divide-y divide-gray-50">
               {rows.map((c) => {
                 const isCommercial = c.customer_type === "commercial";
-                // PMA column: positive pill if active, em-dash otherwise.
-                // PMAs are optional for any customer type — only a chase
-                // item once contracted work begins, so no "required" framing.
-                const companyCell =
-                  c.company_name ?? (isCommercial ? "—" : "N/A");
                 return (
                   <tr
                     key={c.id}
@@ -229,9 +229,18 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
                           e.stopPropagation();
                           setSelectedId(c.id);
                         }}
-                        className="text-left font-medium text-gray-900 hover:underline"
+                        className="block text-left hover:underline"
                       >
-                        {c.name}
+                        <span className="font-medium text-gray-900">
+                          {customerDisplayName(c)}
+                        </span>
+                        {/* Company is the headline → show the contact name
+                            beneath it. Only when a company is set. */}
+                        {customerDisplayName(c) !== c.name && (
+                          <span className="block text-xs font-normal text-gray-500">
+                            {c.name}
+                          </span>
+                        )}
                       </button>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
@@ -248,15 +257,6 @@ export function CustomersTable({ rows, query, typeFilter }: CustomersTableProps)
                           }`}
                         />
                         {isCommercial ? "Commercial" : "Domestic"}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-500">
-                      <span
-                        className={
-                          companyCell === "N/A" ? "text-gray-300" : ""
-                        }
-                      >
-                        {companyCell}
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-gray-500">

@@ -7,6 +7,7 @@ import {
 import { ROUTES } from "@/lib/constants/routes";
 import { formatAddress } from "@/lib/utils/format-address";
 import { todayUk } from "@/lib/utils/today-uk";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import {
   AGREEMENT_STATUS_LABELS,
   AGREEMENT_STATUS_COLORS,
@@ -100,10 +101,20 @@ export default async function AgreementDetailPage({
           </Link>
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">
-              {agreement.customer.name}
+              {customerDisplayName(agreement.customer)}
             </h1>
             <p className="text-sm text-gray-500">
-              {formatAddress(agreement.site) || "Agreement"}
+              {/* Headline is the company → keep the contact name on the
+                  secondary line alongside the site address. */}
+              {[
+                customerDisplayName(agreement.customer) !==
+                agreement.customer.name
+                  ? agreement.customer.name
+                  : null,
+                formatAddress(agreement.site) || null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "Agreement"}
             </p>
           </div>
         </div>
@@ -370,7 +381,7 @@ export default async function AgreementDetailPage({
                     href={ROUTES.customerDetail(agreement.customer.id)}
                     className="font-medium text-gray-900 hover:underline"
                   >
-                    {agreement.customer.name}
+                    {customerDisplayName(agreement.customer)}
                   </Link>
                 }
               />
