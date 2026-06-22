@@ -13,6 +13,7 @@ export const ROUTES = {
   AUTH_CALLBACK: "/auth/callback",
 
   customerDetail: (id: string) => `/customers/${id}` as const,
+  customerEdit: (id: string) => `/customers/${id}/edit` as const,
   siteDetail: (id: string) => `/sites/${id}` as const,
   jobDetail: (id: string) => `/jobs/${id}` as const,
 } as const;

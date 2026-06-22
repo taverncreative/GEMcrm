@@ -910,6 +910,34 @@ export function CustomerSidePanel({
                 />
               </Section>
 
+              {/* Edit — online-only (mirrors delete): updateCustomer is a
+                  plain server update with no offline outbox, so gate it on
+                  connectivity and send the operator to the edit page. */}
+              <div className="border-t border-gray-100 pt-5">
+                <button
+                  type="button"
+                  onClick={() => router.push(ROUTES.customerEdit(detail.id))}
+                  disabled={!online}
+                  title={online ? undefined : "Online required"}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-100 disabled:text-gray-400 disabled:hover:bg-white"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"
+                    />
+                  </svg>
+                  Edit customer
+                </button>
+              </div>
+
               {/* Danger zone — last thing in the scroll, separated visually.
                   deleteCustomerAction is multi-entity (cascades across
                   sites/jobs/agreements/tasks), so keep online-only

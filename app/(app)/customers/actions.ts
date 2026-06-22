@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { CustomerSchema } from "@/lib/validation/customer";
 import {
   createCustomer,
+  updateCustomer,
   setGoogleReviewReceived,
   updateCustomerType,
   updateCustomerEmail,
@@ -19,7 +20,7 @@ import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
 import type { CustomerDetail, DeleteImpact } from "@/lib/data/customers";
-import type { CustomerType } from "@/types/database";
+import type { Customer, CustomerType } from "@/types/database";
 
 export async function createCustomerAction(
   _prev: ActionState,
@@ -157,6 +158,73 @@ export async function createCustomerAction(
   revalidatePath(ROUTES.CUSTOMERS);
   revalidatePath(ROUTES.DASHBOARD);
   return { success: true, errors: {}, message: null };
+}
+
+/**
+ * Edit an existing customer. Online-only direct action (mirrors delete) —
+ * NOT the optimistic local-first path the create form uses. Same
+ * CustomerSchema validation as create, reused verbatim. Returns the updated
+ * row so the client can refresh its local (Dexie) cache immediately rather
+ * than wait for the next sync pull.
+ */
+export async function updateCustomerAction(
+  customerId: string,
+  formData: FormData
+): Promise<ActionState & { customer?: Customer }> {
+  await requireUser();
+  if (!customerId) {
+    return { success: false, errors: {}, message: "Missing customer id" };
+  }
+
+  // Same null→"" normalisation as createCustomerAction: hidden
+  // domestic-only fields arrive as null and the Zod optional strings
+  // reject null but accept "".
+  const str = (key: string): string =>
+    (formData.get(key) as string | null) ?? "";
+
+  const raw = {
+    name: str("name"),
+    company_name: str("company_name"),
+    position: str("position"),
+    email: str("email"),
+    phone: str("phone"),
+    mobile: str("mobile"),
+    address_line_1: str("address_line_1"),
+    address_line_2: str("address_line_2"),
+    town: str("town"),
+    county: str("county"),
+    postcode: str("postcode"),
+    website: str("website"),
+    notes: str("notes"),
+    annual_contract_value: str("annual_contract_value"),
+    customer_type: str("customer_type") || "commercial",
+  };
+
+  const result = CustomerSchema.safeParse(raw);
+  if (!result.success) {
+    const errors: Record<string, string> = {};
+    for (const issue of result.error.issues) {
+      const key = issue.path[0];
+      if (typeof key === "string") errors[key] = issue.message;
+    }
+    return { success: false, errors, message: "Please check the form for errors." };
+  }
+
+  let customer: Customer;
+  try {
+    customer = await updateCustomer(customerId, result.data);
+  } catch (err) {
+    return {
+      success: false,
+      errors: {},
+      message: err instanceof Error ? err.message : "Failed to update customer",
+    };
+  }
+
+  revalidatePath(ROUTES.CUSTOMERS);
+  revalidatePath(ROUTES.customerDetail(customerId));
+  revalidatePath(ROUTES.DASHBOARD);
+  return { success: true, errors: {}, message: null, customer };
 }
 
 // ─── Side-panel data fetch ───────────────────────────────────────────────

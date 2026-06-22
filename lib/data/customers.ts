@@ -304,6 +304,59 @@ export async function getDeleteImpact(
 }
 
 /**
+ * Edit an existing customer's fields — a plain `.update().eq("id")`, ONLINE
+ * ONLY (no RPC, no outbox). A normal field update never touches
+ * `deleted_at`, so the post-update RETURNING row still satisfies the SELECT
+ * policy `USING (deleted_at IS NULL)` and there is no 42501 catch-22 — the
+ * same reason {@link updateCustomerEmail} works in prod. Only soft-delete
+ * (which flips `deleted_at`) needs the SECURITY DEFINER RPC.
+ *
+ * Sites are NOT touched here — they're managed separately. Field
+ * normalisation mirrors {@link createCustomer} so an edit and a create
+ * write the same shapes. Returns the updated row so the caller can refresh
+ * the local (Dexie) cache without waiting for the next sync pull.
+ */
+export async function updateCustomer(
+  customerId: string,
+  input: CustomerInput
+): Promise<Customer> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("customers")
+    .update({
+      name: input.name.trim(),
+      company_name: emptyToNull(input.company_name),
+      email: emptyToNull(input.email),
+      phone: emptyToNull(input.phone),
+      mobile: emptyToNull(input.mobile),
+      position: emptyToNull(input.position),
+      address_line_1: emptyToNull(input.address_line_1),
+      address_line_2: emptyToNull(input.address_line_2),
+      town: emptyToNull(input.town),
+      county: emptyToNull(input.county),
+      postcode: emptyToNull(input.postcode)?.toUpperCase() ?? null,
+      website: emptyToNull(input.website),
+      notes: emptyToNull(input.notes),
+      annual_contract_value:
+        typeof input.annual_contract_value === "number"
+          ? input.annual_contract_value
+          : null,
+      customer_type: input.customer_type ?? "commercial",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", customerId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[updateCustomer]", error.code, error.message);
+    throw new Error(`Failed to update customer: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
  * L3: set a customer's email address (the inline "Add email" affordance
  * on the service-sheet flow). Normalised lowercase/trimmed; format is
  * validated in the action layer.
