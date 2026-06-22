@@ -5,6 +5,7 @@ import {
   getUpcomingJobs,
   getRecentJobs,
   getBookingsMissingServiceSheet,
+  getJobsReadyToInvoice,
 } from "@/lib/data/jobs";
 import { getJobsInRange, getTasksInRange } from "@/lib/data/calendar";
 import { getRecentCustomers } from "@/lib/data/customers";
@@ -20,6 +21,7 @@ import { getReviewRequestCandidates } from "@/lib/data/reviews";
 import { DailySummary } from "@/components/dashboard/daily-summary";
 import { OverdueTasks } from "@/components/dashboard/overdue-tasks";
 import { ServiceSheetsToFill } from "@/components/dashboard/service-sheets-to-fill";
+import { JobsToInvoice } from "@/components/dashboard/jobs-to-invoice";
 import { ExpiringAgreements } from "@/components/dashboard/expiring-agreements";
 import { JobsToday } from "@/components/dashboard/jobs-today";
 import { UpcomingVisits } from "@/components/dashboard/upcoming-visits";
@@ -69,6 +71,7 @@ async function DashboardWidgets() {
     tasksDue,
     overdueTasks,
     sheetsToFill,
+    jobsToInvoice,
     expiringAgreements,
     contactTasks,
     revenueStats,
@@ -84,6 +87,7 @@ async function DashboardWidgets() {
     getTasksDueToday(),
     getOverdueTasks(),
     getBookingsMissingServiceSheet(),
+    getJobsReadyToInvoice(),
     getExpiringAgreements(30),
     getCustomerContactTasks(5),
     getRevenueStats(),
@@ -167,6 +171,14 @@ async function DashboardWidgets() {
                 title="Service sheets to fill"
               >
                 <ServiceSheetsToFill jobs={sheetsToFill} />
+              </WidgetFrame>
+            ),
+          },
+          {
+            id: "jobs-to-invoice",
+            node: (
+              <WidgetFrame id="jobs-to-invoice" title="To invoice">
+                <JobsToInvoice jobs={jobsToInvoice} />
               </WidgetFrame>
             ),
           },

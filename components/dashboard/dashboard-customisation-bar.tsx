@@ -26,6 +26,7 @@ interface WidgetRegistryEntry {
 export const WIDGET_REGISTRY: ReadonlyArray<WidgetRegistryEntry> = [
   { id: "revenue-stats", title: "Revenue", desktopOnly: true },
   { id: "service-sheets-to-fill", title: "Service sheets to fill", desktopOnly: false },
+  { id: "jobs-to-invoice", title: "To invoice", desktopOnly: false },
   { id: "jobs-today", title: "Jobs today", desktopOnly: false },
   // "upcoming-visits" is intentionally absent: it's now a featured,
   // full-width section at the top of the dashboard (see dashboard/page.tsx),

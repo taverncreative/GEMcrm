@@ -689,6 +689,38 @@ export async function getBookingsMissingServiceSheet(
 }
 
 /**
+ * Completed jobs that haven't been invoiced yet — the "to invoice" billing
+ * reminder, one stage downstream of getBookingsMissingServiceSheet (sheet
+ * done → now bill it). This is the codebase's own definition of
+ * "invoiceable": `job_status = 'completed' AND is_invoiced = false` — the
+ * same condition the jobs-page selection (jobs/page.tsx) and the job-detail
+ * Create Invoice CTA use. `is_invoiced` is a best-effort flag, but
+ * double-billing is blocked by the `invoice_jobs` unique constraint, so a
+ * stale row here is harmless (a re-invoice attempt is rejected at the DB).
+ */
+export async function getJobsReadyToInvoice(
+  limit: number = 20
+): Promise<JobWithContext[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("*, site:sites!inner(*, customer:customers!inner(*))")
+    .eq("job_status", "completed")
+    .eq("is_invoiced", false)
+    .eq("is_archived", false)
+    .order("job_date", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    console.error("[getJobsReadyToInvoice]", error.code, error.message);
+    return [];
+  }
+
+  return (data ?? []) as unknown as JobWithContext[];
+}
+
+/**
  * Count non-archived, non-agreement jobs on a given site + date. Used by the
  * action layer to warn the user *before* they submit.
  */
