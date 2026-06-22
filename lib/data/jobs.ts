@@ -245,20 +245,25 @@ export async function getJobById(id: string): Promise<Job | null> {
 }
 
 /**
- * Soft-delete a job — sets `deleted_at = now()`. A direct update (not an
- * RPC like the customer one): the jobs RLS is `using(true) / with check(true)`,
- * so the self-hiding update isn't rejected the way customers' was. The job
- * row + its dependents (any invoice link, generated report, follow-up
- * children) are LEFT in place — soft delete doesn't cascade — but the job
- * stops surfacing everywhere the reads filter `deleted_at IS NULL` (the
- * server reads above + the Dexie reads).
+ * Soft-delete a job — sets `deleted_at = now()`. The job row + its
+ * dependents (any invoice link, generated report, follow-up children) are
+ * LEFT in place — soft delete doesn't cascade — but the job stops surfacing
+ * everywhere the reads filter `deleted_at IS NULL` (the server reads above +
+ * the Dexie reads).
+ *
+ * Goes through the soft_delete_job SECURITY DEFINER RPC (migration 038),
+ * NOT a direct `.update()`: the jobs SELECT policy's `USING (deleted_at IS
+ * NULL)` (migration 029) is enforced against the post-update row PostgREST
+ * returns, so the very update that sets deleted_at is rejected with 42501
+ * "new row violates row-level security policy for table jobs" for every
+ * authenticated user — the same gap migration 032 fixed for customers (the
+ * UPDATE policy is already `using(true) / with check(true)`, so it is NOT
+ * the gate). The RPC is the narrowest bypass — read policies stay
+ * untouched, deleted rows stay hidden.
  */
 export async function deleteJob(jobId: string): Promise<void> {
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("jobs")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", jobId);
+  const { error } = await supabase.rpc("soft_delete_job", { p_id: jobId });
   if (error) {
     console.error("[deleteJob]", error.code, error.message);
     throw new Error(`Failed to delete job: ${error.message}`);
