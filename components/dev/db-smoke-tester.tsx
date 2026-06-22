@@ -161,6 +161,22 @@ export function DbSmokeTester() {
     }
   }
 
+  /**
+   * Wipe local Dexie (incl. sync cursors) then hard-navigate to the app
+   * root — the next load boots with an EMPTY Dexie, exactly like a fresh
+   * install / iOS cold relaunch. The on-device repro for the cold-start
+   * gate: tap this, then watch the boot. No DevTools required.
+   */
+  async function handleResetAndRelaunch() {
+    setBusy(true);
+    try {
+      await wipeLocalDb();
+      window.location.href = "/";
+    } catch {
+      setBusy(false);
+    }
+  }
+
   async function handleDump() {
     setBusy(true);
     try {
@@ -245,6 +261,14 @@ export function DbSmokeTester() {
             className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
           >
             Wipe local DB
+          </button>
+          <button
+            type="button"
+            onClick={handleResetAndRelaunch}
+            disabled={busy}
+            className="rounded-lg border border-red-300 bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            Reset local data &amp; relaunch
           </button>
         </div>
         {diagnosticOutput && (

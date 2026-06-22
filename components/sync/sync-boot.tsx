@@ -59,6 +59,27 @@ const USER_ID_KEY = "current_user_id";
  */
 const BOOT_TIMEOUT_MS = 15_000;
 
+/**
+ * Grace window before the boot overlay is allowed to paint. On a warm
+ * launch the app reaches `appReady` (boot done + hydrated + core tables
+ * warm) in well under this, so the overlay never shows — the app just
+ * appears. Only a genuinely-cold/slow launch blows past it, and only then
+ * does the overlay paint and hold until ready. Keeps fast launches flash-
+ * free without re-opening the dead window (the residual exposure is at most
+ * this long, vs the multi-second window it replaces). 150–200ms is below a
+ * deliberate post-launch tap.
+ */
+const GRACE_MS = 180;
+
+/**
+ * Hard ceiling on the post-ready "warm the core tables" read so the gate can
+ * never hang on it. The DB is already open by this point (boot read
+ * sync_meta), so the reads resolve in a tick on any real device; this only
+ * exists so a pathological Dexie stall reveals the app (lists fall back to
+ * their own loading/empty state) instead of wedging behind the overlay.
+ */
+const CORE_WARM_TIMEOUT_MS = 5_000;
+
 function initialProgress(): InitialProgressState {
   return {
     customers: { state: "pending", count: 0 },
@@ -84,6 +105,73 @@ export function SyncBoot({ userId }: { userId: string }) {
   const [error, setError] = useState<string | null>(null);
   // Retry token forces the boot effect to re-run.
   const [retryToken, setRetryToken] = useState(0);
+
+  // ─── appReady: don't reveal the app until it GENUINELY works ──────
+  //
+  // The old gate lifted the overlay the moment boot reached "ready"
+  // (a fast sync_meta cursor check) — but that was BEFORE the client
+  // had finished hydrating the heavy shell/page and BEFORE the
+  // Dexie-backed lists had read their data. So the just-revealed app
+  // had a dead window: taps on the jobs list hit an empty/loading list,
+  // and the not-yet-wired "+" did nothing. `appReady` closes it: the
+  // overlay lifts only when ALL three hold.
+  //
+  //   1. bootState === "ready"  (boot done: user checked, cursors /
+  //      initial pull complete)
+  //   2. `mounted`              (post-hydration beacon: effects run
+  //      after the first commit, so this proves the client runtime is
+  //      live)
+  //   3. `coreTablesRead`       (the Dexie tables the landing lists
+  //      join on — customers/sites/jobs — have been read, so the
+  //      lists' useLiveQuery resolves with rows the instant the app
+  //      is revealed, not a beat later)
+  const [mounted, setMounted] = useState(false);
+  const [coreTablesRead, setCoreTablesRead] = useState(false);
+  // Grace gate: only paint the overlay once this is true (after GRACE_MS).
+  const [graceElapsed, setGraceElapsed] = useState(false);
+
+  const appReady =
+    bootState.kind === "ready" && mounted && coreTablesRead;
+
+  // Post-hydration beacon (#2). A bare mount effect — it can only run
+  // once React has hydrated this tree, so it's our "client is live" signal.
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Grace window. After GRACE_MS, allow the overlay to paint if we're
+  // still not ready. Warm launches reach appReady first → overlay never
+  // shows; cold/slow launches trip this → overlay shows and holds.
+  useEffect(() => {
+    const t = setTimeout(() => setGraceElapsed(true), GRACE_MS);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Warm the core tables once boot is ready (#3). Reads the same tables
+  // the landing lists join on so they resolve with rows on reveal. Capped
+  // by CORE_WARM_TIMEOUT_MS and try/catch'd so it can NEVER wedge the gate:
+  // a read failure or stall still flips coreTablesRead → the app reveals
+  // and the lists surface their own loading/empty/error state.
+  useEffect(() => {
+    if (bootState.kind !== "ready") return;
+    let cancelled = false;
+    const warm = Promise.all([
+      db.customers.toArray(),
+      db.sites.toArray(),
+      db.jobs.toArray(),
+    ]).then(() => undefined);
+    const timeout = new Promise<void>((resolve) =>
+      setTimeout(resolve, CORE_WARM_TIMEOUT_MS)
+    );
+    Promise.race([warm, timeout])
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setCoreTablesRead(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bootState.kind, retryToken]);
 
   // ─── Boot sequence ──────────────────────────────────────────────
   //
@@ -145,6 +233,8 @@ export function SyncBoot({ userId }: { userId: string }) {
       setBootState({ kind: "checking" });
       setError(null);
       setDisconnected(false);
+      // A retry re-runs boot — re-warm the core tables before revealing.
+      setCoreTablesRead(false);
 
       try {
         // 1. User-change detection
@@ -355,7 +445,17 @@ export function SyncBoot({ userId }: { userId: string }) {
   // error (Dexie blocked, watchdog trip, sync_meta probe throw)
   // shows immediately in the InitialSyncScreen with its retry
   // button.
-  if (bootState.kind === "ready") return null;
+  // Reveal the app only when it genuinely works (boot done + hydrated +
+  // core tables warm).
+  if (appReady) return null;
+  // Grace window: for the first GRACE_MS, don't paint the overlay — a warm
+  // launch reaches appReady inside this and reveals the app with no flash.
+  // An error/disconnect is surfaced immediately (it shouldn't wait out the
+  // grace), as is an in-progress initial/wiping sync (those are genuine
+  // not-ready states we want to show progress for).
+  const inProgress =
+    bootState.kind === "initial" || bootState.kind === "wiping";
+  if (!graceElapsed && !error && !disconnected && !inProgress) return null;
   return (
     <InitialSyncScreen
       progress={progress}

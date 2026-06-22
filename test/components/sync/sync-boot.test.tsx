@@ -80,7 +80,7 @@ afterEach(() => {
 // ─── (a) Steady-state boot reaches ready ──────────────────────────
 
 describe("SyncBoot — steady state", () => {
-  it("reaches 'ready' (overlay disappears) when user matches and cursors exist", async () => {
+  it("reveals the app (no overlay) when user matches and cursors exist", async () => {
     // Pre-seed sync_meta with the canonical "returning user" shape.
     await db.sync_meta.put({ key: "current_user_id", value: "u-1" });
     await db.sync_meta.put({
@@ -94,14 +94,18 @@ describe("SyncBoot — steady state", () => {
 
     render(<SyncBoot userId="u-1" />);
 
-    // First render: the overlay's initial-state dialog is on screen.
+    // Grace window: the overlay is NOT painted on the first render — a warm
+    // steady-state launch reveals the app with no loading-screen flash.
+    // (Previously the overlay showed during the brief "checking" phase.)
     expect(
       screen.queryByRole("dialog", { name: /initial sync/i })
-    ).toBeInTheDocument();
+    ).toBeNull();
 
-    // After the boot effect resolves, bootState flips to "ready" and
-    // the overlay returns null. Wrap in act+waitFor so React flushes
-    // the resolved promises before assertion.
+    // appReady = boot "ready" + the post-hydration mount beacon + the
+    // core-table warm read, all resolving. Once they do, the app is revealed
+    // and nothing is left on screen. (If the core-table warm never flipped
+    // coreTablesRead, the grace timer would paint the overlay and this
+    // assertion would fail — so a green here exercises the whole gate.)
     await act(async () => {
       await Promise.resolve();
     });
