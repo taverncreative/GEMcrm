@@ -1,6 +1,15 @@
 -- GemCRM Database Schema
 -- Single-company pest control CRM
 -- Run this in the Supabase SQL Editor
+--
+-- ⚠️  OUT OF DATE — DO NOT TRUST FOR RLS OR SCHEMA. This snapshot predates
+--     migration 029 (per-operation policies; the jobs/customers/etc. RLS here
+--     is still the old single `FOR ALL using(true)/with check(true)` policy)
+--     and every migration after it. It does NOT reflect the live database.
+--     The migrations (supabase/migrations/) + setup.sql are the live source
+--     of truth until the `000`-base reconcile lands (see CLAUDE.md "Standing
+--     notes"). Reading RLS off this file is how the soft_delete_job bug was
+--     misdiagnosed — don't repeat that.
 
 -- ============================================================
 -- TABLES
