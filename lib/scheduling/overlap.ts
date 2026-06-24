@@ -7,17 +7,18 @@
  * never participate, on either side — so the relaxed flow is untouched.
  *
  * Window semantics are HALF-OPEN, `[start, end)`:
+ *   - A booking with an explicit `job_time_end` uses its real window.
+ *   - A booking with a start but NO end is assumed to last
+ *     {@link DEFAULT_BOOKING_DURATION_MINUTES} minutes — its window is
+ *     `[job_time, job_time + default)`. So two bookings both starting 09:00
+ *     with no end DO clash (each is treated as 09:00–10:00), while 09:00
+ *     (no end) vs 10:30 does NOT (10:30 is outside the assumed hour). The
+ *     assumption lives ONLY here — `job_time_end` is never written back.
  *   - Two windows clash when their intervals overlap. Touching ends do NOT
  *     clash: a booking ending exactly when the next starts (end == start)
  *     is fine — no double-booking.
- *   - A timed booking with NO end is treated as a single instant. It
- *     clashes only when the OTHER booking's window strictly covers that
- *     instant (start <= instant < end). We do NOT invent a default slot
- *     length for it.
- *   - Two instants never clash, even at the exact same time — neither side
- *     carries a window to "cover" the other (a direct consequence of not
- *     inventing a slot length). [Flagged for John: if same-instant
- *     bookings should warn, that's a deliberate extension of this rule.]
+ *   - A start in the last hour of the day clamps its assumed end to
+ *     end-of-day rather than wrapping past midnight.
  *
  * Times are compared by parsing "HH:MM" / "HH:MM:SS" to seconds, so a row
  * stored as "09:00" (local create) and one as "09:00:00" (server
@@ -29,20 +30,31 @@
  * caller (findOverlappingBookingsLocal) feeds it same-day rows.
  */
 
+/**
+ * How long a timed booking with no explicit end is assumed to last, for
+ * clash detection only. Display/logic constant — never persisted to the
+ * row. Tune here if the assumed slot length should change.
+ */
+export const DEFAULT_BOOKING_DURATION_MINUTES = 60;
+
+/** Half-open upper bound of a day in seconds (24:00, exclusive). */
+const END_OF_DAY_SECONDS = 24 * 3600;
+
 /** The scheduling shape this rule reads off a booking / job row. */
 export interface BookingTimes {
   /** "YYYY-MM-DD". */
   job_date: string;
   /** Start clock time "HH:MM" or "HH:MM:SS". null = untimed (relaxed). */
   job_time: string | null;
-  /** Window end "HH:MM" / "HH:MM:SS". null (or <= start) = single instant. */
+  /** Window end "HH:MM" / "HH:MM:SS". null (or <= start) = no explicit end,
+   *  so the default-duration window is assumed. */
   job_time_end: string | null;
 }
 
-/** A resolved interval in seconds-since-midnight. `end === null` = instant. */
+/** A resolved half-open interval in seconds-since-midnight. */
 interface Interval {
   start: number;
-  end: number | null;
+  end: number;
 }
 
 /** "HH:MM" / "HH:MM:SS" → seconds since midnight; null if blank/invalid. */
@@ -58,34 +70,29 @@ function toSeconds(time: string | null): number | null {
 }
 
 /**
- * Map a booking to its interval, or null when it can't participate in a
- * clash (untimed / unparseable start). An end that isn't strictly after
- * the start collapses to an instant — covers the "end == start" zero-width
- * window and any malformed end.
+ * Map a booking to its half-open window, or null when it can't participate
+ * in a clash (untimed / unparseable start). An end that isn't strictly
+ * after the start (missing, equal, or malformed) falls back to the
+ * default-duration window, clamped to end-of-day so a late start doesn't
+ * wrap past midnight.
  */
 function toInterval(b: BookingTimes): Interval | null {
   const start = toSeconds(b.job_time);
   if (start === null) return null;
   const rawEnd = toSeconds(b.job_time_end);
-  const end = rawEnd !== null && rawEnd > start ? rawEnd : null;
+  const end =
+    rawEnd !== null && rawEnd > start
+      ? rawEnd
+      : Math.min(
+          start + DEFAULT_BOOKING_DURATION_MINUTES * 60,
+          END_OF_DAY_SECONDS
+        );
   return { start, end };
 }
 
-/** Whether two resolved intervals clash under the half-open rule. */
+/** Whether two half-open windows overlap (touching ends do not). */
 function intervalsClash(a: Interval, b: Interval): boolean {
-  if (a.end !== null && b.end !== null) {
-    // Two windows: overlap iff each starts before the other ends.
-    return a.start < b.end && b.start < a.end;
-  }
-  if (a.end !== null && b.end === null) {
-    // a is a window, b an instant: window covers instant?
-    return a.start <= b.start && b.start < a.end;
-  }
-  if (a.end === null && b.end !== null) {
-    return b.start <= a.start && a.start < b.end;
-  }
-  // Two instants: no covering window on either side → never clash.
-  return false;
+  return a.start < b.end && b.start < a.end;
 }
 
 /**

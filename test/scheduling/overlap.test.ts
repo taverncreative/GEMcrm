@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   findClashingBookings,
+  DEFAULT_BOOKING_DURATION_MINUTES,
   type BookingTimes,
 } from "@/lib/scheduling/overlap";
 
 /**
  * The overlap rule (lib/scheduling/overlap). A clash needs both bookings
  * on the same job_date AND both timed; windows are half-open [start, end).
+ * A timed booking with no explicit end is assumed to last
+ * DEFAULT_BOOKING_DURATION_MINUTES (its window is [start, start + default)).
  *
  * Each test feeds one `candidate` plus a list of `existing` rows and
  * asserts exactly which existing rows come back. Rows carry an `id` so the
@@ -32,6 +35,11 @@ function ids(rows: Row[]): string[] {
 }
 
 describe("findClashingBookings", () => {
+  it("the default duration is one hour", () => {
+    expect(DEFAULT_BOOKING_DURATION_MINUTES).toBe(60);
+  });
+
+  // ─── Explicit-end windows: behave exactly as before ────────────────
   it("flags two overlapping windows on the same day", () => {
     const candidate = row("c", "10:00", "11:00");
     const existing = [row("a", "10:30", "11:30")];
@@ -57,45 +65,69 @@ describe("findClashingBookings", () => {
     expect(ids(findClashingBookings(candidate, existing))).toEqual(["a"]);
   });
 
-  it("flags an instant that falls INSIDE another booking's window", () => {
-    // candidate has no end → instant at 10:30, existing window covers it.
+  // ─── No-end bookings: assumed one-hour window ───────────────────────
+  it("CLASHES two bookings both at 09:00 with no end (each assumed 09:00–10:00)", () => {
+    // The headline change: under the old instant rule these did not clash.
+    const candidate = row("c", "09:00", null);
+    const existing = [row("a", "09:00", null)];
+    expect(ids(findClashingBookings(candidate, existing))).toEqual(["a"]);
+  });
+
+  it("does NOT clash 09:00 (no end) vs 10:30 (no end) — outside the assumed hour", () => {
+    // 09:00 → [09:00,10:00); 10:30 → [10:30,11:30). No overlap.
+    const candidate = row("c", "09:00", null);
+    const existing = [row("a", "10:30", null)];
+    expect(findClashingBookings(candidate, existing)).toEqual([]);
+  });
+
+  it("flags a no-end booking whose assumed hour overlaps an explicit window", () => {
+    // candidate 10:30 → [10:30,11:30); existing 10:00–11:00 overlaps it.
     const candidate = row("c", "10:30", null);
     const existing = [row("a", "10:00", "11:00")];
     expect(ids(findClashingBookings(candidate, existing))).toEqual(["a"]);
   });
 
-  it("flags an instant at the exact START of a window (start inclusive)", () => {
+  it("flags a no-end booking starting exactly at an explicit window's start", () => {
     const candidate = row("c", "10:00", null);
     const existing = [row("a", "10:00", "11:00")];
     expect(ids(findClashingBookings(candidate, existing))).toEqual(["a"]);
   });
 
-  it("does NOT flag an instant at the exact END of a window (end exclusive)", () => {
+  it("does NOT flag a no-end booking starting exactly at an explicit window's end", () => {
+    // candidate 11:00 → [11:00,12:00); existing [10:00,11:00). Touching → no.
     const candidate = row("c", "11:00", null);
     const existing = [row("a", "10:00", "11:00")];
     expect(findClashingBookings(candidate, existing)).toEqual([]);
   });
 
-  it("does NOT flag an instant OUTSIDE a window", () => {
+  it("does NOT flag a no-end booking starting outside an explicit window", () => {
     const candidate = row("c", "12:00", null);
     const existing = [row("a", "10:00", "11:00")];
     expect(findClashingBookings(candidate, existing)).toEqual([]);
   });
 
-  it("flags symmetrically: a window candidate covering an existing instant", () => {
+  it("flags symmetrically: an explicit window overlapping a no-end booking's hour", () => {
     const candidate = row("c", "10:00", "11:00");
     const existing = [row("a", "10:30", null)];
     expect(ids(findClashingBookings(candidate, existing))).toEqual(["a"]);
   });
 
-  it("does NOT flag two instants, even at the exact same time (no invented slot)", () => {
-    // Per spec: an instant clashes only with a covering WINDOW. Two
-    // zero-width instants never clash — flagged behaviour for John.
-    const candidate = row("c", "10:00", null);
-    const existing = [row("a", "10:00", null)];
+  // ─── Midnight clamp: a late start does not wrap past 24:00 ──────────
+  it("clamps a late no-end booking to end-of-day and still clashes nearby", () => {
+    // 23:30 → [23:30,24:00) (clamped, not 00:30); 23:45 → [23:45,24:00).
+    const candidate = row("c", "23:30", null);
+    const existing = [row("a", "23:45", null)];
+    expect(ids(findClashingBookings(candidate, existing))).toEqual(["a"]);
+  });
+
+  it("does NOT wrap past midnight: 23:30 (no end) vs 00:15 next morning", () => {
+    // If start+1h wrapped, [23:30,00:30) would falsely clash with 00:15.
+    const candidate = row("c", "23:30", null);
+    const existing = [row("a", "00:15", null)];
     expect(findClashingBookings(candidate, existing)).toEqual([]);
   });
 
+  // ─── Untimed / relaxed: never participates ─────────────────────────
   it("never clashes when the CANDIDATE is untimed (relaxed booking)", () => {
     const candidate = row("c", null, null);
     const existing = [row("a", "10:00", "11:00")];
@@ -108,6 +140,7 @@ describe("findClashingBookings", () => {
     expect(findClashingBookings(candidate, existing)).toEqual([]);
   });
 
+  // ─── Scoping / robustness ──────────────────────────────────────────
   it("does NOT flag an overlapping window on a DIFFERENT day", () => {
     const candidate = row("c", "10:00", "11:00", DAY);
     const existing = [row("a", "10:00", "11:00", OTHER_DAY)];
@@ -117,23 +150,32 @@ describe("findClashingBookings", () => {
   it("returns only the clashing subset from a mixed list", () => {
     const candidate = row("c", "10:00", "11:00");
     const existing = [
-      row("overlap", "10:30", "11:30"), // clashes
+      row("overlap", "10:30", "11:30"), // explicit window overlaps → yes
       row("touch", "11:00", "12:00"), // touches end → no
       row("untimed", null, null), // untimed → no
       row("otherday", "10:15", "10:45", OTHER_DAY), // wrong day → no
-      row("inside", "10:45", null), // instant inside → clashes
+      row("noend", "10:45", null), // [10:45,11:45) overlaps → yes
     ];
     expect(ids(findClashingBookings(candidate, existing)).sort()).toEqual(
-      ["inside", "overlap"].sort()
+      ["noend", "overlap"].sort()
     );
   });
 
-  it("treats end == start as an instant, not a zero-width window", () => {
-    // existing 'a' has end == start (10:00–10:00) → instant at 10:00.
-    // candidate window 09:00–10:00 is half-open, so 10:00 is NOT covered.
+  it("treats an explicit end == start as no real end (assumed hour)", () => {
+    // existing 'a' has end == start (10:00–10:00), no real window, so the
+    // assumed hour [10:00,11:00) applies. candidate 09:00–10:00 ends as the
+    // assumed window begins → touching → no clash.
     const candidate = row("c", "09:00", "10:00");
     const existing = [row("a", "10:00", "10:00")];
     expect(findClashingBookings(candidate, existing)).toEqual([]);
+  });
+
+  it("flags an explicit end == start whose assumed hour overlaps the candidate", () => {
+    // existing 10:00–10:00 → assumed [10:00,11:00); candidate 10:30–11:30
+    // overlaps it.
+    const candidate = row("c", "10:30", "11:30");
+    const existing = [row("a", "10:00", "10:00")];
+    expect(ids(findClashingBookings(candidate, existing))).toEqual(["a"]);
   });
 
   it("compares HH:MM and HH:MM:SS equivalently (no string-order bug)", () => {
