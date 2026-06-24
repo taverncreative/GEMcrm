@@ -6,6 +6,8 @@ import {
   searchCustomersLocal,
   getSitesForCustomerLocal,
   findClashingJobLocal,
+  findOverlappingBookingsLocal,
+  type BookingClash,
 } from "@/lib/db/lookups";
 import { CALL_TYPES } from "@/lib/validation/booking";
 import { CALL_TYPE_LABELS, COMMON_PESTS } from "@/lib/constants/job-labels";
@@ -351,6 +353,13 @@ export function BookingModal({
   // any server-returned errors for display.
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
 
+  // Non-blocking overlap warning (Nate Q3). When the time window clashes
+  // with another same-day timed booking, the first save surfaces this list
+  // instead of submitting; a second save (warning shown, unchanged)
+  // proceeds. Cleared whenever the date/window is edited so the next save
+  // re-checks. null = no warning currently shown.
+  const [clashWarning, setClashWarning] = useState<BookingClash[] | null>(null);
+
   const customerInputRef = useRef<HTMLInputElement>(null);
   const customerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOpenRef = useRef(false);
@@ -422,6 +431,7 @@ export function BookingModal({
     setSites([]);
     setSelectedPests([]);
     setClientErrors({});
+    setClashWarning(null);
     setNewSiteLine1("");
     setNewSiteLine2("");
     setNewSiteTown("");
@@ -572,6 +582,24 @@ export function BookingModal({
       }
     }
     setClientErrors({});
+    // Non-blocking overlap WARNING (Nate Q3): a TIMED booking whose window
+    // clashes with another same-day timed booking. Warn once — surface the
+    // conflict and stop — then let a second, unchanged save through. Editing
+    // the date/window clears `clashWarning`, so the next save re-checks. An
+    // untimed booking skips this entirely (no job_time), saving silently as
+    // today, so the relaxed flow is untouched.
+    if (jobTime && clashWarning === null) {
+      const clashes = await findOverlappingBookingsLocal({
+        job_date: jobDate,
+        job_time: jobTime,
+        job_time_end: jobTimeEnd || null,
+      });
+      if (clashes.length > 0) {
+        setClashWarning(clashes);
+        return;
+      }
+    }
+    setClashWarning(null);
     await action(formData);
   }
 
@@ -679,6 +707,32 @@ export function BookingModal({
           {state.message && !state.success && (
             <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-600">
               {state.message}
+            </div>
+          )}
+
+          {/* Non-blocking overlap warning — names the conflict(s) and lets
+              the operator save anyway (the submit button becomes "Save
+              anyway"). Mirrors the amber warn-and-proceed delete pattern. */}
+          {clashWarning && clashWarning.length > 0 && (
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <p className="font-medium">
+                Heads up — this time clashes with{" "}
+                {clashWarning.length === 1
+                  ? "another booking"
+                  : `${clashWarning.length} other bookings`}{" "}
+                that day:
+              </p>
+              <ul className="list-disc space-y-0.5 pl-5">
+                {clashWarning.map((c) => (
+                  <li key={c.id}>
+                    {c.customerName}
+                    {c.timeLabel ? ` at ${c.timeLabel}` : ""}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-amber-700">
+                You can still book it — tap “Save anyway” to go ahead.
+              </p>
             </div>
           )}
 
@@ -1005,7 +1059,10 @@ export function BookingModal({
                     id="bn-job_date"
                     type="date"
                     value={jobDate}
-                    onChange={(e) => setJobDate(e.target.value)}
+                    onChange={(e) => {
+                      setJobDate(e.target.value);
+                      setClashWarning(null);
+                    }}
                     required
                     className="block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand sm:max-w-xs"
                   />
@@ -1022,6 +1079,7 @@ export function BookingModal({
                     onChange={({ start, end }) => {
                       setJobTime(start);
                       setJobTimeEnd(end);
+                      setClashWarning(null);
                     }}
                   />
                 </div>
@@ -1123,7 +1181,11 @@ export function BookingModal({
               disabled={isPending}
               className="min-h-[44px] rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50 sm:min-h-0"
             >
-              {isPending ? "Saving…" : "Add Booking"}
+              {isPending
+                ? "Saving…"
+                : clashWarning
+                  ? "Save anyway"
+                  : "Add Booking"}
             </button>
           </div>
         </form>

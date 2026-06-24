@@ -1,4 +1,9 @@
 import { db } from "@/lib/db";
+import { customerDisplayName } from "@/lib/utils/customer-display-name";
+import {
+  findClashingBookings,
+  type BookingTimes,
+} from "@/lib/scheduling/overlap";
 import type { Customer, Job, Site } from "@/types/database";
 
 /**
@@ -100,4 +105,92 @@ export async function findClashingJobLocal(
       !j.deleted_at &&
       !j.agreement_id
   );
+}
+
+/** One same-day booking that clashes with the candidate's time window —
+ *  enough to NAME the conflict in the warning. */
+export interface BookingClash {
+  id: string;
+  /** Headline customer name, or a neutral fallback if the chain can't
+   *  resolve (e.g. a brand-new local site not yet linked). */
+  customerName: string;
+  /** Slot label for the copy: "10:00–11:00" or "10:00". */
+  timeLabel: string;
+}
+
+/** "HH:MM:SS" / "HH:MM" → "HH:MM"; blank → "". */
+function toHhMm(time: string | null): string {
+  if (!time) return "";
+  const m = /^(\d{1,2}):(\d{2})/.exec(time.trim());
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : time.trim();
+}
+
+/** "10:00–11:00" for a window, "10:00" for an instant, "" when untimed. */
+function formatSlot(start: string | null, end: string | null): string {
+  const s = toHhMm(start);
+  if (!s) return "";
+  const e = toHhMm(end);
+  return e && e !== s ? `${s}–${e}` : s;
+}
+
+async function resolveCustomerName(siteId: string | null): Promise<string> {
+  if (!siteId) return "another booking";
+  const site = await db.sites.get(siteId);
+  if (!site) return "another booking";
+  const customer = await db.customers.get(site.customer_id);
+  return customer ? customerDisplayName(customer) : "another booking";
+}
+
+/**
+ * Same-day TIMED bookings that clash with a candidate booking's window —
+ * the offline-first input to the non-blocking overlap WARNING on the New
+ * Booking modal (Nate Q3).
+ *
+ * Reads Dexie (so it works online AND offline, like findClashingJobLocal),
+ * scoped to the candidate's job_date via the standalone `job_date` index;
+ * keeps live (not archived / soft-deleted) jobs that have a start time,
+ * minus the booking being edited; then applies the pure half-open overlap
+ * rule (lib/scheduling/overlap). Each clash is resolved to a customer name
+ * + slot label so the warning can name what it conflicts with.
+ *
+ * Unlike findClashingJobLocal (a per-site duplicate guard), this spans ALL
+ * sites: it's the operator's own diary being double-booked, regardless of
+ * which customer each visit is for. Agreement-generated visits are included
+ * — a recurring visit at a clashing time still double-books the day.
+ *
+ * Untimed candidate (job_time null) → returns [] (no clash), so the relaxed
+ * flow never warns.
+ */
+export async function findOverlappingBookingsLocal(
+  candidate: BookingTimes,
+  excludeJobId?: string
+): Promise<BookingClash[]> {
+  if (!candidate.job_time || !candidate.job_date) return [];
+
+  const sameDay = await db.jobs
+    .where("job_date")
+    .equals(candidate.job_date)
+    .toArray();
+
+  const live = sameDay.filter(
+    (j) =>
+      j.id !== excludeJobId &&
+      !j.is_archived &&
+      !j.deleted_at &&
+      !!j.job_time
+  );
+
+  const clashes = findClashingBookings(candidate, live);
+
+  // Same-day timed jobs are few (a single operator's diary), so the
+  // per-row site→customer resolution is cheap.
+  const out: BookingClash[] = [];
+  for (const j of clashes) {
+    out.push({
+      id: j.id,
+      customerName: await resolveCustomerName(j.site_id),
+      timeLabel: formatSlot(j.job_time, j.job_time_end),
+    });
+  }
+  return out;
 }
