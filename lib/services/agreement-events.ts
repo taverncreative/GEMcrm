@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { dateUk } from "@/lib/utils/today-uk";
+import { agreementVisitDates } from "@/lib/services/agreement-schedule";
 import { newId } from "@/lib/utils/id";
 import type { Agreement } from "@/types/database";
 
@@ -23,12 +23,12 @@ async function hasJobsForAgreement(agreementId: string): Promise<boolean> {
 
 /**
  * Auto-generate scheduled jobs based on agreement frequency.
- * Uses month-based cadence: intervalMonths = floor(12 / frequency).
  *
- * Examples:
- *  12 visits/year → monthly (every 1 month)
- *   6 visits/year → every 2 months
- *   4 visits/year → quarterly (every 3 months)
+ * Visit dates come from agreementVisitDates (agreement-schedule.ts):
+ * an even spread across one year from start_date for ANY 1-52
+ * visits-per-year, month-anchored up to 12/yr and day-based above.
+ * (The old floor(12/frequency) interval bunched every non-divisor of
+ * 12 into consecutive months — 8/yr generated monthly visits.)
  *
  * Prevents duplicates: skips if jobs already exist for this agreement.
  * Only generates for active agreements.
@@ -42,24 +42,18 @@ export async function generateAgreementJobs(
   const exists = await hasJobsForAgreement(agreement.id);
   if (exists) return;
 
-  const frequency = agreement.visit_frequency;
-  const intervalMonths = Math.max(1, Math.floor(12 / frequency));
-
-  const jobs = [];
-  for (let i = 0; i < frequency; i++) {
-    const jobDate = new Date(agreement.start_date);
-    jobDate.setMonth(jobDate.getMonth() + intervalMonths * i);
-
-    jobs.push({
-      id: newId(),
-      site_id: agreement.site_id,
-      job_date: dateUk(jobDate),
-      call_type: "routine" as const,
-      pest_species: agreement.pest_species ?? [],
-      job_status: "scheduled" as const,
-      agreement_id: agreement.id,
-    });
-  }
+  const jobs = agreementVisitDates(
+    agreement.start_date,
+    agreement.visit_frequency
+  ).map((jobDate) => ({
+    id: newId(),
+    site_id: agreement.site_id,
+    job_date: jobDate,
+    call_type: "routine" as const,
+    pest_species: agreement.pest_species ?? [],
+    job_status: "scheduled" as const,
+    agreement_id: agreement.id,
+  }));
 
   if (jobs.length === 0) return;
 
