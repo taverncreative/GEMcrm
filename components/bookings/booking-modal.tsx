@@ -353,11 +353,10 @@ export function BookingModal({
   // any server-returned errors for display.
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
 
-  // Non-blocking overlap warning (Nate Q3). When the time window clashes
-  // with another same-day timed booking, the first save surfaces this list
-  // instead of submitting; a second save (warning shown, unchanged)
-  // proceeds. Cleared whenever the date/window is edited so the next save
-  // re-checks. null = no warning currently shown.
+  // Non-blocking overlap warning (Nate Q3). Recomputed LIVE by the
+  // debounced effect below whenever the date/window changes, so the operator
+  // sees the clash before ever tapping save. Display only — it never gates
+  // the submit. null = no warning currently shown.
   const [clashWarning, setClashWarning] = useState<BookingClash[] | null>(null);
 
   const customerInputRef = useRef<HTMLInputElement>(null);
@@ -491,6 +490,35 @@ export function BookingModal({
     onClose();
   }, [state.success, onClose]);
 
+  // Live overlap advisory (replaces the old first-save gate, which swallowed
+  // the first tap): recompute the clash list as the date/window changes so
+  // the amber banner + "Save anyway" label are already showing when the
+  // operator reaches for save. Debounced so mid-typing states don't hammer
+  // Dexie; `cancelled` discards a stale read that resolves after the deps
+  // have moved on. An untimed booking clears the warning and skips the read.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (!jobTime) {
+        setClashWarning(null);
+        return;
+      }
+      void findOverlappingBookingsLocal({
+        job_date: jobDate,
+        job_time: jobTime,
+        job_time_end: jobTimeEnd || null,
+      }).then((clashes) => {
+        if (cancelled) return;
+        setClashWarning(clashes.length > 0 ? clashes : null);
+      });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, jobDate, jobTime, jobTimeEnd]);
+
   const runCustomerSearch = useCallback((v: string) => {
     setCustomerQuery(v);
     if (customerDebounceRef.current) {
@@ -582,24 +610,9 @@ export function BookingModal({
       }
     }
     setClientErrors({});
-    // Non-blocking overlap WARNING (Nate Q3): a TIMED booking whose window
-    // clashes with another same-day timed booking. Warn once — surface the
-    // conflict and stop — then let a second, unchanged save through. Editing
-    // the date/window clears `clashWarning`, so the next save re-checks. An
-    // untimed booking skips this entirely (no job_time), saving silently as
-    // today, so the relaxed flow is untouched.
-    if (jobTime && clashWarning === null) {
-      const clashes = await findOverlappingBookingsLocal({
-        job_date: jobDate,
-        job_time: jobTime,
-        job_time_end: jobTimeEnd || null,
-      });
-      if (clashes.length > 0) {
-        setClashWarning(clashes);
-        return;
-      }
-    }
-    setClashWarning(null);
+    // The overlap WARNING (Nate Q3) is advisory only — the live effect above
+    // keeps it current, the banner + "Save anyway" label have already told
+    // the operator, and the save always proceeds in one tap.
     await action(formData);
   }
 
@@ -1059,10 +1072,7 @@ export function BookingModal({
                     id="bn-job_date"
                     type="date"
                     value={jobDate}
-                    onChange={(e) => {
-                      setJobDate(e.target.value);
-                      setClashWarning(null);
-                    }}
+                    onChange={(e) => setJobDate(e.target.value)}
                     required
                     className="block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand sm:max-w-xs"
                   />
@@ -1079,7 +1089,6 @@ export function BookingModal({
                     onChange={({ start, end }) => {
                       setJobTime(start);
                       setJobTimeEnd(end);
-                      setClashWarning(null);
                     }}
                   />
                 </div>
