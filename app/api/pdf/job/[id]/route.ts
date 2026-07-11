@@ -3,11 +3,15 @@ import { getSiteById } from "@/lib/data/sites";
 import { getCustomerById } from "@/lib/data/customers";
 import { renderJobReportHtml } from "@/lib/pdf/templates/job-report-template";
 import { htmlToPdf } from "@/lib/pdf/html-to-pdf";
+import { requireUser } from "@/lib/auth/require-user";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Renders a PII PDF (customer name, address, findings, signatures); gate at
+  // the route, not just the edge middleware. Matches reports/export/route.ts.
+  await requireUser();
   const { id } = await params;
 
   const job = await getJobById(id);

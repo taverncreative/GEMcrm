@@ -668,6 +668,40 @@ grant execute on function public.soft_delete_customer(uuid) to authenticated;
 
 
 -- ============================================================
+-- 038: soft_delete_job SECURITY DEFINER RPC
+-- ============================================================
+-- Jobs share the identical RLS gap the 032 header anticipated: the
+-- SELECT policy's USING (deleted_at IS NULL) is enforced against the
+-- post-update row, so a plain deleted_at update is rejected (42501).
+-- Same narrowest bypass as soft_delete_customer. Kept here (not just in
+-- migration 038) so a local rebuild from setup.sql matches prod — the
+-- job Delete button calls this RPC and 500s (PGRST202) without it.
+-- See supabase/migrations/038_soft_delete_job_rpc.sql.
+
+create or replace function public.soft_delete_job(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'soft_delete_job: not authenticated';
+  end if;
+
+  update public.jobs
+     set deleted_at = now()
+   where id = p_id
+     and deleted_at is null;
+end;
+$$;
+
+revoke all on function public.soft_delete_job(uuid) from public;
+revoke all on function public.soft_delete_job(uuid) from anon;
+grant execute on function public.soft_delete_job(uuid) to authenticated;
+
+
+-- ============================================================
 -- 033: report-email truth on jobs (L3)
 -- ============================================================
 -- Written server-side only when a report email actually SENDS

@@ -199,7 +199,7 @@ export function useLocalFirstAction<TState, TInput>(
   initialState: Awaited<TState>,
   meta: WrapMeta<TInput>,
   opts?: LocalFirstOptions<Awaited<TState>, TInput>
-): [Awaited<TState>, (formData: FormData) => Promise<void>, boolean] {
+): [Awaited<TState>, (formData: FormData) => Promise<void>, boolean, () => void] {
   // Manually own state + pending. We DELIBERATELY do NOT use
   // useActionState here, even though our return shape mimics it.
   //
@@ -335,7 +335,14 @@ export function useLocalFirstAction<TState, TInput>(
     [serverAction, meta, state, startTransition, opts]
   );
 
-  return [state, wrappedDispatch, isPending];
+  // Reset action state back to initial. The optimistic path never clears
+  // `success` on its own (a booking is "done" once it lands locally), so a
+  // modal that stays mounted across open/close must call this on each fresh
+  // open — otherwise `success` is sticky-true and the second save produces no
+  // false->true transition for the close effect to fire on.
+  const reset = useCallback(() => setState(initialState), [initialState]);
+
+  return [state, wrappedDispatch, isPending, reset];
 }
 
 // ─── Direct-call function wrapper ────────────────────────────────────

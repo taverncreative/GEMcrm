@@ -371,10 +371,19 @@ export function BookingModal({
   // is UNUSED at submit: this modal is on the optimistic path
   // (localSuccessState set), so the server is reached only via the outbox
   // registry keyed by meta.actionName — never this direct ref.
-  const [state, action, isPending] = useLocalFirstAction<
+  const [state, action, isPending, resetAction] = useLocalFirstAction<
     ActionState,
     BookingWrapInput
   >(createQuickBookingAction, initialState, bookingMeta, bookingLocalFirstOpts);
+
+  // H4: this modal stays mounted across open/close, and the local-first
+  // hook's `state.success` is sticky (never cleared after an optimistic
+  // save). Two coordinated pieces keep repeated New Booking working without a
+  // reload: (1) resetAction() on every fresh open (below) so each save is a
+  // clean false->true transition; (2) this ref so the close effect fires only
+  // on that transition — a stale sticky `success` (or a fresh onClose identity)
+  // on reopen can't re-slam the modal shut.
+  const prevSuccessRef = useRef(false);
 
   /** When a customer has no sites but the customer record itself has an
    *  address, swing the form into "new site" mode and pre-fill it from
@@ -424,6 +433,9 @@ export function BookingModal({
     // customer page) keeps "existing" and loads their sites.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSiteMode(presetCustomer ? "existing" : "new");
+    // H4: clear the sticky action state so this open starts from
+    // success:false and the next save is a real false->true transition.
+    resetAction();
     setCustomerQuery("");
     setSelectedCustomer(presetCustomer ?? null);
     setSelectedSite(presetSite ?? null);
@@ -468,7 +480,7 @@ export function BookingModal({
         }
       });
     }
-  }, [open, presetCustomer, presetSite]);
+  }, [open, presetCustomer, presetSite, resetAction]);
 
   // Close on successful submission — and that's it. The post-save NEVER
   // touches the network. router.refresh() used to live here, but it's the
@@ -486,8 +498,14 @@ export function BookingModal({
   // the dashboard-stale decision. Keeping the save fully connectivity-
   // independent is the whole point of the optimistic redesign.
   useEffect(() => {
-    if (!state.success) return;
-    onClose();
+    // Edge-triggered close: fire onClose only when success flips false->true
+    // (a fresh save), not on every render where it's still true. Combined with
+    // the resetAction() on open, this closes after each save yet leaves a
+    // reopened modal open even though onClose's identity changes per render.
+    if (state.success && !prevSuccessRef.current) {
+      onClose();
+    }
+    prevSuccessRef.current = state.success;
   }, [state.success, onClose]);
 
   // Live overlap advisory (replaces the old first-save gate, which swallowed

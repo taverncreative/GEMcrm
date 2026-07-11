@@ -3,11 +3,15 @@ import { getSiteById } from "@/lib/data/sites";
 import { getCustomerById } from "@/lib/data/customers";
 import { renderAgreementHtml } from "@/lib/pdf/templates/agreement-template";
 import { htmlToPdf } from "@/lib/pdf/html-to-pdf";
+import { requireUser } from "@/lib/auth/require-user";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Renders a PII PDF (names, address, signatures, contract value); gate at
+  // the route, not just the edge middleware. Matches reports/export/route.ts.
+  await requireUser();
   const { id } = await params;
 
   const agreement = await getAgreementById(id);
