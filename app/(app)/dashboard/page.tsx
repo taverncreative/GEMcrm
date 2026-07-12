@@ -24,6 +24,7 @@ import { ServiceSheetsToFill } from "@/components/dashboard/service-sheets-to-fi
 import { JobsToInvoice } from "@/components/dashboard/jobs-to-invoice";
 import { ExpiringAgreements } from "@/components/dashboard/expiring-agreements";
 import { JobsToday } from "@/components/dashboard/jobs-today";
+import { TasksDue } from "@/components/dashboard/tasks-due";
 import { UpcomingVisits } from "@/components/dashboard/upcoming-visits";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { CustomersToContact } from "@/components/dashboard/customers-to-contact";
@@ -191,6 +192,14 @@ async function DashboardWidgets() {
             node: (
               <WidgetFrame id="jobs-today" title="Jobs today">
                 <JobsToday jobs={todayJobs} />
+              </WidgetFrame>
+            ),
+          },
+          {
+            id: "tasks-due",
+            node: (
+              <WidgetFrame id="tasks-due" title="Tasks due today">
+                <TasksDue tasks={tasksDue} />
               </WidgetFrame>
             ),
           },

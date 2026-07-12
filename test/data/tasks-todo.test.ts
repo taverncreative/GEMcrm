@@ -95,7 +95,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: () => makeQuery() }),
 }));
 
-import { getOverdueTasks, createTask } from "@/lib/data/tasks";
+import { getOverdueTasks, getTasksDueToday, createTask } from "@/lib/data/tasks";
 
 beforeEach(() => {
   taskRows = [];
@@ -136,6 +136,50 @@ describe("getOverdueTasks — excludes 'todo'", () => {
       { id: "future", status: "pending", task_type: "follow_up", due_date: "2026-07-20", priority_order: 2 },
     ];
     expect(await getOverdueTasks()).toEqual([]);
+  });
+});
+
+describe("getTasksDueToday — INCLUDES 'todo' (unlike overdue)", () => {
+  beforeEach(() => {
+    // Mixed types + statuses + dates. today is mocked to 2026-07-12.
+    taskRows = [
+      { id: "d1", status: "pending", task_type: "todo", due_date: "2026-07-12", priority_order: 2, created_at: "2026-07-01T00:00:00Z" },
+      { id: "d2", status: "pending", task_type: "follow_up", due_date: "2026-07-12", priority_order: 3, created_at: "2026-07-02T00:00:00Z" },
+      { id: "d3", status: "pending", task_type: "general", due_date: "2026-07-12", priority_order: 2, created_at: "2026-07-03T00:00:00Z" },
+      // due tomorrow — must be excluded (due_date filter)
+      { id: "d4", status: "pending", task_type: "todo", due_date: "2026-07-13", priority_order: 2, created_at: "2026-07-04T00:00:00Z" },
+      // due today but already complete — must be excluded (status filter)
+      { id: "d5", status: "complete", task_type: "todo", due_date: "2026-07-12", priority_order: 2, created_at: "2026-07-05T00:00:00Z" },
+    ];
+  });
+
+  it("includes a 'todo' due today (todos belong on this card)", async () => {
+    const rows = await getTasksDueToday();
+    expect(rows.map((r) => r.id)).toContain("d1");
+  });
+
+  it("also includes follow-up and system tasks due today", async () => {
+    const rows = await getTasksDueToday();
+    expect(rows.map((r) => r.id)).toEqual(expect.arrayContaining(["d2", "d3"]));
+  });
+
+  it("returns every pending task due today regardless of type", async () => {
+    const rows = await getTasksDueToday();
+    expect(rows.map((r) => r.id).sort()).toEqual(["d1", "d2", "d3"]);
+  });
+
+  it("excludes tasks not due today, and completed tasks", async () => {
+    const rows = await getTasksDueToday();
+    expect(rows.map((r) => r.id)).not.toContain("d4"); // due tomorrow
+    expect(rows.map((r) => r.id)).not.toContain("d5"); // already complete
+  });
+
+  it("a lone 'todo' due today still surfaces (no todo-exclusion here)", async () => {
+    taskRows = [
+      { id: "only", status: "pending", task_type: "todo", due_date: "2026-07-12", priority_order: 2, created_at: "2026-07-01T00:00:00Z" },
+    ];
+    const rows = await getTasksDueToday();
+    expect(rows.map((r) => r.id)).toEqual(["only"]);
   });
 });
 

@@ -28,6 +28,7 @@ export const WIDGET_REGISTRY: ReadonlyArray<WidgetRegistryEntry> = [
   { id: "service-sheets-to-fill", title: "Service sheets to fill", desktopOnly: false },
   { id: "jobs-to-invoice", title: "To invoice", desktopOnly: false },
   { id: "jobs-today", title: "Jobs today", desktopOnly: false },
+  { id: "tasks-due", title: "Tasks due today", desktopOnly: false },
   // "upcoming-visits" is intentionally absent: it's now a featured,
   // full-width section at the top of the dashboard (see dashboard/page.tsx),
   // rendered outside the reorderable grid — so it's not customisable here.

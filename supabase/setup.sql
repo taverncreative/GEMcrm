@@ -154,9 +154,14 @@ create policy "Authenticated users full access" on reports for all to authentica
 -- ============================================================
 -- 004: Task type refinement
 -- ============================================================
+-- 'todo' is included here (not only in the 040 block at the tail) so this
+-- canonical schema stays idempotent over an EXISTING DB that already holds
+-- 'todo' rows: the rebuild applies setup.sql before truncating data, and a
+-- 4-value constraint would re-validate against those rows and fail. The 040
+-- block below re-affirms the same final set as the migration mirror.
 alter table tasks drop constraint if exists tasks_task_type_check;
 alter table tasks add constraint tasks_task_type_check
-  check (task_type in ('general', 'follow_up', 'review_request', 'contract_renewal'));
+  check (task_type in ('general', 'follow_up', 'review_request', 'contract_renewal', 'todo'));
 
 
 -- ============================================================
