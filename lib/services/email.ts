@@ -20,6 +20,37 @@
 import { Resend } from "resend";
 import type { Customer } from "@/types/database";
 import { BUSINESS } from "@/lib/constants/branding";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { storageObjectPath } from "@/lib/storage/asset-url";
+
+/**
+ * The reports bucket is private (H1), so a customer clicking a PDF link
+ * in an email is unauthenticated and can't hit the in-app proxy. Mint a
+ * 7-day Supabase signed URL for the object instead. If the reference
+ * isn't a reports-bucket object, or signing fails, fall back to the
+ * original value (a legacy link — dead when private, logged for
+ * visibility). 7 days by design: if it expires, Nate resends.
+ */
+const EMAIL_LINK_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+async function signedEmailLink(storedUrl: string): Promise<string> {
+  const path = storageObjectPath(storedUrl);
+  if (!path) return storedUrl;
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin.storage
+      .from("reports")
+      .createSignedUrl(path, EMAIL_LINK_TTL_SECONDS);
+    if (error || !data?.signedUrl) {
+      console.error("[signedEmailLink]", error?.message ?? "no signed URL");
+      return storedUrl;
+    }
+    return data.signedUrl;
+  } catch (err) {
+    console.error("[signedEmailLink]", err);
+    return storedUrl;
+  }
+}
 
 interface SendEmailInput {
   to: string;
@@ -135,10 +166,11 @@ export async function sendServiceReport(
   if (!customer.email) {
     return { success: false, error: "Customer has no email" };
   }
+  const link = await signedEmailLink(pdfUrl);
   return sendEmail({
     to: customer.email,
     subject: `${BUSINESS.name} – Your Service Report`,
-    html: serviceReportHtml(customer.name, pdfUrl),
+    html: serviceReportHtml(customer.name, link),
   });
 }
 
@@ -151,10 +183,11 @@ export async function sendAgreement(
   if (!customer.email) {
     return { success: false, error: "Customer has no email" };
   }
+  const link = await signedEmailLink(pdfUrl);
   return sendEmail({
     to: customer.email,
     subject: `${BUSINESS.name} – Your Pest Management Agreement`,
-    html: agreementHtml(customer.name, pdfUrl),
+    html: agreementHtml(customer.name, link),
   });
 }
 

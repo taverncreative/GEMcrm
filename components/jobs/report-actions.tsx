@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { generateReportAction } from "@/app/(app)/jobs/[id]/report/actions";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { INITIAL_ACTION_STATE } from "@/types/actions";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
 
 interface ReportActionsProps {
   jobId: string;
@@ -82,7 +83,7 @@ export function ReportActions({
 
       {pdfUrl && (
         <a
-          href={pdfUrl}
+          href={proxyAssetUrl(pdfUrl) ?? pdfUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="block w-full rounded-lg border border-gray-200 px-4 py-2.5 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"

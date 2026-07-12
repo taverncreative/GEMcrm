@@ -46,6 +46,7 @@ import {
   RISK_LEVEL_LABELS,
 } from "@/lib/constants/job-labels";
 import { ROUTES } from "@/lib/constants/routes";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
 
 interface ServiceSheetViewOnlyProps {
   job: Job;
@@ -155,7 +156,7 @@ function SignatureView({
               we use next/image for layout consistency with the form's
               photo previews. */}
           <Image
-            src={src}
+            src={proxyAssetUrl(src) ?? src}
             alt={label}
             width={320}
             height={120}
@@ -292,7 +293,7 @@ export function ServiceSheetViewOnly({
               >
                 <div className="relative aspect-square w-full">
                   <Image
-                    src={url}
+                    src={proxyAssetUrl(url) ?? url}
                     alt={`Photo ${idx + 1}`}
                     fill
                     sizes="(max-width: 768px) 50vw, 25vw"

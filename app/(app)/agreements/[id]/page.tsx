@@ -5,6 +5,7 @@ import {
   getJobsForAgreement,
 } from "@/lib/data/agreements";
 import { ROUTES } from "@/lib/constants/routes";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import { formatAddress } from "@/lib/utils/format-address";
 import { todayUk } from "@/lib/utils/today-uk";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
@@ -231,7 +232,7 @@ export default async function AgreementDetailPage({
                     <p className="text-xs text-gray-400">GEM Services</p>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={agreement.gem_signature_url}
+                      src={proxyAssetUrl(agreement.gem_signature_url) ?? agreement.gem_signature_url}
                       alt="GEM signature"
                       className="mt-1 h-20 rounded border border-gray-100 bg-white object-contain"
                     />
@@ -244,7 +245,7 @@ export default async function AgreementDetailPage({
                     </p>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={agreement.client_signature_url}
+                      src={proxyAssetUrl(agreement.client_signature_url) ?? agreement.client_signature_url}
                       alt="Client signature"
                       className="mt-1 h-20 rounded border border-gray-100 bg-white object-contain"
                     />
@@ -345,7 +346,7 @@ export default async function AgreementDetailPage({
           <SectionCard title="Documents">
             {agreement.contract_pdf_url ? (
               <a
-                href={agreement.contract_pdf_url}
+                href={proxyAssetUrl(agreement.contract_pdf_url) ?? agreement.contract_pdf_url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"

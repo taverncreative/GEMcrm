@@ -19,6 +19,7 @@ import {
 import { searchCustomersAction } from "@/app/(app)/bookings/actions";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { buildInvoiceEmailDraft } from "@/lib/services/invoice-email";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import { dateUkOffset } from "@/lib/utils/today-uk";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { BUSINESS } from "@/lib/constants/branding";
@@ -615,7 +616,7 @@ export function InvoiceCreatorModal({
               )}
               {draftInvoice.pdfUrl && (
                 <a
-                  href={draftInvoice.pdfUrl}
+                  href={proxyAssetUrl(draftInvoice.pdfUrl) ?? draftInvoice.pdfUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-2 inline-block text-xs font-medium text-brand-darker hover:text-brand-darker"

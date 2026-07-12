@@ -839,12 +839,20 @@ end $$;
 -- ============================================================
 -- Storage bucket: "reports" for signatures, photos, and PDFs
 -- ============================================================
+-- H1: PRIVATE bucket. It holds customer PII (service reports, signed
+-- agreements, invoices, site photos, signatures) — public-read exposed
+-- all of it to anyone with the URL. The app now streams objects through
+-- the auth-gated proxy (/api/storage/reports/[...path], service-role
+-- download); emailed customer links use short-lived signed URLs.
 insert into storage.buckets (id, name, public)
-  values ('reports', 'reports', true)
+  values ('reports', 'reports', false)
 on conflict (id) do nothing;
+-- Idempotent for an already-created bucket: force it private on re-run.
+update storage.buckets set public = false where id = 'reports';
 
--- Allow authenticated users to upload / update / delete files,
--- and anyone to read (public bucket, so emailed PDF links work).
+-- Authenticated users may upload / update / delete files. There is NO
+-- read policy: reads go through the service-role proxy (which bypasses
+-- RLS), so nothing public or anon-readable is granted.
 -- Drop-then-create keeps these idempotent across re-runs.
 drop policy if exists "Authenticated users can upload reports" on storage.objects;
 create policy "Authenticated users can upload reports"
@@ -865,8 +873,7 @@ create policy "Authenticated users can delete reports"
   to authenticated
   using (bucket_id = 'reports');
 
+-- H1: remove the old public read policy — the bucket is private now and
+-- all reads go through the service-role proxy. Left as a drop (no
+-- recreate) so a rebuild lands the private state.
 drop policy if exists "Anyone can read reports" on storage.objects;
-create policy "Anyone can read reports"
-  on storage.objects for select
-  to public
-  using (bucket_id = 'reports');

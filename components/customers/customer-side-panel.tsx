@@ -65,6 +65,7 @@ import { DeleteCustomerConfirm } from "@/components/customers/delete-customer-co
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { ROUTES } from "@/lib/constants/routes";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import {
   CALL_TYPE_LABELS,
   AGREEMENT_STATUS_LABELS,
@@ -1241,7 +1242,7 @@ function DocumentsContent({
       {agreementPdfs.map((a) => (
         <li key={a.id}>
           <a
-            href={a.contract_pdf_url!}
+            href={proxyAssetUrl(a.contract_pdf_url) ?? a.contract_pdf_url!}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 rounded-lg border border-gray-100 px-3 py-2 hover:bg-gray-50"

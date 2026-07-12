@@ -30,6 +30,7 @@ import { db } from "@/lib/db";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { getReportByJobIdAction } from "@/app/(app)/jobs/[id]/actions";
 import { ROUTES } from "@/lib/constants/routes";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import {
   CALL_TYPE_LABELS,
   RISK_LEVEL_LABELS,
@@ -178,14 +179,14 @@ function PhotosSection({ job }: { job: Job }) {
         {job.photo_urls.map((url, idx) => (
           <a
             key={`${url}-${idx}`}
-            href={url}
+            href={proxyAssetUrl(url) ?? url}
             target="_blank"
             rel="noopener noreferrer"
             className="block overflow-hidden rounded-lg border border-gray-200 bg-white"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={url}
+              src={proxyAssetUrl(url) ?? url}
               alt={`Photo ${idx + 1}`}
               className="aspect-square w-full object-cover"
             />
@@ -231,7 +232,7 @@ function SignaturesSection({ job }: { job: Job }) {
             <p className="text-xs text-gray-400">Technician</p>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={job.technician_signature_url}
+              src={proxyAssetUrl(job.technician_signature_url) ?? job.technician_signature_url}
               alt="Technician signature"
               className="mt-1 h-20 rounded border border-gray-100 bg-white object-contain"
             />
@@ -242,7 +243,7 @@ function SignaturesSection({ job }: { job: Job }) {
             <p className="text-xs text-gray-400">Client</p>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={job.client_signature_url}
+              src={proxyAssetUrl(job.client_signature_url) ?? job.client_signature_url}
               alt="Client signature"
               className="mt-1 h-20 rounded border border-gray-100 bg-white object-contain"
             />

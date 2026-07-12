@@ -16,6 +16,7 @@
  */
 
 import { FOOTER_BAND_ASPECT, FOOTER_BAND_DATA_URI } from "@/lib/pdf/footer-band";
+import { inlineStorageImages } from "@/lib/pdf/inline-storage-images";
 
 const IS_SERVERLESS = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 
@@ -87,14 +88,19 @@ async function launchBrowser() {
 }
 
 export async function htmlToPdf(html: string): Promise<Buffer> {
+  // H1: the reports bucket is private, so Puppeteer can't fetch embedded
+  // photo/signature URLs. Resolve them to base64 data URIs first — after
+  // this the HTML is fully self-contained and needs no network at render.
+  const inlinedHtml = await inlineStorageImages(html);
   const browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();
-    // `load` is enough for inline HTML — no remote network calls to wait
-    // on, and puppeteer-core's `setContent` types exclude the `networkidle*`
+    // `load` is enough for inline HTML — after inlineStorageImages every
+    // image is a data: URI, so there are no remote network calls to wait
+    // on. puppeteer-core's `setContent` types exclude the `networkidle*`
     // events since they don't apply meaningfully when there's no nav.
-    await page.setContent(html, { waitUntil: "load" });
+    await page.setContent(inlinedHtml, { waitUntil: "load" });
     // The brand font (Montserrat) is embedded as a base64 @font-face. Wait
     // for it to be fully parsed before printing, else the first PDF can
     // fall back to a system font (FOIT). No network — resolves immediately

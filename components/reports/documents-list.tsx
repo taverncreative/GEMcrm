@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ROUTES } from "@/lib/constants/routes";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import {
   markInvoicePaidAction,
   sendInvoiceFollowUpAction,
@@ -160,7 +161,7 @@ export function DocumentsList({ items }: DocumentsListProps) {
                       )}
                       {item.url ? (
                         <a
-                          href={item.url}
+                          href={proxyAssetUrl(item.url) ?? item.url}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
