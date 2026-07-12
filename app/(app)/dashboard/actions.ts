@@ -28,6 +28,10 @@ export async function completeTaskAction(
   }
 
   revalidatePath("/dashboard");
+  // The calendar (server-rendered) only shows pending tasks, so a
+  // completion must invalidate it too or a completed to-do/follow-up
+  // lingers on the grid until the next unrelated revalidation.
+  revalidatePath("/calendar");
   return { success: true, errors: {}, message: "Task completed" };
 }
 

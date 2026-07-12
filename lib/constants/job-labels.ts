@@ -58,6 +58,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   follow_up: "Follow-up",
   review_request: "Review Request",
   contract_renewal: "Contract Renewal",
+  todo: "To-do",
 };
 
 // Aligned with GEM Services Service Sheet JotForm.

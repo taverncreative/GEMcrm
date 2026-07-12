@@ -3,6 +3,7 @@ import { ROUTES } from "@/lib/constants/routes";
 import { JOB_STATUS_COLORS } from "@/lib/constants/job-labels";
 import { formatAddress } from "@/lib/utils/format-address";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
+import { CalendarTaskChip } from "@/components/calendar/calendar-task-chip";
 import type { JobWithContext } from "@/lib/data/jobs";
 import type { JobStatus, Task } from "@/types/database";
 
@@ -213,13 +214,7 @@ export function MonthCalendar({ year, month, jobs, tasks }: MonthCalendarProps) 
                 })}
                 {dayTasks.slice(0, Math.max(1, 3 - Math.min(dayJobs.length, 2))).map(
                   (task) => (
-                    <span
-                      key={task.id}
-                      className="block truncate rounded bg-purple-100 px-1.5 py-0.5 text-[11px] font-medium text-purple-700"
-                      title={task.title}
-                    >
-                      • {task.title}
-                    </span>
+                    <CalendarTaskChip key={task.id} task={task} />
                   )
                 )}
                 {totalItems > 3 && (

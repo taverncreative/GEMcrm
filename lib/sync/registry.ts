@@ -29,6 +29,7 @@
  */
 
 import { completeTaskAction } from "@/app/(app)/dashboard/actions";
+import { createTaskAction } from "@/app/(app)/tasks/actions";
 import { updateJobStatusAction } from "@/app/(app)/jobs/[id]/actions";
 import { updateAgreementStatusAction } from "@/app/(app)/agreements/[id]/actions";
 import {
@@ -72,6 +73,14 @@ export const REGISTRY: Record<string, RegistryEntry> = {
   completeTaskAction: {
     kind: "form",
     invoke: (fd) => completeTaskAction(INITIAL_FORM_STATE, fd),
+  },
+  // Manual to-do create (Tasks module v1). Replayed from the id-enriched
+  // args the wrapper persisted (id + title/due_date/notes), so the
+  // server row matches the locally-created one. Idempotent via
+  // createTask's upsert-on-id.
+  createTaskAction: {
+    kind: "form",
+    invoke: (fd) => createTaskAction(INITIAL_FORM_STATE, fd),
   },
 
   // ─── job ─────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getJobsInRange, getTasksInRange } from "@/lib/data/calendar";
 import { MonthCalendar } from "@/components/calendar/month-calendar";
 import { StartJobButton } from "@/components/jobs/start-job-button";
+import { NewTaskButton } from "@/components/tasks/new-task-button";
 import { ROUTES } from "@/lib/constants/routes";
 import { JOB_STATUS_LABELS } from "@/lib/constants/job-labels";
 import { formatAddress } from "@/lib/utils/format-address";
@@ -96,7 +97,10 @@ export default async function CalendarPage({
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
         </div>
-        <StartJobButton label="New Booking" />
+        <div className="flex items-center gap-2">
+          <NewTaskButton />
+          <StartJobButton label="New Booking" />
+        </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">

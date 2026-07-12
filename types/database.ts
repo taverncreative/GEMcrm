@@ -205,7 +205,16 @@ export interface Agreement {
 }
 
 export type TaskStatus = "pending" | "complete";
-export type TaskType = "general" | "follow_up" | "review_request" | "contract_renewal";
+export type TaskType =
+  | "general"
+  | "follow_up"
+  | "review_request"
+  | "contract_renewal"
+  // Manually-created personal to-do (Tasks module v1). Filtered OUT of
+  // the auto-follow-up customer surfaces (overdue + customers-to-contact)
+  // so personal to-dos never pollute them; shown on the calendar and in
+  // "Tasks Due Today".
+  | "todo";
 export type TaskPriority = "low" | "medium" | "high";
 
 export interface Task {
@@ -216,6 +225,9 @@ export interface Task {
   deleted_at: string | null;
   title: string;
   due_date: string | null;
+  /** Optional free-text, captured on the manual to-do create form
+   *  (migration 039). NULL for auto-created tasks and pre-039 rows. */
+  notes: string | null;
   status: TaskStatus;
   task_type: TaskType;
   priority: TaskPriority;

@@ -899,3 +899,24 @@ revoke delete, truncate on public.sites       from authenticated;
 revoke delete, truncate on public.jobs        from authenticated;
 revoke delete, truncate on public.agreements  from authenticated;
 revoke delete, truncate on public.tasks       from authenticated;
+
+
+-- ============================================================
+-- 040: manual to-do task type + optional notes on tasks
+-- ============================================================
+-- See supabase/migrations/040_task_todo_type_and_notes.sql for the full
+-- rationale. Tasks module v1, two additive changes:
+--   1. 'todo' joins the task_type CHECK. Existing rows keep their type, so
+--      the auto-follow-up widgets (overdue + customers-to-contact) that key
+--      off task_type are unchanged; new manual to-dos are written as 'todo'
+--      and filtered out of those surfaces.
+--   2. A nullable `notes` column backs the optional free-text on the manual
+--      create form. NULL for every existing row and every auto-created task.
+-- The default stays 'general', so any insert that omits task_type is
+-- unchanged. Constraint name matches migrations 004/014 so the
+-- drop-then-add cleanly replaces the live constraint.
+alter table tasks drop constraint if exists tasks_task_type_check;
+alter table tasks add constraint tasks_task_type_check
+  check (task_type in ('general', 'follow_up', 'review_request', 'contract_renewal', 'todo'));
+
+alter table tasks add column if not exists notes text;

@@ -10,8 +10,14 @@ const PRIORITY_TO_ORDER: Record<TaskPriority, number> = {
 };
 
 interface CreateTaskInput {
+  /** Client-generated UUID from the offline-first path (applyLocal wrote
+   *  this id locally; the outbox replay passes it so server == local).
+   *  Omitted by plain server-side callers (job-events, agreement-renewal)
+   *  → a fresh UUID is minted, behaving like an insert. */
+  id?: string;
   title: string;
   due_date?: string | null;
+  notes?: string | null;
   task_type?: TaskType;
   priority?: TaskPriority;
   related_job_id?: string | null;
@@ -55,10 +61,16 @@ export async function getOverdueTasks(
   const supabase = await createClient();
   const today = todayUk();
 
+  // Personal to-dos ('todo') are deliberately excluded — this is an
+  // auto-follow-up customer surface (the red "overdue tasks" alert), so a
+  // missed personal to-do must not raise a customer-follow-up alarm. They
+  // still live on the calendar and in "Tasks Due Today". ("Customers to
+  // contact" already excludes 'todo' via its task_type allowlist.)
   const { data, error } = await supabase
     .from("tasks")
     .select("*")
     .eq("status", "pending")
+    .neq("task_type", "todo")
     .lt("due_date", today)
     .order("priority_order", { ascending: false })
     .order("due_date", { ascending: true })
@@ -234,21 +246,29 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
   const supabase = await createClient();
   const priority = input.priority ?? "medium";
 
+  // upsert(onConflict:"id") makes a lost-ack outbox replay re-run
+  // idempotent (same client id → no duplicate row). Plain server callers
+  // omit `id` → a fresh UUID, so no conflict is possible and it behaves
+  // like an insert. Mirrors createCustomer / createBooking.
   const { data, error } = await supabase
     .from("tasks")
-    .insert({
-      id: newId(),
-      title: input.title,
-      due_date: input.due_date ?? null,
-      status: "pending",
-      task_type: input.task_type ?? "general",
-      priority,
-      priority_order: PRIORITY_TO_ORDER[priority],
-      related_job_id: input.related_job_id ?? null,
-      related_customer_id: input.related_customer_id ?? null,
-      agreement_id: input.agreement_id ?? null,
-      site_id: input.site_id ?? null,
-    })
+    .upsert(
+      {
+        id: input.id ?? newId(),
+        title: input.title,
+        due_date: input.due_date ?? null,
+        notes: input.notes ?? null,
+        status: "pending",
+        task_type: input.task_type ?? "general",
+        priority,
+        priority_order: PRIORITY_TO_ORDER[priority],
+        related_job_id: input.related_job_id ?? null,
+        related_customer_id: input.related_customer_id ?? null,
+        agreement_id: input.agreement_id ?? null,
+        site_id: input.site_id ?? null,
+      },
+      { onConflict: "id" }
+    )
     .select()
     .single();
 

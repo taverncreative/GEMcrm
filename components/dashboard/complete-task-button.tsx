@@ -5,18 +5,20 @@ import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
 import type { ActionState } from "@/types/actions";
 
-const initialState: ActionState = {
+export const completeTaskInitialState: ActionState = {
   success: false,
   errors: {},
   message: null,
 };
 
 // Wrapper metadata — defined at module level so the reference is stable
-// across renders (the hook's useCallback deps include `meta`).
-interface CompleteTaskInput {
+// across renders (the hook's useCallback deps include `meta`). Exported
+// so other surfaces (e.g. the calendar task modal) drive the identical
+// local-first completion without duplicating the Dexie write.
+export interface CompleteTaskInput {
   task_id: string;
 }
-const meta: WrapMeta<CompleteTaskInput> = {
+export const completeTaskMeta: WrapMeta<CompleteTaskInput> = {
   actionName: "completeTaskAction",
   entityType: "task",
   entityId: (input) => input.task_id,
@@ -39,8 +41,8 @@ const meta: WrapMeta<CompleteTaskInput> = {
 export function CompleteTaskButton({ taskId }: { taskId: string }) {
   const [state, action, isPending] = useLocalFirstAction(
     completeTaskAction,
-    initialState,
-    meta
+    completeTaskInitialState,
+    completeTaskMeta
   );
 
   if (state.success) {

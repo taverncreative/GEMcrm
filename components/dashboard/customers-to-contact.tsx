@@ -14,6 +14,9 @@ const TASK_TYPE_LABELS: Record<TaskType, string> = {
   follow_up: "Follow up",
   review_request: "Review request",
   contract_renewal: "Contract renewal",
+  // 'todo' never reaches this widget (getCustomerContactTasks allowlists
+  // review_request/follow_up/contract_renewal) — present for exhaustiveness.
+  todo: "To-do",
 };
 
 const TASK_TYPE_COLORS: Partial<Record<TaskType, string>> = {
