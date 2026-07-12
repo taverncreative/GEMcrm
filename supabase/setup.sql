@@ -877,3 +877,25 @@ create policy "Authenticated users can delete reports"
 -- all reads go through the service-role proxy. Left as a drop (no
 -- recreate) so a rebuild lands the private state.
 drop policy if exists "Anyone can read reports" on storage.objects;
+
+
+-- ============================================================
+-- 039: defence-in-depth grants (belt-and-braces; RLS is the real gate)
+-- ============================================================
+-- See supabase/migrations/039_defence_in_depth_grants.sql for the full
+-- rationale. Placed at the end so every table already exists.
+--
+-- M2: anon gets NO table access. RLS already blocks it (all policies are
+-- `to authenticated`); this removes the single-point-of-failure where an
+-- accidental RLS-disable would expose data to the public anon key.
+revoke all on all tables in schema public from anon;
+
+-- M1: authenticated cannot HARD-delete the five core tables — all deletes
+-- go through the soft_delete_<table> SECURITY DEFINER RPCs (UPDATE as
+-- owner, unaffected). invoices / invoice_jobs keep DELETE (invoice-create
+-- rollback issues a real delete on its own row).
+revoke delete, truncate on public.customers  from authenticated;
+revoke delete, truncate on public.sites       from authenticated;
+revoke delete, truncate on public.jobs        from authenticated;
+revoke delete, truncate on public.agreements  from authenticated;
+revoke delete, truncate on public.tasks       from authenticated;
