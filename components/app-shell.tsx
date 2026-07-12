@@ -6,6 +6,7 @@ import { Topbar } from "@/components/topbar";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { BottomNav } from "@/components/bottom-nav";
 import { SessionExpiredBanner } from "@/components/sync/session-expired-banner";
+import { StuckSyncAlert } from "@/components/sync/stuck-sync-alert";
 import { SyncBoot } from "@/components/sync/sync-boot";
 import { DocReadyProvider } from "@/components/documents/doc-ready-provider";
 
@@ -65,6 +66,11 @@ export function AppShell({
             401/403. Sits above the quick-actions bar so the operator
             sees it before they reach for any control. */}
         <SessionExpiredBanner />
+        {/* Active nudge for newly-stuck sync entries (H3) — persistent
+            banner (survives navigation until dismissed) + transient toast,
+            naming the record. The topbar red dot remains the ambient
+            signal after acknowledgement. */}
+        <StuckSyncAlert />
         {/* Persistent quick-actions bar — desktop only. On mobile the
             bottom tab bar's central "+ New" supersedes it, so we hide
             this bar below md to avoid a duplicate create affordance. */}
