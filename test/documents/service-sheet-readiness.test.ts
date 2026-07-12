@@ -100,4 +100,28 @@ describe("customerServiceSheetReadiness", () => {
       "site_address",
     ]);
   });
+
+  // ─── Customer-address fallback (feat: sheet prefill) ─────────────────
+
+  it("does NOT re-ask for a site address when the customer record has one (bare site)", () => {
+    const r = customerServiceSheetReadiness(
+      {
+        ...fullCustomer,
+        address_line_1: "22 Garden Lane",
+        town: "Testford",
+      },
+      { address_line_1: null, town: null }
+    );
+    expect(r.ready).toBe(true);
+    expect(r.missing).toEqual([]);
+  });
+
+  it("still blocks on site address when NEITHER the site nor the customer has one", () => {
+    const r = customerServiceSheetReadiness(fullCustomer, {
+      address_line_1: null,
+      town: null,
+    });
+    expect(r.ready).toBe(false);
+    expect(r.missing.map((f) => f.key)).toEqual(["site_address"]);
+  });
 });

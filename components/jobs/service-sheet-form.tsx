@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
 import { ROUTES } from "@/lib/constants/routes";
 import {
@@ -226,6 +227,13 @@ interface ServiceSheetFormProps {
   customerEmail?: string | null;
   customerPhone?: string | null;
   siteAddress?: string;
+  /** The sheet location was resolved from the customer's own address (the
+   *  job's site was bare), not the site itself — surfaces a "from customer
+   *  record" note + an edit affordance so the operator can make it
+   *  site-specific if needed. */
+  addressFromCustomer?: boolean;
+  /** The job's site id — drives the "edit location" link. */
+  siteId?: string;
   /** L2: "amend" edits an already-completed sheet — job_status is never
    *  touched, the review modal reads Save instead of Complete, and the
    *  email send is an explicit choice defaulting OFF. Default: "fill". */
@@ -288,6 +296,8 @@ function ServiceSheetFormBody({
   customerEmail,
   customerPhone,
   siteAddress,
+  addressFromCustomer = false,
+  siteId,
   mode = "fill",
   customerId,
   draft,
@@ -637,7 +647,24 @@ function ServiceSheetFormBody({
                 )}
               </p>
               {siteAddress && (
-                <p className="text-xs text-gray-500">{siteAddress}</p>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <p className="text-xs text-gray-500">{siteAddress}</p>
+                  {addressFromCustomer && (
+                    <span className="rounded bg-gray-200 px-1.5 py-px text-[10px] font-medium text-gray-500">
+                      from customer record
+                    </span>
+                  )}
+                  {siteId && (
+                    <Link
+                      href={`${ROUTES.siteEdit(siteId)}?returnTo=${encodeURIComponent(
+                        `${ROUTES.jobDetail(jobId)}/complete`
+                      )}`}
+                      className="text-[11px] font-medium text-brand-darker hover:underline"
+                    >
+                      Edit location
+                    </Link>
+                  )}
+                </div>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 sm:ml-auto">

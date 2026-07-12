@@ -47,6 +47,10 @@ import {
 } from "@/lib/constants/job-labels";
 import { ROUTES } from "@/lib/constants/routes";
 import { proxyAssetUrl } from "@/lib/storage/asset-url";
+import {
+  resolveSheetAddress,
+  formatSheetAddress,
+} from "@/lib/documents/resolve-sheet-address";
 
 interface ServiceSheetViewOnlyProps {
   job: Job;
@@ -183,9 +187,12 @@ export function ServiceSheetViewOnly({
   const riskLevelLabel = job.risk_level
     ? RISK_LEVEL_LABELS[job.risk_level as RiskLevel] ?? job.risk_level
     : "—";
-  const siteAddress = site
-    ? [site.address_line_1, site.town, site.postcode].filter(Boolean).join(", ")
-    : "";
+  // Falls back to the customer's own address when the site is bare — same
+  // resolution the fill sheet + PDF use, so a completed sheet never shows a
+  // blank Site line for a quick-add booking.
+  const siteAddress = formatSheetAddress(
+    resolveSheetAddress(site ?? null, customer ?? null)
+  );
 
   return (
     <div className="space-y-6">

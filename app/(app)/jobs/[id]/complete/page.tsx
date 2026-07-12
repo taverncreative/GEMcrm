@@ -63,6 +63,10 @@ import { ServiceSheetForm } from "@/components/jobs/service-sheet-form";
 import { ServiceSheetViewOnly } from "@/components/jobs/service-sheet-view-only";
 import { ServiceSheetGate } from "@/components/jobs/service-sheet-gate";
 import { customerServiceSheetReadiness } from "@/lib/documents/service-sheet-readiness";
+import {
+  resolveSheetAddress,
+  formatSheetAddress,
+} from "@/lib/documents/resolve-sheet-address";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { SmartBackButton } from "@/components/smart-back-button";
 import { ROUTES } from "@/lib/constants/routes";
@@ -286,6 +290,11 @@ export default function CompleteServiceSheetPage() {
     );
   }
 
+  // Location that prints on the sheet: the job's site if it has an address,
+  // else the customer's own address block (so a bare quick-add site doesn't
+  // re-ask). Same resolution the gate above passed on.
+  const resolvedAddress = resolveSheetAddress(gateSite, gateCustomer);
+
   return (
     <div>
       <div className="flex items-start gap-3">
@@ -329,12 +338,12 @@ export default function CompleteServiceSheetPage() {
           customerEmail={customer?.email ?? null}
           customerPhone={customer?.phone ?? null}
           siteAddress={
-            site
-              ? [site.address_line_1, site.town, site.postcode]
-                  .filter(Boolean)
-                  .join(", ")
+            resolvedAddress.source !== "none"
+              ? formatSheetAddress(resolvedAddress)
               : undefined
           }
+          addressFromCustomer={resolvedAddress.source === "customer"}
+          siteId={job.site_id ?? undefined}
           mode={amendMode ? "amend" : "fill"}
           customerId={customer?.id}
         />

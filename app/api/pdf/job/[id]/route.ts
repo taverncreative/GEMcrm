@@ -4,6 +4,7 @@ import { getCustomerById } from "@/lib/data/customers";
 import { renderJobReportHtml } from "@/lib/pdf/templates/job-report-template";
 import { htmlToPdf } from "@/lib/pdf/html-to-pdf";
 import { requireUser } from "@/lib/auth/require-user";
+import { resolveSheetAddress } from "@/lib/documents/resolve-sheet-address";
 
 export async function GET(
   _request: Request,
@@ -29,7 +30,23 @@ export async function GET(
     return new Response("Customer not found", { status: 404 });
   }
 
-  const html = renderJobReportHtml({ job, site, customer });
+  // The printed address falls back to the customer's own address when the
+  // job's site is bare (feat: sheet prefill) — same resolution the sheet
+  // shows, so what prints matches what the operator saw.
+  const resolved = resolveSheetAddress(site, customer);
+  const siteForPdf =
+    resolved.source === "customer"
+      ? {
+          ...site,
+          address_line_1: resolved.address_line_1,
+          address_line_2: resolved.address_line_2,
+          town: resolved.town,
+          county: resolved.county,
+          postcode: resolved.postcode,
+        }
+      : site;
+
+  const html = renderJobReportHtml({ job, site: siteForPdf, customer });
   const pdf = await htmlToPdf(html);
 
   return new Response(new Uint8Array(pdf), {

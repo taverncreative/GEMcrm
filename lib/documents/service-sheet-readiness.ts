@@ -1,5 +1,9 @@
-import type { Customer, Site } from "@/types/database";
+import type { Customer } from "@/types/database";
 import { isBlank } from "@/lib/documents/doc-readiness";
+import {
+  resolveSheetAddress,
+  type AddressLike,
+} from "@/lib/documents/resolve-sheet-address";
 
 /**
  * Service-sheet completeness gate — refuse to START a service record sheet
@@ -32,19 +36,11 @@ export interface ServiceSheetReadiness {
   missing: ServiceSheetField[];
 }
 
-type CustomerFields = Pick<Customer, "name" | "phone" | "email">;
-type SiteFields = Pick<Site, "address_line_1" | "town">;
-
-/**
- * A site has a usable address when address line 1 AND town are both
- * present. Matches createCustomer's `hasUsableSiteAddress` predicate
- * (line 1 + town, postcode optional) — deliberately stricter than
- * doc-readiness's any-line `hasAddress`.
- */
-function hasUsableSiteAddress(site: SiteFields | null): boolean {
-  if (!site) return false;
-  return !isBlank(site.address_line_1) && !isBlank(site.town);
-}
+// Contact fields are the gate's own concern; the address columns (optional
+// via AddressLike) are the fallback location the resolver reads when the
+// job's site is bare.
+type CustomerFields = Pick<Customer, "name" | "phone" | "email"> & AddressLike;
+type SiteFields = AddressLike;
 
 /**
  * Decide whether a (customer, site) pair is complete enough to start the
@@ -67,8 +63,11 @@ export function customerServiceSheetReadiness(
     missing.push({ key: "email", label: "an email address", fixOn: "customer" });
   }
 
-  // The address that prints on the sheet lives on the site.
-  if (!hasUsableSiteAddress(site)) {
+  // The address that prints on the sheet: the job's site if it has one,
+  // else the customer's own address block (feat: prefill from the customer
+  // record so a bare quick-add site doesn't re-ask for an address the
+  // customer already has). Only truly-missing-everywhere blocks.
+  if (resolveSheetAddress(site, customer).source === "none") {
     missing.push({ key: "site_address", label: "a site address", fixOn: "site" });
   }
 
