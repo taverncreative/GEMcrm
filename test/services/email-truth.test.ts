@@ -8,8 +8,9 @@
  *      (replay safety: email problems never fail/strand a completion).
  *   3. no-address completion → exactly ONE "Email service report…"
  *      follow-up task; deduped on replay; and the completion succeeds.
- *   4. sendReportNowAction is single-fire: an already-recorded job
- *      no-ops (no second email); an unsent one sends once and records.
+ *   4. sendReportNowAction is multi-recipient: one send to the given
+ *      list, records the joined string, re-send is allowed (guard
+ *      relaxed), and any invalid address hard-blocks the send.
  *   5. setCustomerEmailAction validates and normalises.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -185,33 +186,55 @@ describe("approve — no-address completion surfaces a task, exactly once", () =
   });
 });
 
-describe("sendReportNowAction — single-fire", () => {
-  it("already recorded → no-op success, no second email", async () => {
+describe("sendReportNowAction — multi-recipient", () => {
+  it("sends to the given recipients (one send) and records the joined list", async () => {
+    const res = await sendReportNowAction("job1", [
+      "a@example.test",
+      "b@example.test",
+    ]);
+    expect(res.success).toBe(true);
+    expect(res.emailedTo).toBe("a@example.test, b@example.test");
+    // One send, recipient list forwarded to sendServiceReport as the 3rd arg.
+    expect(sendServiceReportMock).toHaveBeenCalledTimes(1);
+    expect(sendServiceReportMock).toHaveBeenCalledWith(
+      WITH_EMAIL,
+      "https://example.test/service-sheet.pdf",
+      ["a@example.test", "b@example.test"]
+    );
+    expect(markReportEmailedMock).toHaveBeenCalledWith(
+      "job1",
+      "a@example.test, b@example.test"
+    );
+  });
+
+  it("re-send after a prior send is ALLOWED (guard relaxed)", async () => {
     getJobByIdMock.mockResolvedValue({
       ...JOB,
-      report_emailed_to: "c@example.test",
+      report_emailed_to: "old@example.test",
     });
-    const res = await sendReportNowAction("job1");
+    const res = await sendReportNowAction("job1", ["new@example.test"]);
     expect(res.success).toBe(true);
-    expect(res.emailedTo).toBe("c@example.test");
+    expect(res.emailedTo).toBe("new@example.test");
+    expect(sendServiceReportMock).toHaveBeenCalledTimes(1); // NOT a no-op
+    expect(markReportEmailedMock).toHaveBeenCalledWith(
+      "job1",
+      "new@example.test"
+    );
+  });
+
+  it("one invalid address → hard-block, nothing sent, names the bad one", async () => {
+    const res = await sendReportNowAction("job1", [
+      "a@example.test",
+      "not-an-email",
+    ]);
+    expect(res.success).toBe(false);
+    expect(res.message).toContain("not-an-email");
     expect(sendServiceReportMock).not.toHaveBeenCalled();
     expect(markReportEmailedMock).not.toHaveBeenCalled();
   });
 
-  it("not yet sent → one send + recorded", async () => {
-    const res = await sendReportNowAction("job1");
-    expect(res.success).toBe(true);
-    expect(res.emailedTo).toBe("c@example.test");
-    expect(sendServiceReportMock).toHaveBeenCalledTimes(1);
-    expect(markReportEmailedMock).toHaveBeenCalledWith(
-      "job1",
-      "c@example.test"
-    );
-  });
-
-  it("no address → clear failure, nothing sent", async () => {
-    getCustomerByIdMock.mockResolvedValue(NO_EMAIL);
-    const res = await sendReportNowAction("job1");
+  it("empty recipient list → blocked, nothing sent", async () => {
+    const res = await sendReportNowAction("job1", []);
     expect(res.success).toBe(false);
     expect(sendServiceReportMock).not.toHaveBeenCalled();
   });

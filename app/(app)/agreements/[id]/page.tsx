@@ -6,6 +6,7 @@ import {
 } from "@/lib/data/agreements";
 import { ROUTES } from "@/lib/constants/routes";
 import { proxyAssetUrl } from "@/lib/storage/asset-url";
+import { AgreementSend } from "@/components/agreements/agreement-send";
 import { formatAddress } from "@/lib/utils/format-address";
 import { todayUk } from "@/lib/utils/today-uk";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
@@ -370,6 +371,12 @@ export default async function AgreementDetailPage({
               <p className="text-sm text-gray-400">
                 No contract document available.
               </p>
+            )}
+            {agreement.contract_pdf_url && (
+              <AgreementSend
+                agreementId={agreement.id}
+                defaultEmail={agreement.contact_email}
+              />
             )}
           </SectionCard>
 

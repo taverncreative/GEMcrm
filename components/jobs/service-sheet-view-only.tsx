@@ -39,7 +39,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { sendReportNowAction } from "@/app/(app)/jobs/[id]/report/actions";
-import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
+import { parseAndValidateRecipients } from "@/lib/validation/recipients";
 import type { Job, Site, Customer, CallType, RiskLevel } from "@/types/database";
 import {
   CALL_TYPE_LABELS,
@@ -354,16 +354,15 @@ export function ServiceSheetViewOnly({
 
 
 /**
- * L3 email truth line. Four states, in priority order:
- *   1. report_emailed_to set      → "Report emailed to …" (server-
- *      recorded fact — written only on an actual successful send)
- *   2. a queued completion entry carrying send_email
- *                                 → "Email queued — sends when synced"
- *   3. customer has no address    → "Not emailed — no address on file"
- *      + inline add-email (unlocks state 4 live via Dexie)
- *   4. address exists, never sent → "Not emailed" + Send report now
- *      (online-only; single-fire — the action checks report_emailed_to
- *      before sending)
+ * Report email panel — send the report PDF to one or more recipients.
+ * States:
+ *   1. a queued completion entry carrying send_email → "Email queued"
+ *      (the deferred single-recipient path; stays as-is)
+ *   2. otherwise → a recipients field (comma-separated, pre-filled with
+ *      the customer email / the last-sent list) + Send. Online-only.
+ *      When already sent, a light "Already sent to … " note shows but a
+ *      re-send to a new/updated list is allowed. All recipients go on one
+ *      email. Invalid addresses hard-block the send.
  */
 function ReportEmailStatus({
   job,
@@ -375,7 +374,10 @@ function ReportEmailStatus({
   const online = useIsOnline();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const ensureReady = useEnsureCustomerDocReady();
+  // Pre-fill: the last-sent recipients if any, else the customer email.
+  const [recipients, setRecipients] = useState(
+    () => job.report_emailed_to ?? customer?.email ?? ""
+  );
 
   // A pending outbox completion/amend entry that carries the email
   // choice — the send happens when it replays, so say so.
@@ -396,51 +398,30 @@ function ReportEmailStatus({
     [job.id]
   );
 
-  function sendNow() {
+  function send() {
     setError(null);
-    // Gate first: if the customer has no email, prompt for it (and save it)
-    // before sending. Report sends never collect an address (the report
-    // shows the site address), so this is email-only.
-    void (async () => {
-      if (customer) {
-        const gate = await ensureReady(customer, { verb: "send", doc: "report" });
-        if (!gate.proceed) return; // cancelled
-      }
-      startTransition(async () => {
-        try {
-          const res = await sendReportNowAction(job.id);
-          if (res.success && res.emailedTo) {
-            // Server confirmed the send — mirror the truth locally so the
-            // line flips without waiting for the next pull.
-            await db.jobs.update(job.id, {
-              report_emailed_to: res.emailedTo,
-              report_emailed_at: new Date().toISOString(),
-            });
-          } else if (!res.success) {
-            setError(res.message ?? "Failed to send");
-          }
-        } catch {
-          setError("Couldn't reach the server — try again online");
+    const parsed = parseAndValidateRecipients(recipients);
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const res = await sendReportNowAction(job.id, parsed.emails);
+        if (res.success && res.emailedTo) {
+          // Mirror the server truth locally so the note updates without
+          // waiting for the next pull.
+          await db.jobs.update(job.id, {
+            report_emailed_to: res.emailedTo,
+            report_emailed_at: new Date().toISOString(),
+          });
+        } else if (!res.success) {
+          setError(res.message ?? "Failed to send");
         }
-      });
-    })();
-  }
-
-  if (job.report_emailed_to) {
-    return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-        Report emailed to{" "}
-        <span className="font-medium">{job.report_emailed_to}</span>
-        {job.report_emailed_at
-          ? ` on ${new Date(job.report_emailed_at).toLocaleDateString("en-GB", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })}`
-          : ""}
-        .
-      </div>
-    );
+      } catch {
+        setError("Couldn't reach the server — try again online");
+      }
+    });
   }
 
   if (emailQueued) {
@@ -451,32 +432,56 @@ function ReportEmailStatus({
     );
   }
 
+  const alreadySent = job.report_emailed_to;
+
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
-      <p className="text-sm text-gray-600">
-        {customer?.email
-          ? "Report not emailed to the customer yet."
-          : "Report not emailed — no email on file. Sending will ask for one."}
-      </p>
-      <div className="text-right">
+    <div className="space-y-2 rounded-xl border border-gray-200 bg-white px-4 py-3">
+      {alreadySent && (
+        <p className="text-xs text-emerald-700">
+          Already sent to <span className="font-medium">{alreadySent}</span>
+          {job.report_emailed_at
+            ? ` on ${new Date(job.report_emailed_at).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}`
+            : ""}
+          . You can send again below.
+        </p>
+      )}
+      <label
+        htmlFor={`report-recipients-${job.id}`}
+        className="block text-xs font-medium text-gray-600"
+      >
+        Email report to
+      </label>
+      <input
+        id={`report-recipients-${job.id}`}
+        type="text"
+        value={recipients}
+        onChange={(e) => {
+          setRecipients(e.target.value);
+          if (error) setError(null);
+        }}
+        placeholder="name@example.com, second@example.com"
+        className="block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-gray-400">
+          Separate multiple emails with commas — all go on one email.
+        </p>
         <button
           type="button"
-          onClick={sendNow}
+          onClick={send}
           disabled={isPending || !online}
           title={!online ? "Needs internet" : undefined}
-          className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="shrink-0 rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isPending
-            ? "Sending…"
-            : customer?.email
-              ? `Send report now to ${customer.email}`
-              : "Send report now"}
+          {isPending ? "Sending…" : alreadySent ? "Send again" : "Send report"}
         </button>
-        {!online && (
-          <p className="mt-1 text-xs text-gray-400">Needs internet.</p>
-        )}
-        {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
       </div>
+      {!online && <p className="text-xs text-gray-400">Needs internet.</p>}
+      {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   );
 }

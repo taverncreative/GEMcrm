@@ -53,7 +53,9 @@ async function signedEmailLink(storedUrl: string): Promise<string> {
 }
 
 interface SendEmailInput {
-  to: string;
+  /** One recipient, or several — all delivered in a single Resend send
+   *  (Resend's `to` accepts up to 50 addresses). */
+  to: string | string[];
   subject: string;
   html?: string;
   text?: string;
@@ -93,7 +95,13 @@ function defaultFrom(): string {
  * retries; we don't.
  */
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
-  if (!input.to || !input.to.includes("@")) {
+  const recipients = (Array.isArray(input.to) ? input.to : [input.to])
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+  if (
+    recipients.length === 0 ||
+    recipients.some((a) => !a.includes("@"))
+  ) {
     return { success: false, error: "Invalid recipient address" };
   }
   if (!input.html && !input.text) {
@@ -107,7 +115,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   if (!resend) {
     if (process.env.NODE_ENV !== "production") {
       console.log(
-        `[email:stub] from=${from} to=${input.to} subject=${input.subject}`
+        `[email:stub] from=${from} to=${recipients.join(", ")} subject=${input.subject}`
       );
       return { success: true, id: "stub" };
     }
@@ -122,7 +130,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     // guaranteed by the guard above.
     const payload = {
       from,
-      to: input.to,
+      to: recipients,
       subject: input.subject,
       ...(input.html ? { html: input.html } : {}),
       ...(input.text ? { text: input.text } : {}),
@@ -161,14 +169,24 @@ function escapeHtml(value: string): string {
 
 export async function sendServiceReport(
   customer: Customer,
-  pdfUrl: string
+  pdfUrl: string,
+  recipients?: string[]
 ): Promise<SendEmailResult> {
-  if (!customer.email) {
+  // Recipients default to the customer's own email (backward compatible
+  // with the deferred completion path); the "Send report now" flow passes
+  // an explicit, validated multi-recipient list.
+  const to =
+    recipients && recipients.length > 0
+      ? recipients
+      : customer.email
+        ? [customer.email]
+        : [];
+  if (to.length === 0) {
     return { success: false, error: "Customer has no email" };
   }
   const link = await signedEmailLink(pdfUrl);
   return sendEmail({
-    to: customer.email,
+    to,
     subject: `${BUSINESS.name} – Your Service Report`,
     html: serviceReportHtml(customer.name, link),
   });
@@ -178,14 +196,21 @@ export async function sendServiceReport(
 
 export async function sendAgreement(
   customer: Customer,
-  pdfUrl: string
+  pdfUrl: string,
+  recipients?: string[]
 ): Promise<SendEmailResult> {
-  if (!customer.email) {
+  const to =
+    recipients && recipients.length > 0
+      ? recipients
+      : customer.email
+        ? [customer.email]
+        : [];
+  if (to.length === 0) {
     return { success: false, error: "Customer has no email" };
   }
   const link = await signedEmailLink(pdfUrl);
   return sendEmail({
-    to: customer.email,
+    to,
     subject: `${BUSINESS.name} – Your Pest Management Agreement`,
     html: agreementHtml(customer.name, link),
   });

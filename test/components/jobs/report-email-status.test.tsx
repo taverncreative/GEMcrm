@@ -1,14 +1,18 @@
 /**
- * L3 email-truth line on the view-only sheet. Four states, pinned:
+ * L3 email panel on the view-only sheet — the multi-recipient send.
+ * States, pinned:
  *
- *   1. report_emailed_to set → "Report emailed to …" (and no Send-now)
- *   2. queued outbox completion carrying send_email → "queued"
- *   3. no customer email → "Send report now" (the shared gate asks for an
- *      email on click — no bespoke inline capture any more)
- *   4. email on file, never sent → "Send report now to …"
+ *   1. report_emailed_to set → a light "Already sent to …" note AND a
+ *      re-send is still offered (guard relaxed): the recipients field is
+ *      pre-filled with the last-sent list and the button reads "Send again".
+ *   2. queued outbox completion carrying send_email → "queued" (the
+ *      deferred single-recipient path; unchanged).
+ *   3. no customer email → the recipients field is offered empty, "Send
+ *      report". The field is authoritative now (no separate email gate).
+ *   4. email on file, never sent → field pre-filled with it, "Send report".
  *
- * The truth column is server-written; this component must never claim
- * a send that isn't recorded.
+ * The truth column is server-written; the note never claims a send that
+ * isn't recorded, but a re-send to a new list is always allowed.
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -67,7 +71,7 @@ beforeEach(async () => {
 });
 
 describe("ReportEmailStatus states", () => {
-  it("recorded send → 'Report emailed to …', no Send-now button", async () => {
+  it("recorded send → 'Already sent to …' note, but re-send still offered", async () => {
     render(
       <ServiceSheetViewOnly
         job={{ ...baseJob, report_emailed_to: "c@example.test" } as Job}
@@ -75,9 +79,13 @@ describe("ReportEmailStatus states", () => {
         customer={customerWithEmail}
       />
     );
-    expect(await screen.findByText(/Report emailed to/)).toBeTruthy();
+    expect(await screen.findByText(/Already sent to/)).toBeTruthy();
     expect(screen.getByText("c@example.test")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Send report now/ })).toBeNull();
+    // Guard relaxed: a re-send is offered, pre-filled with the last list.
+    const button = screen.getByRole("button", { name: /Send again/ });
+    expect(button).toBeTruthy();
+    const input = screen.getByLabelText(/Email report to/) as HTMLInputElement;
+    expect(input.value).toBe("c@example.test");
   });
 
   it("queued completion with send_email → 'queued'", async () => {
@@ -94,26 +102,27 @@ describe("ReportEmailStatus states", () => {
         customer={customerWithEmail}
       />
     );
-    await waitFor(() =>
-      expect(screen.getByText(/queued/i)).toBeTruthy()
-    );
+    await waitFor(() => expect(screen.getByText(/queued/i)).toBeTruthy());
   });
 
-  it("no email → 'Send report now' offered (gate asks for the email on click)", async () => {
+  it("no email → an empty recipients field is offered ('Send report')", async () => {
     render(
-      <ServiceSheetViewOnly job={baseJob} site={null} customer={customerNoEmail} />
+      <ServiceSheetViewOnly
+        job={baseJob}
+        site={null}
+        customer={customerNoEmail}
+      />
     );
-    // The no-email state still offers the send button; clicking it runs the
-    // shared completeness gate (which prompts for the email).
-    expect(await screen.findByText(/no email on file/i)).toBeTruthy();
+    const input = (await screen.findByLabelText(
+      /Email report to/
+    )) as HTMLInputElement;
+    expect(input.value).toBe("");
     expect(
-      screen.getByRole("button", { name: /Send report now/ })
+      screen.getByRole("button", { name: /Send report/ })
     ).toBeTruthy();
-    // No bespoke inline email input any more — the shared gate handles it.
-    expect(document.querySelector('input[type="email"]')).toBeNull();
   });
 
-  it("address on file, never sent → Send report now offered", async () => {
+  it("address on file, never sent → field pre-filled, 'Send report'", async () => {
     render(
       <ServiceSheetViewOnly
         job={baseJob}
@@ -121,8 +130,12 @@ describe("ReportEmailStatus states", () => {
         customer={customerWithEmail}
       />
     );
+    const input = (await screen.findByLabelText(
+      /Email report to/
+    )) as HTMLInputElement;
+    expect(input.value).toBe("c@example.test");
     expect(
-      await screen.findByRole("button", { name: /Send report now/ })
+      screen.getByRole("button", { name: /Send report/ })
     ).toBeTruthy();
   });
 });

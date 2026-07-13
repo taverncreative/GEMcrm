@@ -11,6 +11,7 @@ import { uploadPdf } from "@/lib/storage/upload";
 import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import { isServiceSheetFilled } from "@/lib/validation/service-sheet";
+import { validateRecipients } from "@/lib/validation/recipients";
 import type { ActionState } from "@/types/actions";
 
 export async function generateReportAction(
@@ -69,29 +70,38 @@ export async function generateReportAction(
 }
 
 /**
- * L3 "Send report now" — the recovery for a completed job whose report
- * was never emailed (no address at completion, or the operator chose
- * plain Complete). Single-fire: report_emailed_to is checked before
- * sending, so a double-tap or stale button is a no-op, never a second
- * email. Online-only (the email leaves from the server on the spot).
+ * "Send report now" — email a completed job's report PDF to one or more
+ * recipients (the multi-recipient flow). All recipients go in a single
+ * Resend `to`. Online-only (the email leaves from the server on the spot).
+ *
+ * NOT single-fire any more: a report can be re-sent to a new/updated
+ * recipient list. The UI shows an "already sent to …" note so the
+ * operator knows, but the send proceeds. `report_emailed_to` records the
+ * most recent recipient list as a comma-joined string.
+ *
+ * Recipients are validated server-side (hard-block on any invalid
+ * address) so a stale client can't slip a bad one through.
  */
 export async function sendReportNowAction(
-  jobId: string
+  jobId: string,
+  recipients: string[]
 ): Promise<{ success: boolean; message?: string; emailedTo?: string }> {
   await requireUser();
   if (!jobId) return { success: false, message: "Missing job ID" };
 
+  // Validate the recipient list up front — hard-block on any invalid one.
+  const validated = validateRecipients(recipients ?? []);
+  if (!validated.ok) {
+    return { success: false, message: validated.error };
+  }
+
   const job = await getJobById(jobId);
   if (!job) return { success: false, message: "Job not found" };
-  if (job.report_emailed_to) {
-    // Already sent — single-fire no-op.
-    return { success: true, emailedTo: job.report_emailed_to };
-  }
 
   const site = await getSiteById(job.site_id);
   const customer = site ? await getCustomerById(site.customer_id) : null;
-  if (!customer?.email) {
-    return { success: false, message: "Customer has no email address on file" };
+  if (!customer) {
+    return { success: false, message: "Customer not found" };
   }
 
   const report = await getReportByJobId(jobId);
@@ -102,12 +112,17 @@ export async function sendReportNowAction(
     };
   }
 
-  const sendRes = await sendServiceReport(customer, report.pdf_url);
+  const sendRes = await sendServiceReport(
+    customer,
+    report.pdf_url,
+    validated.emails
+  );
   if (!sendRes.success) {
     return { success: false, message: "Email failed to send — try again" };
   }
 
-  await markReportEmailed(jobId, customer.email);
+  const emailedTo = validated.emails.join(", ");
+  await markReportEmailed(jobId, emailedTo);
   revalidatePath(ROUTES.jobDetail(jobId));
-  return { success: true, emailedTo: customer.email };
+  return { success: true, emailedTo };
 }
