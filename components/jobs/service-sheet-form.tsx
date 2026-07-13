@@ -193,6 +193,44 @@ const completeServiceSheetOpts = {
   }),
 };
 
+// ── "Other" free-text encoding ──────────────────────────────────────
+//
+// Pest species and treatment methods are stored as plain string[]
+// (jobs.pest_species / jobs.method_used). When the operator picks the
+// "Other" pill we capture a free-text description and fold it into the
+// array as "Other: <desc>" — no schema change, and every downstream
+// renderer (view-only sheet, PDF tags, agreements) prints the array
+// strings as-is, so the description surfaces everywhere for free.
+//
+// The UI keeps the bare "Other" pill in the selected list and holds the
+// description in its own state; encode/split convert at the storage
+// boundary (hidden input on the way out, initial seed on the way in).
+const OTHER_PILL = "Other";
+
+/** Fold the free-text back into the array for storage. A bare "Other"
+ *  (empty description) is left as-is so validation can catch it. */
+function encodeOther(pills: string[], otherText: string): string[] {
+  const t = otherText.trim();
+  return pills.map((p) => (p === OTHER_PILL && t ? `Other: ${t}` : p));
+}
+
+/** Inverse of encodeOther: split a stored array (which may carry an
+ *  encoded "Other: <desc>" entry) back into the bare pill list plus the
+ *  extracted description. Round-trips with encodeOther. */
+function splitOther(items: string[]): { pills: string[]; otherText: string } {
+  let otherText = "";
+  const pills = items.map((item) => {
+    if (item === OTHER_PILL) return OTHER_PILL;
+    const m = /^Other:\s*([\s\S]*)$/.exec(item);
+    if (m) {
+      otherText = m[1];
+      return OTHER_PILL;
+    }
+    return item;
+  });
+  return { pills, otherText };
+}
+
 const STEP_LABELS = ["Visit", "Service", "Risk", "Photos", "Sign off"] as const;
 
 function getErrorStep(errors: Record<string, string>): number | null {
@@ -202,7 +240,9 @@ function getErrorStep(errors: Record<string, string>): number | null {
     errors.recommendations ||
     errors.method_used ||
     errors.pesticides_used ||
-    errors.pest_species
+    errors.pest_species ||
+    errors.other_pest ||
+    errors.other_method
   )
     return 2;
   if (errors.risk_level || errors.risk_comments) return 3;
@@ -314,12 +354,21 @@ function ServiceSheetFormBody({
   // one-shot mounting (it renders the body only once `draft !== undefined`).
   const [step, setStep] = useState<number>(draft?.step ?? 1);
   const [callType, setCallType] = useState(draft?.call_type ?? defaultCallType);
-  const [selectedPests, setSelectedPests] = useState<string[]>(
-    draft?.selected_pests ?? defaultPests
-  );
+  // Seed the pest/method pills + their "Other" free-text. A draft stores
+  // bare pills alongside a separate other_* field; the job row's defaults
+  // may carry an encoded "Other: <desc>" entry, so split those apart.
+  const pestSeed = draft
+    ? { pills: draft.selected_pests, otherText: draft.other_pest ?? "" }
+    : splitOther(defaultPests);
+  const methodSeed = draft
+    ? { pills: draft.selected_methods, otherText: draft.other_method ?? "" }
+    : splitOther(defaultMethods);
+  const [selectedPests, setSelectedPests] = useState<string[]>(pestSeed.pills);
+  const [otherPest, setOtherPest] = useState(pestSeed.otherText);
   const [selectedMethods, setSelectedMethods] = useState<string[]>(
-    draft?.selected_methods ?? defaultMethods
+    methodSeed.pills
   );
+  const [otherMethod, setOtherMethod] = useState(methodSeed.otherText);
   // All text inputs below are CONTROLLED via state. React 19's
   // <form action={fn}> resets uncontrolled inputs to their defaults
   // whenever the action returns (regardless of success/error payload),
@@ -412,8 +461,17 @@ function ServiceSheetFormBody({
   function handleReview() {
     if (!formRef.current) return;
     const fd = new FormData(formRef.current);
-    const validationErrors = validateServiceSheetFormData(fd);
-    if (validationErrors) {
+    const validationErrors = validateServiceSheetFormData(fd) ?? {};
+    // "Other" pills require a description — the schema can't see this
+    // (a bare "Other" still satisfies the min(1) array rule), so gate it
+    // here where the pill selection + free-text are in scope.
+    if (selectedPests.includes(OTHER_PILL) && !otherPest.trim()) {
+      validationErrors.other_pest = "Describe the other pest";
+    }
+    if (selectedMethods.includes(OTHER_PILL) && !otherMethod.trim()) {
+      validationErrors.other_method = "Describe the other treatment";
+    }
+    if (Object.keys(validationErrors).length > 0) {
       setClientErrors(validationErrors);
       const errorStep = getErrorStep(validationErrors);
       if (errorStep) setStep(errorStep);
@@ -512,6 +570,8 @@ function ServiceSheetFormBody({
         callType !== "" ||
         selectedPests.length > 0 ||
         selectedMethods.length > 0 ||
+        otherPest !== "" ||
+        otherMethod !== "" ||
         findings !== "" ||
         recommendations !== "" ||
         pesticidesUsed !== "" ||
@@ -532,6 +592,8 @@ function ServiceSheetFormBody({
         call_type: callType,
         selected_pests: selectedPests,
         selected_methods: selectedMethods,
+        other_pest: otherPest,
+        other_method: otherMethod,
         findings,
         recommendations,
         pesticides_used: pesticidesUsed,
@@ -554,6 +616,8 @@ function ServiceSheetFormBody({
     callType,
     selectedPests,
     selectedMethods,
+    otherPest,
+    otherMethod,
     findings,
     recommendations,
     pesticidesUsed,
@@ -613,8 +677,16 @@ function ServiceSheetFormBody({
     >
       <input type="hidden" name="job_id" value={jobId} />
       <input type="hidden" name="call_type" value={callType} />
-      <input type="hidden" name="pest_species" value={JSON.stringify(selectedPests)} />
-      <input type="hidden" name="method_used" value={JSON.stringify(selectedMethods)} />
+      <input
+        type="hidden"
+        name="pest_species"
+        value={JSON.stringify(encodeOther(selectedPests, otherPest))}
+      />
+      <input
+        type="hidden"
+        name="method_used"
+        value={JSON.stringify(encodeOther(selectedMethods, otherMethod))}
+      />
       <input type="hidden" name="photo_data_urls" value={JSON.stringify(photoDataUrls)} />
       <input type="hidden" name="technician_signature" value={techSig} />
       <input type="hidden" name="client_signature" value={clientSig} />
@@ -803,6 +875,25 @@ function ServiceSheetFormBody({
           {errors.pest_species && (
             <p className="mt-1 text-sm text-red-500">{errors.pest_species}</p>
           )}
+          {selectedPests.includes(OTHER_PILL) && (
+            <div className="mt-3">
+              <label htmlFor="pest_other" className={labelClass}>
+                Describe the other pest{" "}
+                <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="pest_other"
+                type="text"
+                value={otherPest}
+                onChange={(e) => setOtherPest(e.target.value)}
+                placeholder="e.g. Cockroaches"
+                className={inputClass}
+              />
+              {errors.other_pest && (
+                <p className="mt-1 text-sm text-red-500">{errors.other_pest}</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div>
@@ -862,6 +953,27 @@ function ServiceSheetFormBody({
           </div>
           {errors.method_used && (
             <p className="mt-1 text-sm text-red-500">{errors.method_used}</p>
+          )}
+          {selectedMethods.includes(OTHER_PILL) && (
+            <div className="mt-3">
+              <label htmlFor="method_other" className={labelClass}>
+                Describe the other treatment{" "}
+                <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="method_other"
+                type="text"
+                value={otherMethod}
+                onChange={(e) => setOtherMethod(e.target.value)}
+                placeholder="e.g. Heat treatment"
+                className={inputClass}
+              />
+              {errors.other_method && (
+                <p className="mt-1 text-sm text-red-500">
+                  {errors.other_method}
+                </p>
+              )}
+            </div>
           )}
         </div>
 
@@ -1144,12 +1256,14 @@ function ServiceSheetFormBody({
                   callType}
               </ReviewRow>
               <ReviewRow label="Pests">
-                {selectedPests.length > 0 ? selectedPests.join(", ") : "—"}
+                {selectedPests.length > 0
+                  ? encodeOther(selectedPests, otherPest).join(", ")
+                  : "—"}
               </ReviewRow>
               <ReviewRow label="Findings">{findings}</ReviewRow>
               <ReviewRow label="Recommendations">{recommendations}</ReviewRow>
               <ReviewRow label="Methods">
-                {selectedMethods.join(", ")}
+                {encodeOther(selectedMethods, otherMethod).join(", ")}
               </ReviewRow>
               <ReviewRow label="Pesticides">{pesticidesUsed}</ReviewRow>
               <ReviewRow label="Risk">

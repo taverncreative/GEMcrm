@@ -42,6 +42,13 @@ export interface ServiceSheetDraft {
   call_type: string;
   selected_pests: string[];
   selected_methods: string[];
+  /** Free-text description captured when the "Other" pest pill is
+   *  selected. Optional so drafts written before this field existed (and
+   *  the test fixtures) load cleanly; folded into `pest_species` as
+   *  "Other: <desc>" at submit. Not indexed → no Dexie version bump. */
+  other_pest?: string;
+  /** Same, for the "Other" treatment method → folded into `method_used`. */
+  other_method?: string;
   findings: string;
   recommendations: string;
   pesticides_used: string;
