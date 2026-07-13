@@ -345,6 +345,49 @@ export async function updateJobStatus(
   }
 }
 
+/**
+ * Reschedule a job — change its date and time window only. A plain
+ * last-write-wins field update (v1, single operator).
+ *
+ * Guarded with `neq('job_status', 'completed')` so a completed job is
+ * never moved (mirrors {@link updateJobStatus}'s no-downgrade guard): a
+ * stale offline reschedule replaying after the job completed matches zero
+ * rows and no-ops instead of dragging a finished visit onto a new date.
+ *
+ * A move onto a slot already taken by the same site + call type raises the
+ * partial-unique index (23505) → JobClashError, the same server-side
+ * backstop `createBooking` relies on (the client runs findClashingJobLocal
+ * first, so this is only the rare offline-race path). Not a self-hiding
+ * write, so — unlike a soft-delete — the RETURNING row still passes the
+ * read policy; no 42501.
+ */
+export async function rescheduleJob(
+  jobId: string,
+  input: { job_date: string; job_time: string; job_time_end: string }
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("jobs")
+    .update({
+      job_date: input.job_date,
+      job_time: emptyToNull(input.job_time),
+      job_time_end: emptyToNull(input.job_time_end),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId)
+    .neq("job_status", "completed");
+
+  if (error) {
+    if (error.code === "23505") {
+      throw new JobClashError(
+        "A booking of this call type already exists for this site on this date."
+      );
+    }
+    console.error("[rescheduleJob]", error.code, error.message);
+    throw new Error(`Failed to reschedule job: ${error.message}`);
+  }
+}
+
 export async function hasJobForSiteOnDate(
   siteId: string,
   jobDate: string,

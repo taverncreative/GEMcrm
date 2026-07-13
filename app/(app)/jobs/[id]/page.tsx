@@ -40,6 +40,7 @@ import { ReportActions } from "@/components/jobs/report-actions";
 import { isServiceSheetFilled } from "@/lib/validation/service-sheet";
 import { JobStatusActions } from "@/components/jobs/job-status-actions";
 import { DeleteJobConfirm } from "@/components/jobs/delete-job-confirm";
+import { RescheduleJobModal } from "@/components/jobs/reschedule-job-modal";
 import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { SmartBackButton } from "@/components/smart-back-button";
@@ -71,14 +72,48 @@ function SectionCard({
   );
 }
 
-function VisitDetailsSection({ job }: { job: Job }) {
+/** "HH:MM:SS" → "HH:MM"; null/blank → "". */
+function hhmm(time: string | null): string {
+  if (!time) return "";
+  const m = /^(\d{1,2}):(\d{2})/.exec(time);
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : "";
+}
+
+function VisitDetailsSection({
+  job,
+  onReschedule,
+}: {
+  job: Job;
+  onReschedule?: () => void;
+}) {
+  const start = hhmm(job.job_time);
+  const end = hhmm(job.job_time_end);
+  const timeLabel = start
+    ? end && end !== start
+      ? `${start}–${end}`
+      : start
+    : "All day";
   return (
     <SectionCard title="Visit Details">
       <dl className="space-y-3">
-        <DetailField
-          label="Date"
-          value={new Date(job.job_date).toLocaleDateString()}
-        />
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <dt className="text-xs text-gray-400">Date</dt>
+            <dd className="text-sm text-gray-900">
+              {new Date(job.job_date).toLocaleDateString()}
+              <span className="ml-2 text-gray-500">{timeLabel}</span>
+            </dd>
+          </div>
+          {onReschedule && (
+            <button
+              type="button"
+              onClick={onReschedule}
+              className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Reschedule
+            </button>
+          )}
+        </div>
         {job.call_type && (
           <DetailField
             label="Call Type"
@@ -300,6 +335,7 @@ export default function JobDetailPage() {
   const id = typeof params.id === "string" ? params.id : "";
   const online = useIsOnline();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
 
   // Job — undefined while loading, null if missing-or-soft-deleted, Job otherwise.
   // `async` querier so TypeScript unwraps cleanly to `Job | null` rather than
@@ -447,7 +483,14 @@ export default function JobDetailPage() {
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="space-y-6">
-          <VisitDetailsSection job={job} />
+          <VisitDetailsSection
+            job={job}
+            onReschedule={
+              job.job_status === "scheduled" || job.job_status === "draft"
+                ? () => setRescheduleOpen(true)
+                : undefined
+            }
+          />
           <FindingsSection job={job} />
           <PhotosSection job={job} />
           <SignaturesSection job={job} />
@@ -514,6 +557,13 @@ export default function JobDetailPage() {
           router.refresh();
         }}
       />
+
+      {rescheduleOpen && (
+        <RescheduleJobModal
+          job={job}
+          onClose={() => setRescheduleOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import {
   updateJobStatus,
+  rescheduleJob,
   getJobById,
   deleteJob,
   getJobDeleteImpact,
@@ -53,6 +54,49 @@ export async function updateJobStatusAction(
       success: false,
       errors: {},
       message: err instanceof Error ? err.message : "Failed to update status",
+    };
+  }
+
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/jobs");
+  revalidatePath("/dashboard");
+  return { success: true, errors: {}, message: null };
+}
+
+/**
+ * Reschedule a job — move its date + time window. Offline-first: the
+ * modal writes Dexie optimistically and enqueues ONE outbox entry, so
+ * this runs on replay (and on an online submit via drainOutbox). The
+ * data fn is guarded to never touch a completed job.
+ */
+export async function rescheduleJobAction(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  await requireUser();
+  const jobId = formData.get("job_id") as string;
+  const jobDate = formData.get("job_date") as string;
+  const jobTime = (formData.get("job_time") as string) ?? "";
+  const jobTimeEnd = (formData.get("job_time_end") as string) ?? "";
+
+  if (!jobId) {
+    return { success: false, errors: {}, message: "Missing job ID" };
+  }
+  if (!jobDate) {
+    return { success: false, errors: {}, message: "Pick a date" };
+  }
+
+  try {
+    await rescheduleJob(jobId, {
+      job_date: jobDate,
+      job_time: jobTime,
+      job_time_end: jobTimeEnd,
+    });
+  } catch (err) {
+    return {
+      success: false,
+      errors: {},
+      message: err instanceof Error ? err.message : "Failed to reschedule job",
     };
   }
 

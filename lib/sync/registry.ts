@@ -30,7 +30,10 @@
 
 import { completeTaskAction } from "@/app/(app)/dashboard/actions";
 import { createTaskAction } from "@/app/(app)/tasks/actions";
-import { updateJobStatusAction } from "@/app/(app)/jobs/[id]/actions";
+import {
+  updateJobStatusAction,
+  rescheduleJobAction,
+} from "@/app/(app)/jobs/[id]/actions";
 import { updateAgreementStatusAction } from "@/app/(app)/agreements/[id]/actions";
 import {
   setReviewReceivedAction,
@@ -87,6 +90,14 @@ export const REGISTRY: Record<string, RegistryEntry> = {
   updateJobStatusAction: {
     kind: "form",
     invoke: (fd) => updateJobStatusAction(INITIAL_FORM_STATE, fd),
+  },
+  // Reschedule (date/time move). Optimistic + one outbox entry; the
+  // update is idempotent (last-write-wins on id), so a replay after an
+  // online submit is harmless. A true partial-unique clash on the new
+  // slot surfaces as a stuck entry in the conflict inbox.
+  rescheduleJobAction: {
+    kind: "form",
+    invoke: (fd) => rescheduleJobAction(INITIAL_FORM_STATE, fd),
   },
   // Multi-entity create (step 8). Replayed from the id-enriched args
   // the wrapper persisted (job_id / customer_id_new / site_id_new), so
