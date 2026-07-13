@@ -5,6 +5,11 @@ import { createBookingAction } from "@/app/(app)/sites/[id]/bookings/actions";
 import { CALL_TYPES } from "@/lib/validation/booking";
 import { CALL_TYPE_LABELS, COMMON_PESTS } from "@/lib/constants/job-labels";
 import { todayUk } from "@/lib/utils/today-uk";
+import {
+  OTHER_PILL,
+  encodeOther,
+  splitOther,
+} from "@/lib/utils/other-describe";
 import type { ActionState } from "@/types/actions";
 
 const initialState: ActionState = {
@@ -35,12 +40,28 @@ export function QuickBookingForm({
     createBookingAction,
     initialState
   );
-  const [selectedPests, setSelectedPests] = useState<string[]>(defaultPests);
+  // Seed from defaultPests, splitting any stored "Other: <desc>" back into
+  // the bare pill + its description.
+  const pestSeed = splitOther(defaultPests);
+  const [selectedPests, setSelectedPests] = useState<string[]>(pestSeed.pills);
+  const [otherPest, setOtherPest] = useState(pestSeed.otherText);
+  const [otherPestError, setOtherPestError] = useState<string | null>(null);
 
   function togglePest(pest: string) {
     setSelectedPests((prev) =>
       prev.includes(pest) ? prev.filter((p) => p !== pest) : [...prev, pest]
     );
+  }
+
+  // Gate the submit: an "Other" pill with no description must not save a
+  // bare "Other". Everything else proceeds to the server action unchanged.
+  function handleSubmit(formData: FormData) {
+    if (selectedPests.includes(OTHER_PILL) && !otherPest.trim()) {
+      setOtherPestError("Describe the other pest");
+      return;
+    }
+    setOtherPestError(null);
+    action(formData);
   }
 
   if (state.success) {
@@ -74,12 +95,12 @@ export function QuickBookingForm({
   const labelClass = "block text-sm font-medium text-gray-700 mb-0.5";
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={handleSubmit} className="space-y-4">
       <input type="hidden" name="site_id" value={siteId} />
       <input
         type="hidden"
         name="pest_species"
-        value={JSON.stringify(selectedPests)}
+        value={JSON.stringify(encodeOther(selectedPests, otherPest))}
       />
 
       {state.message && (
@@ -150,6 +171,27 @@ export function QuickBookingForm({
             </button>
           ))}
         </div>
+        {selectedPests.includes(OTHER_PILL) && (
+          <div className="mt-3">
+            <label htmlFor="qb_pest_other" className={labelClass}>
+              Describe the other pest <span className="text-red-500">*</span>
+            </label>
+            <input
+              id="qb_pest_other"
+              type="text"
+              value={otherPest}
+              onChange={(e) => {
+                setOtherPest(e.target.value);
+                if (otherPestError) setOtherPestError(null);
+              }}
+              placeholder="e.g. Cockroaches"
+              className={inputClass}
+            />
+            {otherPestError && (
+              <p className="mt-1 text-sm text-red-500">{otherPestError}</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div>

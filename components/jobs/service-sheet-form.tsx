@@ -20,6 +20,7 @@ import {
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { PhotoUpload } from "@/components/ui/photo-upload";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
+import { OTHER_PILL, encodeOther, splitOther } from "@/lib/utils/other-describe";
 import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
 import { isPhotoClientId, photoPublicUrl } from "@/lib/photos/path";
@@ -192,44 +193,6 @@ const completeServiceSheetOpts = {
     finalized: input.finalize,
   }),
 };
-
-// ── "Other" free-text encoding ──────────────────────────────────────
-//
-// Pest species and treatment methods are stored as plain string[]
-// (jobs.pest_species / jobs.method_used). When the operator picks the
-// "Other" pill we capture a free-text description and fold it into the
-// array as "Other: <desc>" — no schema change, and every downstream
-// renderer (view-only sheet, PDF tags, agreements) prints the array
-// strings as-is, so the description surfaces everywhere for free.
-//
-// The UI keeps the bare "Other" pill in the selected list and holds the
-// description in its own state; encode/split convert at the storage
-// boundary (hidden input on the way out, initial seed on the way in).
-const OTHER_PILL = "Other";
-
-/** Fold the free-text back into the array for storage. A bare "Other"
- *  (empty description) is left as-is so validation can catch it. */
-function encodeOther(pills: string[], otherText: string): string[] {
-  const t = otherText.trim();
-  return pills.map((p) => (p === OTHER_PILL && t ? `Other: ${t}` : p));
-}
-
-/** Inverse of encodeOther: split a stored array (which may carry an
- *  encoded "Other: <desc>" entry) back into the bare pill list plus the
- *  extracted description. Round-trips with encodeOther. */
-function splitOther(items: string[]): { pills: string[]; otherText: string } {
-  let otherText = "";
-  const pills = items.map((item) => {
-    if (item === OTHER_PILL) return OTHER_PILL;
-    const m = /^Other:\s*([\s\S]*)$/.exec(item);
-    if (m) {
-      otherText = m[1];
-      return OTHER_PILL;
-    }
-    return item;
-  });
-  return { pills, otherText };
-}
 
 const STEP_LABELS = ["Visit", "Service", "Risk", "Photos", "Sign off"] as const;
 

@@ -11,6 +11,7 @@ import {
 } from "@/lib/db/lookups";
 import { CALL_TYPES } from "@/lib/validation/booking";
 import { CALL_TYPE_LABELS, COMMON_PESTS } from "@/lib/constants/job-labels";
+import { OTHER_PILL, encodeOther } from "@/lib/utils/other-describe";
 import { todayUk } from "@/lib/utils/today-uk";
 import {
   useLocalFirstAction,
@@ -346,6 +347,7 @@ export function BookingModal({
   const [value, setValue] = useState("");
   const [reportNotes, setReportNotes] = useState("");
   const [selectedPests, setSelectedPests] = useState<string[]>([]);
+  const [otherPest, setOtherPest] = useState("");
 
   // Client-side required-field validation. Offline, the server action that
   // normally returns field errors never runs (or fails as a network error),
@@ -441,6 +443,7 @@ export function BookingModal({
     setSelectedSite(presetSite ?? null);
     setSites([]);
     setSelectedPests([]);
+    setOtherPest("");
     setClientErrors({});
     setClashWarning(null);
     setNewSiteLine1("");
@@ -594,6 +597,11 @@ export function BookingModal({
       errs.customer_name = "Enter a customer name";
     }
     if (!jobDate) errs.job_date = "Pick a date";
+    // Pests are optional, but an "Other" pill with no description must not
+    // save a bare "Other".
+    if (selectedPests.includes(OTHER_PILL) && !otherPest.trim()) {
+      errs.other_pest = "Describe the other pest";
+    }
     return errs;
   }
 
@@ -727,7 +735,7 @@ export function BookingModal({
           <input
             type="hidden"
             name="pest_species"
-            value={JSON.stringify(selectedPests)}
+            value={JSON.stringify(encodeOther(selectedPests, otherPest))}
           />
 
           {hasClientErrors && (
@@ -1172,6 +1180,27 @@ export function BookingModal({
                     </button>
                   ))}
                 </div>
+                {selectedPests.includes(OTHER_PILL) && (
+                  <div className="mt-2">
+                    <label htmlFor="bn-pest_other" className={labelClass}>
+                      Describe the other pest{" "}
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="bn-pest_other"
+                      type="text"
+                      value={otherPest}
+                      onChange={(e) => setOtherPest(e.target.value)}
+                      placeholder="e.g. Cockroaches"
+                      className={inputClass}
+                    />
+                    {clientErrors.other_pest && (
+                      <p className="mt-1 text-xs text-red-500">
+                        {clientErrors.other_pest}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <label htmlFor="bn-report_notes" className={labelClass}>

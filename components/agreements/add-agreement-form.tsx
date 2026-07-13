@@ -4,6 +4,7 @@ import { useActionState, useState, useEffect, useRef } from "react";
 import { createAgreementAction } from "@/app/(app)/sites/[id]/agreements/actions";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { PMA_PESTS } from "@/lib/constants/job-labels";
+import { OTHER_PILL, encodeOther } from "@/lib/utils/other-describe";
 import { DEFAULT_TERMS } from "@/lib/constants/agreement-terms";
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { todayUk, dateUk } from "@/lib/utils/today-uk";
@@ -61,12 +62,22 @@ export function AddAgreementForm({
   // is conditional on the email being present server-side. This lives on the
   // FORM (not a button onClick) so an Enter-key submit can't bypass the gate.
   async function handleSubmit(formData: FormData) {
+    // An "Other" pill with no description must not save a bare "Other".
+    // Block before the send-gate/dispatch and route back to the pest step.
+    if (selectedPests.includes(OTHER_PILL) && !otherPest.trim()) {
+      setOtherPestError("Describe the other pest");
+      setStep(2);
+      return;
+    }
+    setOtherPestError(null);
     if (customer) {
       await ensureReady(customer, { verb: "send", doc: "agreement" });
     }
     action(formData);
   }
   const [selectedPests, setSelectedPests] = useState<string[]>([]);
+  const [otherPest, setOtherPest] = useState("");
+  const [otherPestError, setOtherPestError] = useState<string | null>(null);
   const [clientSig, setClientSig] = useState("");
   const [gemSig, setGemSig] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -125,7 +136,7 @@ export function AddAgreementForm({
   return (
     <form action={handleSubmit}>
       <input type="hidden" name="site_id" value={siteId} />
-      <input type="hidden" name="pest_species" value={JSON.stringify(selectedPests)} />
+      <input type="hidden" name="pest_species" value={JSON.stringify(encodeOther(selectedPests, otherPest))} />
       <input type="hidden" name="client_signature" value={clientSig} />
       <input type="hidden" name="gem_signature" value={gemSig} />
 
@@ -327,6 +338,27 @@ export function AddAgreementForm({
             ))}
           </div>
           {state.errors.pest_species && <p className="mt-1 text-xs text-red-500">{state.errors.pest_species}</p>}
+          {selectedPests.includes(OTHER_PILL) && (
+            <div className="mt-3">
+              <label htmlFor="pest_other" className={labelClass}>
+                Describe the other pest <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="pest_other"
+                type="text"
+                value={otherPest}
+                onChange={(e) => {
+                  setOtherPest(e.target.value);
+                  if (otherPestError) setOtherPestError(null);
+                }}
+                placeholder="e.g. Cockroaches"
+                className={inputClass}
+              />
+              {otherPestError && (
+                <p className="mt-1 text-xs text-red-500">{otherPestError}</p>
+              )}
+            </div>
+          )}
         </div>
         <div>
           <label htmlFor="visit_frequency" className={labelClass}>
