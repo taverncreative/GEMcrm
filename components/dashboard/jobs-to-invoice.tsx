@@ -1,90 +1,137 @@
+"use client";
+
+import { useTransition } from "react";
 import Link from "next/link";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "@/lib/db";
 import { ROUTES } from "@/lib/constants/routes";
-import type { JobWithContext } from "@/lib/data/jobs";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
+import { setJobNeedsInvoiceLocal } from "@/lib/actions/needs-invoice";
+import type { JobWithContext } from "@/lib/data/jobs";
 
 interface JobsToInvoiceProps {
+  /** Server-rendered initial list (needs_invoice = true). Used only until
+   *  the Dexie live query resolves, so there's no empty flash on load. */
   jobs: JobWithContext[];
 }
 
-/** Whole-pound £ formatting, matching the Revenue widget's convention. */
-function gbp(n: number): string {
-  return `£${n.toLocaleString("en-GB", { maximumFractionDigits: 0 })}`;
+interface ChecklistRow {
+  id: string;
+  job_date: string;
+  reference_number: string | null;
+  customerName: string;
+}
+
+function shortDate(value: string): string {
+  return new Date(value).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function rowsFromProp(jobs: JobWithContext[]): ChecklistRow[] {
+  return jobs.map((j) => ({
+    id: j.id,
+    job_date: j.job_date,
+    reference_number: j.reference_number,
+    customerName: customerDisplayName(j.site.customer),
+  }));
 }
 
 /**
- * Completed jobs that haven't been billed yet — Nate's "don't forget to
- * invoice" nudge, one stage downstream of "Service sheets to fill". Mirrors
- * that widget: each row is a single tap target (customer name + the job's
- * value) linking to the job detail, where the Create Invoice CTA lives. The
- * header carries the total still waiting to bill.
+ * "Invoices required" checklist (migration 041). A running to-do of jobs
+ * Nate flagged as needing billing in QuickBooks — via the service-sheet
+ * "Invoice required" checkbox or the job-detail toggle. Ticking a row off
+ * clears the flag (setJobNeedsInvoiceLocal → optimistic Dexie write + one
+ * outbox entry), so it works offline and the row disappears instantly.
+ *
+ * Dexie-live via useLiveQuery so a flag set offline (or ticked off) shows
+ * immediately; the server prop is the initial paint before IDB resolves.
+ * No money framing — invoicing itself lives in QuickBooks.
  */
 export function JobsToInvoice({ jobs }: JobsToInvoiceProps) {
-  if (jobs.length === 0) {
+  const [, startTransition] = useTransition();
+
+  const live = useLiveQuery(async (): Promise<ChecklistRow[]> => {
+    const flagged = await db.jobs
+      .filter((j) => !!j.needs_invoice && !j.is_archived && !j.deleted_at)
+      .toArray();
+    const rows: ChecklistRow[] = [];
+    for (const j of flagged) {
+      const site = j.site_id ? await db.sites.get(j.site_id) : undefined;
+      const customer = site?.customer_id
+        ? await db.customers.get(site.customer_id)
+        : undefined;
+      rows.push({
+        id: j.id,
+        job_date: j.job_date,
+        reference_number: j.reference_number,
+        customerName: customer
+          ? customerDisplayName(customer)
+          : "Unknown customer",
+      });
+    }
+    // Newest first, matching getJobsNeedingInvoice.
+    return rows.sort((a, b) =>
+      (b.job_date || "").localeCompare(a.job_date || "")
+    );
+  }, []);
+
+  // undefined = IDB still loading → fall back to the server prop.
+  const rows = live ?? rowsFromProp(jobs);
+
+  function clear(jobId: string) {
+    startTransition(async () => {
+      await setJobNeedsInvoiceLocal(jobId, false);
+    });
+  }
+
+  if (rows.length === 0) {
     return (
       <div className="rounded-xl bg-white p-5 shadow-sm">
-        <h3 className="text-sm font-medium text-gray-500">To invoice</h3>
+        <h3 className="text-sm font-medium text-gray-500">Invoices required</h3>
         <p className="mt-3 text-sm text-gray-400">
-          Nothing waiting — all completed jobs are billed.
+          Nothing needs invoicing right now.
         </p>
       </div>
     );
   }
 
-  const total = jobs.reduce((sum, job) => sum + Number(job.value ?? 0), 0);
-
   return (
     <div className="rounded-xl bg-white p-5 shadow-sm">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-medium text-gray-500">To invoice</h3>
-        {/* Total still waiting to bill across the pending jobs. */}
-        <span className="text-xs font-medium text-gray-500">{gbp(total)}</span>
+        <h3 className="text-sm font-medium text-gray-500">Invoices required</h3>
+        <span className="text-xs font-medium text-gray-400">{rows.length}</span>
       </div>
       <ul className="space-y-1.5">
-        {jobs.slice(0, 5).map((job) => (
-          <li key={job.id}>
+        {rows.map((row) => (
+          <li
+            key={row.id}
+            className="flex items-center gap-3 rounded-lg border border-gray-100 px-3 py-2.5"
+          >
+            <input
+              type="checkbox"
+              onChange={() => clear(row.id)}
+              aria-label={`Mark ${row.customerName} as invoiced`}
+              title="Tick once billed in QuickBooks"
+              className="h-5 w-5 shrink-0 cursor-pointer rounded border-gray-300 text-brand-darker focus:ring-brand"
+            />
             <Link
-              href={ROUTES.jobDetail(job.id)}
-              className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 px-3 py-2.5 transition-colors hover:bg-gray-50"
+              href={ROUTES.jobDetail(row.id)}
+              className="min-w-0 flex-1 transition-colors hover:opacity-80"
             >
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">
-                {customerDisplayName(job.site.customer)}
+              <span className="block truncate text-sm font-medium text-gray-900">
+                {row.customerName}
               </span>
-              {job.value != null && (
-                <span className="shrink-0 text-sm tabular-nums text-gray-500">
-                  {gbp(Number(job.value))}
-                </span>
-              )}
-              <ChevronRight />
+              <span className="block truncate text-xs text-gray-500">
+                {row.reference_number ? `${row.reference_number} · ` : ""}
+                {shortDate(row.job_date)}
+              </span>
             </Link>
           </li>
         ))}
-        {jobs.length > 5 && (
-          <li className="pt-1 text-center">
-            <Link
-              href={ROUTES.JOBS}
-              className="text-xs font-medium text-gray-500 hover:text-gray-700"
-            >
-              View all {jobs.length}
-            </Link>
-          </li>
-        )}
       </ul>
     </div>
-  );
-}
-
-function ChevronRight() {
-  return (
-    <svg
-      className="h-4 w-4 shrink-0 text-gray-300"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-      aria-hidden="true"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-    </svg>
   );
 }

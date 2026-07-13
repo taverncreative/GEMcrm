@@ -5,7 +5,7 @@ import {
   getUpcomingJobs,
   getRecentJobs,
   getBookingsMissingServiceSheet,
-  getJobsReadyToInvoice,
+  getJobsNeedingInvoice,
 } from "@/lib/data/jobs";
 import { getJobsInRange, getTasksInRange } from "@/lib/data/calendar";
 import { getRecentCustomers } from "@/lib/data/customers";
@@ -92,7 +92,7 @@ async function DashboardWidgets() {
     getTasksDueToday(),
     getOverdueTasks(),
     getBookingsMissingServiceSheet(),
-    getJobsReadyToInvoice(),
+    getJobsNeedingInvoice(),
     getExpiringAgreements(30),
     getCustomerContactTasks(5),
     getRevenueStats(),
@@ -182,7 +182,7 @@ async function DashboardWidgets() {
           {
             id: "jobs-to-invoice",
             node: (
-              <WidgetFrame id="jobs-to-invoice" title="To invoice">
+              <WidgetFrame id="jobs-to-invoice" title="Invoices required">
                 <JobsToInvoice jobs={jobsToInvoice} />
               </WidgetFrame>
             ),

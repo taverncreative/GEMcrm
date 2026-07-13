@@ -41,6 +41,7 @@ import { isServiceSheetFilled } from "@/lib/validation/service-sheet";
 import { JobStatusActions } from "@/components/jobs/job-status-actions";
 import { DeleteJobConfirm } from "@/components/jobs/delete-job-confirm";
 import { RescheduleJobModal } from "@/components/jobs/reschedule-job-modal";
+import { NeedsInvoiceToggle } from "@/components/jobs/needs-invoice-toggle";
 import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { SmartBackButton } from "@/components/smart-back-button";
@@ -414,6 +415,16 @@ export default function JobDetailPage() {
               · {new Date(job.job_date).toLocaleDateString()}
             </h1>
             <JobStatusActions jobId={job.id} currentStatus={job.job_status} />
+            {/* "Invoices required" checklist flag (migration 041). Completed
+                jobs only — the recovery path if the sheet's "Invoice
+                required" box was missed. Slice 1; independent of the legacy
+                Create Invoice button below (Slice 2). */}
+            {job.job_status === "completed" && (
+              <NeedsInvoiceToggle
+                jobId={job.id}
+                needsInvoice={job.needs_invoice}
+              />
+            )}
             {/* "Fill Service Sheet" is a completion affordance — show it for a
                 fillable booking only. Completed → done (no link). */}
             {job.job_status !== "completed" && (

@@ -62,6 +62,9 @@ export interface ServiceSheetDraft {
   photo_data_urls: string[];
   schedule_follow_up: boolean;
   follow_up_date: string;
+  /** "Invoice required" checkbox state (optional so drafts written before
+   *  this field existed load cleanly). Non-indexed → no Dexie version bump. */
+  invoice_required?: boolean;
 }
 
 /** Everything the form needs to write; updated_at is stamped here. */

@@ -49,6 +49,8 @@ vi.mock("@/app/(app)/jobs/[id]/actions", () => ({
     followUps: 0,
   })),
   deleteJobAction: vi.fn(async () => ({ success: true })),
+  // Pulled in via NeedsInvoiceToggle (completed-job header control).
+  setJobNeedsInvoiceAction: vi.fn(async () => ({ success: true })),
 }));
 
 // Leaf components not under test — render nothing.
@@ -105,6 +107,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     value: null,
     is_invoiced: false,
     is_paid: false,
+    needs_invoice: false,
     report_emailed_to: null,
     report_emailed_at: null,
     reference_number: "JOB-001",

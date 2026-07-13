@@ -74,6 +74,7 @@ function buildRawSheetInput(formData: FormData) {
     client_present: (formData.get("client_present") as string) ?? "",
     client_signature: (formData.get("client_signature") as string) ?? "",
     client_name: (formData.get("client_name") as string) ?? "",
+    invoice_required: (formData.get("invoice_required") as string) ?? "",
   };
 }
 
@@ -151,6 +152,7 @@ export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
       photo_urls: localPhotoUrls,
       client_present: input.client_present,
       client_name: input.client_name || null,
+      needs_invoice: input.invoice_required,
       // Combined entry (finalize) completes the job locally — the
       // optimistic mirror of the server's finalizeServiceSheet. The
       // non-finalize shape keeps today's in_progress semantics. Amend
@@ -367,6 +369,9 @@ function ServiceSheetFormBody({
   const [followUpDate, setFollowUpDate] = useState(
     () => draft?.follow_up_date ?? dateUkOffset(14)
   );
+  const [invoiceRequired, setInvoiceRequired] = useState(
+    draft?.invoice_required ?? false
+  );
   const prevErrorsRef = useRef<Record<string, string>>({});
   const router = useRouter();
 
@@ -570,6 +575,7 @@ function ServiceSheetFormBody({
         photo_data_urls: photoDataUrls,
         schedule_follow_up: scheduleFollowUp,
         follow_up_date: followUpDate,
+        invoice_required: invoiceRequired,
       });
     }, 500);
     return () => clearTimeout(t);
@@ -594,6 +600,7 @@ function ServiceSheetFormBody({
     photoDataUrls,
     scheduleFollowUp,
     followUpDate,
+    invoiceRequired,
   ]);
 
   function togglePest(pest: string) {
@@ -654,6 +661,11 @@ function ServiceSheetFormBody({
       <input type="hidden" name="technician_signature" value={techSig} />
       <input type="hidden" name="client_signature" value={clientSig} />
       <input type="hidden" name="client_present" value={clientPresent ? "true" : ""} />
+      <input
+        type="hidden"
+        name="invoice_required"
+        value={invoiceRequired ? "true" : ""}
+      />
       <input
         type="hidden"
         name="schedule_follow_up"
@@ -1126,6 +1138,26 @@ function ServiceSheetFormBody({
             />
           </div>
         )}
+
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={invoiceRequired}
+              onChange={(e) => setInvoiceRequired(e.target.checked)}
+              className="mt-0.5 h-5 w-5 rounded border-gray-300 text-brand-darker focus:ring-brand"
+            />
+            <div className="flex-1">
+              <span className="block text-sm font-medium text-gray-900">
+                Invoice required
+              </span>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Adds this job to the &ldquo;Invoices required&rdquo; list on
+                the homepage to bill in QuickBooks.
+              </p>
+            </div>
+          </label>
+        </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <label className="flex cursor-pointer items-start gap-3">

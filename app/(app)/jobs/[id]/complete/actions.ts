@@ -121,6 +121,7 @@ export async function completeServiceSheetAction(
     client_present: str("client_present"),
     client_signature: str("client_signature"),
     client_name: str("client_name"),
+    invoice_required: str("invoice_required"),
   };
 
   const result = ServiceSheetSchema.safeParse(raw);

@@ -388,6 +388,53 @@ export async function rescheduleJob(
   }
 }
 
+/**
+ * Set the "Invoices required" checklist flag on a job (migration 041).
+ * A plain field update — flagged from the job-detail toggle or ticked off
+ * from the homepage checklist. Last-write-wins (single operator); not a
+ * self-hiding write, so no 42501 concern.
+ */
+export async function setJobNeedsInvoice(
+  jobId: string,
+  needsInvoice: boolean
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("jobs")
+    .update({ needs_invoice: needsInvoice, updated_at: new Date().toISOString() })
+    .eq("id", jobId);
+
+  if (error) {
+    console.error("[setJobNeedsInvoice]", error.code, error.message);
+    throw new Error(`Failed to update invoice flag: ${error.message}`);
+  }
+}
+
+/**
+ * Jobs flagged as "needs invoicing" (migration 041) — the homepage
+ * "Invoices required" checklist. Non-archived, non-deleted; newest first.
+ */
+export async function getJobsNeedingInvoice(
+  limit: number = 50
+): Promise<JobWithContext[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("*, site:sites!inner(*, customer:customers!inner(*))")
+    .eq("needs_invoice", true)
+    .eq("is_archived", false)
+    .order("job_date", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("[getJobsNeedingInvoice]", error.code, error.message);
+    return [];
+  }
+
+  return (data ?? []) as unknown as JobWithContext[];
+}
+
 export async function hasJobForSiteOnDate(
   siteId: string,
   jobDate: string,
@@ -685,6 +732,7 @@ async function writeServiceSheet(
       photo_urls: photoUrls,
       client_present: input.client_present,
       client_name: emptyToNull(input.client_name),
+      needs_invoice: input.invoice_required,
       technician_signature_url: techSigUrl,
       client_signature_url: clientSigUrl,
       // in_progress went through the guarded write above; only

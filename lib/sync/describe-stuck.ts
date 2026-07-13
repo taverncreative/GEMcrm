@@ -17,6 +17,7 @@ const FRIENDLY: Record<string, string> = {
   createCustomerAction: "New customer",
   updateJobStatusAction: "Job status change",
   rescheduleJobAction: "Reschedule",
+  setJobNeedsInvoiceAction: "Invoice flag",
   updateAgreementStatusAction: "Agreement status change",
   completeTaskAction: "Task completion",
   setCustomerTypeAction: "Customer update",

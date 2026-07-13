@@ -59,6 +59,10 @@ export const ServiceSheetSchema = z.object({
   client_present: z.coerce.boolean().default(false),
   client_signature: optionalString,
   client_name: optionalString,
+  /** "Invoice required" checkbox — flags the job for the QuickBooks
+   *  billing checklist. Coerced + defaulted like client_present so an
+   *  unchecked box (absent key) is a clean false. */
+  invoice_required: z.coerce.boolean().default(false),
 });
 
 export type ServiceSheetInput = z.infer<typeof ServiceSheetSchema>;

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import {
   updateJobStatus,
   rescheduleJob,
+  setJobNeedsInvoice,
   getJobById,
   deleteJob,
   getJobDeleteImpact,
@@ -104,6 +105,31 @@ export async function rescheduleJobAction(
   revalidatePath("/jobs");
   revalidatePath("/dashboard");
   return { success: true, errors: {}, message: null };
+}
+
+/**
+ * Toggle the "Invoices required" checklist flag on a job (migration 041).
+ * Direct-call, wrapped local-first via wrapAction at the call site so the
+ * flag round-trips offline (optimistic Dexie write + one outbox entry).
+ */
+export async function setJobNeedsInvoiceAction(
+  jobId: string,
+  needsInvoice: boolean
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!jobId) return { success: false, message: "Missing job id" };
+  try {
+    await setJobNeedsInvoice(jobId, needsInvoice);
+    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath("/dashboard");
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      message:
+        err instanceof Error ? err.message : "Failed to update invoice flag",
+    };
+  }
 }
 
 /**

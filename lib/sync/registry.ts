@@ -33,6 +33,7 @@ import { createTaskAction } from "@/app/(app)/tasks/actions";
 import {
   updateJobStatusAction,
   rescheduleJobAction,
+  setJobNeedsInvoiceAction,
 } from "@/app/(app)/jobs/[id]/actions";
 import { updateAgreementStatusAction } from "@/app/(app)/agreements/[id]/actions";
 import {
@@ -134,6 +135,11 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     kind: "direct",
     invoke: (...args) =>
       setReviewReceivedAction(args[0] as string, args[1] as boolean),
+  },
+  setJobNeedsInvoiceAction: {
+    kind: "direct",
+    invoke: (...args) =>
+      setJobNeedsInvoiceAction(args[0] as string, args[1] as boolean),
   },
   setCustomerTypeAction: {
     kind: "direct",

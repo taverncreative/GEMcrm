@@ -109,6 +109,11 @@ export interface Job {
   value: number | null;
   is_invoiced: boolean;
   is_paid: boolean;
+  /** "Invoices required" checklist flag (migration 041). Operator-set via
+   *  the service-sheet checkbox or the job-detail toggle; flagged jobs
+   *  collect in the homepage checklist and are ticked off once billed in
+   *  QuickBooks. Independent of the legacy is_invoiced flag. */
+  needs_invoice: boolean;
   reference_number: string | null;
   /** L3 email truth (migration 033): set server-side ONLY when a report
    *  email actually sends. Null = never emailed. */

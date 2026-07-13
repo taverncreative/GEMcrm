@@ -283,6 +283,11 @@ create index if not exists idx_tasks_agreement_id on tasks (agreement_id);
 alter table jobs add column if not exists value numeric;
 alter table jobs add column if not exists is_invoiced boolean not null default false;
 alter table jobs add column if not exists is_paid boolean not null default false;
+-- 041: "Invoices required" checklist flag (QuickBooks reminder). Operator
+-- flags a job as needing billing (sheet checkbox or job-detail toggle);
+-- flagged jobs collect in a homepage checklist, ticked off once billed in
+-- QuickBooks. Additive, default false — no existing row is affected.
+alter table jobs add column if not exists needs_invoice boolean not null default false;
 
 create table if not exists invoices (
   id uuid primary key default gen_random_uuid(),
