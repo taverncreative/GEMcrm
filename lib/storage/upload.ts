@@ -1,12 +1,22 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const BUCKET = "reports";
+
+// Writes go through the service-role admin client, NOT the user-JWT SSR
+// client. The `reports` bucket is private with an INSERT policy scoped to
+// `authenticated` only (H1 moved reads to a service-role proxy to close a
+// PII hole; the anon INSERT policy stays REMOVED). On the field
+// sync-replay path the user token doesn't reliably reach the Storage API,
+// so a user-client upload arrives as anon and is rejected with 42501
+// "new row violates row-level security policy". Every caller here is
+// already behind a requireUser()-gated server action/route, so using the
+// admin client is safe and does not widen who can upload.
 
 export async function uploadBase64Image(
   dataUrl: string,
   path: string
 ): Promise<string> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
   const buffer = Buffer.from(base64, "base64");
@@ -31,7 +41,7 @@ export async function uploadPdf(
   buffer: Buffer,
   path: string
 ): Promise<string> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { error } = await supabase.storage
     .from(BUCKET)

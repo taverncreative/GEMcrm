@@ -28,7 +28,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth/require-user";
 import {
   isPhotoClientId,
@@ -96,7 +96,13 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const path = photoStoragePath(photoIdRaw);
-  const supabase = await createClient();
+  // Writes go through the service-role admin client (see lib/storage/upload.ts
+  // for the full rationale): the private `reports` bucket's INSERT policy is
+  // scoped to `authenticated`, and on the field sync-replay the user token
+  // doesn't reliably reach the Storage API, so a user-client upload lands as
+  // anon → 42501. requireUser() above is the auth gate; this endpoint is never
+  // reachable unauthenticated.
+  const supabase = createAdminClient();
 
   // Convert Blob → ArrayBuffer for the Supabase upload (the Node-side
   // SDK accepts Buffer or Uint8Array).
