@@ -10,6 +10,11 @@ export interface DocumentItem {
   date: string;
   /** Subtitle for the document, e.g. amount for an invoice. */
   subtitle?: string;
+  /** Service-sheet only: site address one-liner (line 1 + town/postcode),
+   *  so a row is distinguishable even when the job has no reference. */
+  siteAddress?: string | null;
+  /** Service-sheet only: pests recorded on the job. */
+  pests?: string[];
   /** Renewal date on agreements; due date on invoices. Drives the badge. */
   renewalDate?: string | null;
   /** Driven by renewalDate: ok | upcoming (<=30d) | overdue. */
@@ -62,7 +67,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
   // Service reports — only those with a generated PDF.
   const { data: reports } = await supabase
     .from("reports")
-    .select("id, job_id, pdf_url, created_at, job:jobs(reference_number, job_date, site:sites(customer:customers(id, name, company_name)))")
+    .select("id, job_id, pdf_url, created_at, job:jobs(reference_number, job_date, pest_species, site:sites(address_line_1, town, postcode, customer:customers(id, name, company_name)))")
     .not("pdf_url", "is", null)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -120,13 +125,27 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
         job: Joined<{
           reference_number: string | null;
           job_date: string;
-          site: Joined<{ customer: Joined<{ id: string; name: string; company_name: string | null }> }>;
+          pest_species: string[] | null;
+          site: Joined<{
+            address_line_1: string | null;
+            town: string | null;
+            postcode: string | null;
+            customer: Joined<{ id: string; name: string; company_name: string | null }>;
+          }>;
         }>;
       }).job
     );
     const site = one(job?.site);
     const cust = one(site?.customer);
     const ref = job?.reference_number ?? null;
+    // Site one-liner: line 1 + town + postcode, whichever are present. This
+    // is what keeps ref-less service sheets from all reading "Service Sheet".
+    const siteAddress = site
+      ? [site.address_line_1, site.town, site.postcode]
+          .map((p) => p?.trim())
+          .filter(Boolean)
+          .join(", ") || null
+      : null;
     items.push({
       id: `report-${r.id}`,
       kind: "service_sheet",
@@ -142,6 +161,8 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
             year: "numeric",
           })
         : undefined,
+      siteAddress,
+      pests: job?.pest_species ?? [],
     });
   }
 
