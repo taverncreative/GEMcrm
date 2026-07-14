@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { todayUk } from "@/lib/utils/today-uk";
+import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { newId } from "@/lib/utils/id";
 import type { Job, Site, Customer, JobStatus } from "@/types/database";
 import type { BookingCreateInput } from "@/lib/validation/booking";
@@ -160,18 +160,19 @@ export async function getUpcomingJobs(
   limit: number = 5
 ): Promise<JobWithContext[]> {
   const supabase = await createClient();
-  const today = todayUk();
+  // Overdue visits stay on the list until they're done. The lower bound is
+  // 90 days back (not all-time) so genuinely abandoned old bookings don't
+  // dredge up, while a missed visit from last week stays visible and red.
+  // The list is now "things still on my plate": every scheduled/in_progress
+  // job from 90 days ago onwards, most-overdue first (ascending date). A
+  // finished job (completed) or an archived/deleted one never appears.
+  const floor = dateUkOffset(-90);
 
-  // "Upcoming" = anything from today onwards that hasn't been finished yet.
-  // Previously this used `.gt("job_date", today)` which skipped today's
-  // bookings AND made no status filter, so a completed job still appeared
-  // and a fresh booking for today/tomorrow didn't. Users expect this to
-  // mean "things still on my plate from now on".
   const { data, error } = await supabase
     .from("jobs")
     .select("*, site:sites!inner(*, customer:customers!inner(*))")
     .is("deleted_at", null)
-    .gte("job_date", today)
+    .gte("job_date", floor)
     .in("job_status", ["scheduled", "in_progress"])
     .eq("is_archived", false)
     .order("job_date", { ascending: true })
