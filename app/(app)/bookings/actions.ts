@@ -289,8 +289,14 @@ export async function createQuickBookingAction(
     return { success: false, errors, message: null };
   }
 
+  // The service-sheet-from-scratch flow starts its job "in_progress"; any
+  // other value (or its absence) is the normal "scheduled" booking. Only
+  // these two are ever accepted from this path — never completed/draft.
+  const jobStatus =
+    formData.get("job_status") === "in_progress" ? "in_progress" : "scheduled";
+
   try {
-    await createBooking(bookingResult.data, { id: jobIdNew });
+    await createBooking(bookingResult.data, { id: jobIdNew, jobStatus });
   } catch (err) {
     if (err instanceof JobClashError) {
       return {

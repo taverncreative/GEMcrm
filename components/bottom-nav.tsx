@@ -64,6 +64,7 @@ export function BottomNav() {
   const [createOpen, setCreateOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   // Reuse the sidebar's exact active-state predicate.
   const isRouteActive = (href: string) =>
@@ -147,6 +148,14 @@ export function BottomNav() {
               setBookingOpen(true);
             }}
           />
+          <SheetButton
+            icon={<SheetIcon />}
+            label="New service sheet"
+            onClick={() => {
+              setCreateOpen(false);
+              setSheetOpen(true);
+            }}
+          />
           <SheetLink
             icon={<UserPlusIcon />}
             label="Add Customer"
@@ -171,8 +180,15 @@ export function BottomNav() {
         </Sheet>
       )}
 
-      {/* Create modal — reused unchanged. */}
+      {/* Create modals — the booking flow, and the same modal in
+          service-sheet mode (creates an in_progress job, then routes to the
+          fill flow). */}
       <BookingModal open={bookingOpen} onClose={() => setBookingOpen(false)} />
+      <BookingModal
+        open={sheetOpen}
+        intent="service-sheet"
+        onClose={() => setSheetOpen(false)}
+      />
     </>
   );
 }
@@ -319,6 +335,14 @@ function PlusIcon() {
   return (
     <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    </svg>
+  );
+}
+
+function SheetIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" />
     </svg>
   );
 }

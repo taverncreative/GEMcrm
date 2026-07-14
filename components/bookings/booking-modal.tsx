@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
+import { ROUTES } from "@/lib/constants/routes";
 import {
   searchCustomersLocal,
   getSitesForCustomerLocal,
@@ -73,6 +75,9 @@ export interface BookingWrapInput {
     pest_species: string[];
     value: string;
     report_notes: string;
+    /** The status the created job starts in: "scheduled" for a booking,
+     *  "in_progress" for a service sheet started from scratch. */
+    job_status: string;
   };
 }
 
@@ -133,7 +138,10 @@ export function makeBookingMeta(): WrapMeta<BookingWrapInput> {
       if (!jobDate || !customerId || !siteId) return null;
 
       return {
-        jobId: newId(),
+        // The service-sheet-from-scratch flow mints the job id in the
+        // component (so it can navigate to /complete on save) and passes it
+        // in; the booking flow omits it and mints one here.
+        jobId: s(formData, "job_id") || newId(),
         newCustomerId,
         newSiteId,
         customerId,
@@ -160,6 +168,7 @@ export function makeBookingMeta(): WrapMeta<BookingWrapInput> {
           pest_species: parseBookingPests(formData),
           value: s(formData, "value"),
           report_notes: s(formData, "report_notes"),
+          job_status: s(formData, "job_status") || "scheduled",
         },
       };
     },
@@ -236,7 +245,7 @@ export function makeBookingMeta(): WrapMeta<BookingWrapInput> {
         risk_comments: null,
         technician_signature_url: null,
         client_signature_url: null,
-        job_status: "scheduled",
+        job_status: (f.job_status as Job["job_status"]) || "scheduled",
         agreement_id: null,
         environmental_risk: null,
         environmental_comments: null,
@@ -298,6 +307,11 @@ interface BookingModalProps {
   /** Optional — prefill customer / site (e.g. when opened from a site page). */
   presetCustomer?: Customer | null;
   presetSite?: Site | null;
+  /** "booking" (default) schedules a future visit. "service-sheet" documents
+   *  a visit that already happened: it relabels the modal, drops the
+   *  arrival-window / clash advisory, creates the job as `in_progress`, and
+   *  on save navigates straight to the fill flow at /jobs/[id]/complete. */
+  intent?: "booking" | "service-sheet";
 }
 
 type SiteMode = "existing" | "new";
@@ -378,7 +392,14 @@ export function BookingModal({
   onClose,
   presetCustomer,
   presetSite,
+  intent = "booking",
 }: BookingModalProps) {
+  const router = useRouter();
+  const isSheet = intent === "service-sheet";
+  // A service sheet mints its job id up front so the success handler can
+  // navigate to that job's fill flow. Booking leaves this "" (the meta mints
+  // its own id).
+  const [sheetJobId, setSheetJobId] = useState("");
   // ── Customer state (single type-to-select-or-create field) ──
   // No existing/new tabs: `customerQuery` is the field's text; picking a
   // match sets `selectedCustomer`. On save, a selected customer is used as
@@ -524,6 +545,8 @@ export function BookingModal({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSiteMode(presetCustomer ? "existing" : "new");
     setDifferentSite(false);
+    // Fresh job id for this sheet, so the save handler can route to it.
+    setSheetJobId(newId());
     // H4: clear the sticky action state so this open starts from
     // success:false and the next save is a real false->true transition.
     resetAction();
@@ -597,9 +620,14 @@ export function BookingModal({
     // reopened modal open even though onClose's identity changes per render.
     if (state.success && !prevSuccessRef.current) {
       onClose();
+      if (isSheet && sheetJobId) {
+        // The job is already in Dexie (applyLocal ran), so the fill page loads
+        // it offline — drop the operator straight onto the sheet.
+        router.push(`${ROUTES.jobDetail(sheetJobId)}/complete`);
+      }
     }
     prevSuccessRef.current = state.success;
-  }, [state.success, onClose]);
+  }, [state.success, onClose, isSheet, sheetJobId, router]);
 
   // Live overlap advisory (replaces the old first-save gate, which swallowed
   // the first tap): recompute the clash list as the date/window changes so
@@ -608,7 +636,9 @@ export function BookingModal({
   // Dexie; `cancelled` discards a stale read that resolves after the deps
   // have moved on. An untimed booking clears the warning and skips the read.
   useEffect(() => {
-    if (!open) return;
+    // A service sheet documents a visit that already happened, so scheduling
+    // clashes are irrelevant — skip the advisory entirely in that intent.
+    if (!open || isSheet) return;
     let cancelled = false;
     const timer = setTimeout(() => {
       if (!jobTime) {
@@ -628,7 +658,7 @@ export function BookingModal({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [open, jobDate, jobTime, jobTimeEnd]);
+  }, [open, isSheet, jobDate, jobTime, jobTimeEnd]);
 
   const runCustomerSearch = useCallback((v: string) => {
     setCustomerQuery(v);
@@ -709,10 +739,11 @@ export function BookingModal({
     // brand-new site has no id yet, so it's impossible. Block inline BEFORE
     // the optimistic write so a duplicate never becomes a stuck outbox
     // entry. The conflict inbox stays as the server-side backstop for the
-    // rare offline race.
+    // rare offline race. Skipped for a service sheet (a past visit can share a
+    // site/date/type with a scheduled job without being a duplicate booking).
     const resolvedSiteId =
       siteMode === "existing" ? selectedSite?.id ?? "" : "";
-    if (resolvedSiteId && callType && jobDate) {
+    if (!isSheet && resolvedSiteId && callType && jobDate) {
       const clash = await findClashingJobLocal(
         resolvedSiteId,
         jobDate,
@@ -766,7 +797,7 @@ export function BookingModal({
       <div className="relative flex h-full w-full flex-col bg-white shadow-xl sm:mx-4 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-2xl">
         <div className="flex shrink-0 items-center justify-between border-b px-5 py-4">
           <h2 className="text-base font-semibold text-gray-900">
-            New Booking
+            {isSheet ? "New service sheet" : "New Booking"}
           </h2>
           <button
             type="button"
@@ -828,6 +859,17 @@ export function BookingModal({
           <input type="hidden" name="site_town" value={newSiteTown} />
           <input type="hidden" name="site_county" value={newSiteCounty} />
           <input type="hidden" name="site_postcode" value={newSitePostcode} />
+          {/* A service sheet starts its job in_progress ("being worked on")
+              and carries a component-minted id so the save can navigate to it;
+              a booking starts scheduled and lets the meta mint the id. */}
+          <input
+            type="hidden"
+            name="job_status"
+            value={isSheet ? "in_progress" : "scheduled"}
+          />
+          {isSheet && (
+            <input type="hidden" name="job_id" value={sheetJobId} />
+          )}
           <input type="hidden" name="job_date" value={jobDate} />
           <input type="hidden" name="job_time" value={jobTime} />
           <input type="hidden" name="job_time_end" value={jobTimeEnd} />
@@ -853,8 +895,9 @@ export function BookingModal({
 
           {/* Non-blocking overlap warning — names the conflict(s) and lets
               the operator save anyway (the submit button becomes "Save
-              anyway"). Mirrors the amber warn-and-proceed delete pattern. */}
-          {clashWarning && clashWarning.length > 0 && (
+              anyway"). Mirrors the amber warn-and-proceed delete pattern.
+              Suppressed for a service sheet (no scheduling to clash with). */}
+          {!isSheet && clashWarning && clashWarning.length > 0 && (
             <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               <p className="font-medium">
                 Heads up — this time clashes with{" "}
@@ -1231,9 +1274,11 @@ export function BookingModal({
               <div className="sm:col-span-2">
                 <label htmlFor="bn-job_date" className={labelClass}>
                   Date <span className="text-red-500">*</span>
-                  <span className="ml-2 font-normal text-gray-400">
-                    / Arrival window
-                  </span>
+                  {!isSheet && (
+                    <span className="ml-2 font-normal text-gray-400">
+                      / Arrival window
+                    </span>
+                  )}
                 </label>
                 <div className="mt-1">
                   <input
@@ -1250,16 +1295,18 @@ export function BookingModal({
                     {errors.job_date}
                   </p>
                 )}
-                <div className="mt-2">
-                  <TimeWindowPicker
-                    idPrefix="bn-window"
-                    value={{ start: jobTime, end: jobTimeEnd }}
-                    onChange={({ start, end }) => {
-                      setJobTime(start);
-                      setJobTimeEnd(end);
-                    }}
-                  />
-                </div>
+                {!isSheet && (
+                  <div className="mt-2">
+                    <TimeWindowPicker
+                      idPrefix="bn-window"
+                      value={{ start: jobTime, end: jobTimeEnd }}
+                      onChange={({ start, end }) => {
+                        setJobTime(start);
+                        setJobTimeEnd(end);
+                      }}
+                    />
+                  </div>
+                )}
               </div>
               <div>
                 <label htmlFor="bn-call_type" className={labelClass}>
@@ -1381,9 +1428,11 @@ export function BookingModal({
             >
               {isPending
                 ? "Saving…"
-                : clashWarning
-                  ? "Save anyway"
-                  : "Add Booking"}
+                : isSheet
+                  ? "Start sheet"
+                  : clashWarning
+                    ? "Save anyway"
+                    : "Add Booking"}
             </button>
           </div>
         </form>

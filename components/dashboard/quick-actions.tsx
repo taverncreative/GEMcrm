@@ -23,6 +23,7 @@ import { BookingModal } from "@/components/bookings/booking-modal";
  */
 export function QuickActions() {
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [serviceSheetOpen, setServiceSheetOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // Open a modal from the mobile sheet: close the sheet at the same time
@@ -32,6 +33,11 @@ export function QuickActions() {
   function openBookingFromSheet() {
     setSheetOpen(false);
     setBookingOpen(true);
+  }
+
+  function openServiceSheetFromSheet() {
+    setSheetOpen(false);
+    setServiceSheetOpen(true);
   }
 
   return (
@@ -45,6 +51,14 @@ export function QuickActions() {
         >
           <PlusIcon />
           New Booking
+        </button>
+        <button
+          type="button"
+          onClick={() => setServiceSheetOpen(true)}
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+        >
+          <SheetIcon />
+          New service sheet
         </button>
         <Link
           href={ROUTES.CUSTOMERS_NEW}
@@ -100,6 +114,16 @@ export function QuickActions() {
                 </span>
                 New Booking
               </button>
+              <button
+                type="button"
+                onClick={openServiceSheetFromSheet}
+                className="flex min-h-12 items-center gap-3 px-5 py-3 text-left text-base font-medium text-gray-900 active:bg-gray-50"
+              >
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500">
+                  <SheetIcon />
+                </span>
+                New service sheet
+              </button>
               <Link
                 href={ROUTES.CUSTOMERS_NEW}
                 onClick={() => setSheetOpen(false)}
@@ -116,7 +140,20 @@ export function QuickActions() {
       )}
 
       <BookingModal open={bookingOpen} onClose={() => setBookingOpen(false)} />
+      <BookingModal
+        open={serviceSheetOpen}
+        intent="service-sheet"
+        onClose={() => setServiceSheetOpen(false)}
+      />
     </>
+  );
+}
+
+function SheetIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" />
+    </svg>
   );
 }
 

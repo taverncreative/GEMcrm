@@ -475,7 +475,9 @@ export async function createBooking(
   // Accepts the lenient create input (call_type may be ""); the strict
   // BookingInput from other callers is assignable to it.
   input: BookingCreateInput,
-  opts?: { id?: string }
+  // `jobStatus` lets the service-sheet-from-scratch flow start the job as
+  // "in_progress" (being worked on) instead of the default "scheduled".
+  opts?: { id?: string; jobStatus?: "scheduled" | "in_progress" }
 ): Promise<Job> {
   const supabase = await createClient();
 
@@ -528,7 +530,7 @@ export async function createBooking(
         pest_species: input.pest_species,
         value: input.value ?? null,
         report_notes: emptyToNull(input.report_notes),
-        job_status: "scheduled",
+        job_status: opts?.jobStatus ?? "scheduled",
         reference_number: referenceNumber,
         parent_job_id: parentJobId,
       },
