@@ -68,7 +68,7 @@ create table agreements (
   visit_frequency integer,
   pest_species text[],
   callout_terms text,
-  status text not null default 'active' check (status in ('active', 'paused', 'cancelled'))
+  status text not null default 'active' check (status in ('draft', 'active', 'paused', 'cancelled'))
 );
 
 create table tasks (

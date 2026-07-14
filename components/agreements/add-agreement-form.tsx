@@ -1,7 +1,10 @@
 "use client";
 
 import { useActionState, useState, useEffect, useRef } from "react";
-import { createAgreementAction } from "@/app/(app)/sites/[id]/agreements/actions";
+import {
+  createAgreementAction,
+  createDraftAgreementAction,
+} from "@/app/(app)/sites/[id]/agreements/actions";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { PMA_PESTS } from "@/lib/constants/job-labels";
 import { OTHER_PILL, encodeOther } from "@/lib/utils/other-describe";
@@ -53,8 +56,21 @@ export function AddAgreementForm({
     createAgreementAction,
     initialState
   );
+  // Draft path: "Save as draft" dispatches here (signatures optional). On
+  // success it redirects to the draft detail page, so there is no success
+  // card to render for this one.
+  const [draftState, draftAction, draftPending] = useActionState(
+    createDraftAgreementAction,
+    initialState
+  );
   const ensureReady = useEnsureCustomerDocReady();
   const [step, setStep] = useState(1);
+
+  // Field errors + message merged across both submit paths (only one runs
+  // per submit), so inline errors and the error banner show either way.
+  const formErrors = { ...state.errors, ...draftState.errors };
+  const formMessage = state.message ?? draftState.message;
+  const pending = isPending || draftPending;
 
   // Form action: offer the document-completeness gate first (so the
   // customer's email can be added before the server action's send leg runs),
@@ -75,6 +91,19 @@ export function AddAgreementForm({
     }
     action(formData);
   }
+
+  // "Save as draft": create an unsigned proposal and go to its detail page
+  // (no signatures, no visits, no send-gate — the review copy is sent from
+  // there). Same "Other" pest guard as the full submit.
+  function handleSaveDraft(formData: FormData) {
+    if (selectedPests.includes(OTHER_PILL) && !otherPest.trim()) {
+      setOtherPestError("Describe the other pest");
+      setStep(2);
+      return;
+    }
+    setOtherPestError(null);
+    draftAction(formData);
+  }
   const [selectedPests, setSelectedPests] = useState<string[]>([]);
   const [otherPest, setOtherPest] = useState("");
   const [otherPestError, setOtherPestError] = useState<string | null>(null);
@@ -87,14 +116,14 @@ export function AddAgreementForm({
   // Navigate to the offending step when server-side validation errors arrive.
   useEffect(() => {
     const prev = prevErrorsRef.current;
-    const curr = state.errors;
+    const curr = { ...state.errors, ...draftState.errors };
     const changed = Object.keys(curr).some((k) => curr[k] !== prev[k]);
     if (changed) {
       const errorStep = getErrorStep(curr);
       if (errorStep) setStep(errorStep);
       prevErrorsRef.current = curr;
     }
-  }, [state.errors]);
+  }, [state.errors, draftState.errors]);
 
   if (state.success) {
     return (
@@ -174,9 +203,9 @@ export function AddAgreementForm({
         </span>
       </div>
 
-      {state.message && (
+      {formMessage && (
         <div className="mb-6 rounded-xl bg-red-50 border border-red-100 p-4 text-sm text-red-600">
-          {state.message}
+          {formMessage}
         </div>
       )}
 
@@ -195,8 +224,8 @@ export function AddAgreementForm({
             required
             className={inputClass}
           />
-          {state.errors.reference_number && (
-            <p className="mt-1 text-xs text-red-500">{state.errors.reference_number}</p>
+          {formErrors.reference_number && (
+            <p className="mt-1 text-xs text-red-500">{formErrors.reference_number}</p>
           )}
         </div>
         <div>
@@ -211,8 +240,8 @@ export function AddAgreementForm({
             placeholder="Business name or primary contact"
             className={inputClass}
           />
-          {state.errors.contact_name && (
-            <p className="mt-1 text-xs text-red-500">{state.errors.contact_name}</p>
+          {formErrors.contact_name && (
+            <p className="mt-1 text-xs text-red-500">{formErrors.contact_name}</p>
           )}
         </div>
         <div>
@@ -227,8 +256,8 @@ export function AddAgreementForm({
             placeholder="Street, Town, County, Postcode"
             className={inputClass}
           />
-          {state.errors.invoice_address && (
-            <p className="mt-1 text-xs text-red-500">{state.errors.invoice_address}</p>
+          {formErrors.invoice_address && (
+            <p className="mt-1 text-xs text-red-500">{formErrors.invoice_address}</p>
           )}
         </div>
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -237,8 +266,8 @@ export function AddAgreementForm({
               Telephone <span className="text-red-500">*</span>
             </label>
             <input id="contact_phone" type="tel" name="contact_phone" required placeholder="01xxx xxx xxx" className={inputClass} />
-            {state.errors.contact_phone && (
-              <p className="mt-1 text-xs text-red-500">{state.errors.contact_phone}</p>
+            {formErrors.contact_phone && (
+              <p className="mt-1 text-xs text-red-500">{formErrors.contact_phone}</p>
             )}
           </div>
           <div>
@@ -251,8 +280,8 @@ export function AddAgreementForm({
             Email <span className="text-red-500">*</span>
           </label>
           <input id="contact_email" type="email" name="contact_email" required placeholder="contact@example.com" className={inputClass} />
-          {state.errors.contact_email && (
-            <p className="mt-1 text-xs text-red-500">{state.errors.contact_email}</p>
+          {formErrors.contact_email && (
+            <p className="mt-1 text-xs text-red-500">{formErrors.contact_email}</p>
           )}
         </div>
         <div className="flex items-center justify-between pt-4">
@@ -280,7 +309,7 @@ export function AddAgreementForm({
               <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">&pound;</span>
               <input id="contract_value" type="number" name="contract_value" required min={0} step="0.01" placeholder="0.00" className={`${inputClass} pl-8`} />
             </div>
-            {state.errors.contract_value && <p className="mt-1 text-xs text-red-500">{state.errors.contract_value}</p>}
+            {formErrors.contract_value && <p className="mt-1 text-xs text-red-500">{formErrors.contract_value}</p>}
           </div>
           <div>
             <label htmlFor="start_date" className={labelClass}>
@@ -294,7 +323,7 @@ export function AddAgreementForm({
               defaultValue={todayUk()}
               className={inputClass}
             />
-            {state.errors.start_date && <p className="mt-1 text-xs text-red-500">{state.errors.start_date}</p>}
+            {formErrors.start_date && <p className="mt-1 text-xs text-red-500">{formErrors.start_date}</p>}
           </div>
           <div className="sm:col-span-2">
             <label htmlFor="end_date" className={labelClass}>
@@ -337,7 +366,7 @@ export function AddAgreementForm({
               </button>
             ))}
           </div>
-          {state.errors.pest_species && <p className="mt-1 text-xs text-red-500">{state.errors.pest_species}</p>}
+          {formErrors.pest_species && <p className="mt-1 text-xs text-red-500">{formErrors.pest_species}</p>}
           {selectedPests.includes(OTHER_PILL) && (
             <div className="mt-3">
               <label htmlFor="pest_other" className={labelClass}>
@@ -374,14 +403,14 @@ export function AddAgreementForm({
             defaultValue={12}
             className={inputClass}
           />
-          {state.errors.visit_frequency && <p className="mt-1 text-xs text-red-500">{state.errors.visit_frequency}</p>}
+          {formErrors.visit_frequency && <p className="mt-1 text-xs text-red-500">{formErrors.visit_frequency}</p>}
         </div>
         <div>
           <label htmlFor="callout_terms" className={labelClass}>
             Call Out Arrangement <span className="text-red-500">*</span>
           </label>
           <textarea id="callout_terms" name="callout_terms" rows={3} required placeholder="e.g. Response within 24 hours, included in agreement for covered pests. Out-of-hours rates apply for evenings/weekends." className={inputClass} />
-          {state.errors.callout_terms && <p className="mt-1 text-xs text-red-500">{state.errors.callout_terms}</p>}
+          {formErrors.callout_terms && <p className="mt-1 text-xs text-red-500">{formErrors.callout_terms}</p>}
         </div>
         <div className="flex justify-between pt-4">
           <button type="button" onClick={() => setStep(1)} className="rounded-xl px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">Back</button>
@@ -414,16 +443,30 @@ export function AddAgreementForm({
             <p className="mt-0.5 text-xs text-gray-500">Both parties will be bound once signed on the next step.</p>
           </div>
         </label>
-        <div className="flex justify-between pt-4">
+        <div className="flex items-center justify-between pt-4">
           <button type="button" onClick={() => setStep(2)} className="rounded-xl px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">Back</button>
-          <button
-            type="button"
-            onClick={() => setStep(4)}
-            disabled={!termsAccepted}
-            className="rounded-xl bg-brand px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Next
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Save an unsigned draft to send for review. Not gated on the
+                "I agree" tick (the customer has not agreed yet); signatures
+                are captured later. Submits the whole form (all steps are in
+                the DOM) with empty signatures. */}
+            <button
+              type="submit"
+              formAction={handleSaveDraft}
+              disabled={pending}
+              className="rounded-xl border border-gray-200 px-5 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+            >
+              {draftPending ? "Saving..." : "Save as draft"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep(4)}
+              disabled={!termsAccepted}
+              className="rounded-xl bg-brand px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -434,8 +477,8 @@ export function AddAgreementForm({
           onSignature={setGemSig}
           onClear={() => setGemSig("")}
         />
-        {state.errors.gem_signature && (
-          <p className="-mt-4 text-xs text-red-500">{state.errors.gem_signature}</p>
+        {formErrors.gem_signature && (
+          <p className="-mt-4 text-xs text-red-500">{formErrors.gem_signature}</p>
         )}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <div>
@@ -453,8 +496,8 @@ export function AddAgreementForm({
               Name Of Signee <span className="text-red-500">*</span>
             </label>
             <input id="client_signatory_name" type="text" name="client_signatory_name" required placeholder="Full name of person signing" className={inputClass} />
-            {state.errors.client_signatory_name && (
-              <p className="mt-1 text-xs text-red-500">{state.errors.client_signatory_name}</p>
+            {formErrors.client_signatory_name && (
+              <p className="mt-1 text-xs text-red-500">{formErrors.client_signatory_name}</p>
             )}
           </div>
         </div>
@@ -463,14 +506,14 @@ export function AddAgreementForm({
           onSignature={setClientSig}
           onClear={() => setClientSig("")}
         />
-        {state.errors.client_signature && (
-          <p className="-mt-4 text-xs text-red-500">{state.errors.client_signature}</p>
+        {formErrors.client_signature && (
+          <p className="-mt-4 text-xs text-red-500">{formErrors.client_signature}</p>
         )}
         <div className="flex justify-between pt-4">
           <button type="button" onClick={() => setStep(3)} className="rounded-xl px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">Back</button>
           <button
             type="submit"
-            disabled={isPending}
+            disabled={pending}
             className="rounded-xl bg-brand px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
           >
             {isPending ? "Creating..." : "Create Agreement"}

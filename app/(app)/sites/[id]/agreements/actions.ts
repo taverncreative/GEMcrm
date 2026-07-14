@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { AgreementSchema } from "@/lib/validation/agreement";
+import { redirect } from "next/navigation";
+import { AgreementSchema, DraftAgreementSchema } from "@/lib/validation/agreement";
 import { createAgreement } from "@/lib/data/agreements";
 import { getSiteById } from "@/lib/data/sites";
 import { generateAgreementJobs } from "@/lib/services/agreement-events";
@@ -139,4 +140,93 @@ export async function createAgreementAction(
   revalidatePath(ROUTES.siteDetail(siteId));
   revalidatePath(ROUTES.customerDetail(site.customer_id));
   return { success: true, errors: {}, message: "Agreement created" };
+}
+
+/**
+ * Save an UNSIGNED draft agreement (the proposal a customer reviews before
+ * signing). Same fields as the full create MINUS the signatures, so the
+ * review copy is complete. Deliberately does NOT generate scheduled visits
+ * (a draft = no jobs on the calendar) and does NOT render/send a PDF (the
+ * review copy is sent from the draft detail page). Redirects there on save.
+ */
+export async function createDraftAgreementAction(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  await requireUser();
+  const siteId = formData.get("site_id") as string;
+  if (!siteId) {
+    return { success: false, errors: {}, message: "Missing site ID" };
+  }
+  const site = await getSiteById(siteId);
+  if (!site) {
+    return { success: false, errors: {}, message: "Site not found" };
+  }
+
+  let pestSpecies: string[] = [];
+  const pestSpeciesRaw = formData.get("pest_species") as string;
+  if (pestSpeciesRaw) {
+    try {
+      const parsed: unknown = JSON.parse(pestSpeciesRaw);
+      if (Array.isArray(parsed)) {
+        pestSpecies = parsed.filter(
+          (item): item is string => typeof item === "string" && item.length > 0
+        );
+      }
+    } catch {
+      pestSpecies = [];
+    }
+  }
+
+  const str = (key: string): string =>
+    (formData.get(key) as string | null) ?? "";
+
+  const raw = {
+    customer_id: site.customer_id,
+    site_id: siteId,
+    reference_number: str("reference_number"),
+    start_date: str("start_date"),
+    visit_frequency: str("visit_frequency"),
+    pest_species: pestSpecies,
+    callout_terms: str("callout_terms"),
+    contract_value: str("contract_value"),
+    contact_name: str("contact_name"),
+    contact_phone: str("contact_phone"),
+    mobile: str("mobile"),
+    contact_email: str("contact_email"),
+    invoice_address: str("invoice_address"),
+    terms_text: str("terms_text"),
+    end_date: str("end_date"),
+    // Signatures deliberately omitted — captured later at finalise.
+  };
+
+  const result = DraftAgreementSchema.safeParse(raw);
+  if (!result.success) {
+    const errors: Record<string, string> = {};
+    for (const issue of result.error.issues) {
+      const key = issue.path[0];
+      if (typeof key === "string") errors[key] = issue.message;
+    }
+    return { success: false, errors, message: null };
+  }
+
+  let agreementId: string;
+  try {
+    // status: 'draft' — no signatures, so createAgreement leaves the
+    // signature URLs + signed_date null. NO generateAgreementJobs here.
+    const agreement = await createAgreement({ ...result.data, status: "draft" });
+    agreementId = agreement.id;
+  } catch (err) {
+    return {
+      success: false,
+      errors: {},
+      message: err instanceof Error ? err.message : "Failed to save draft",
+    };
+  }
+
+  revalidatePath(ROUTES.siteDetail(siteId));
+  revalidatePath(ROUTES.customerDetail(site.customer_id));
+  revalidatePath(ROUTES.AGREEMENTS);
+  // redirect() throws NEXT_REDIRECT — keep it out of the try/catch above.
+  redirect(`${ROUTES.AGREEMENTS}/${agreementId}`);
 }

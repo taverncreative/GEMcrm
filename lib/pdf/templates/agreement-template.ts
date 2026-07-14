@@ -43,13 +43,20 @@ interface AgreementTemplateData {
   agreement: Agreement;
   customer: Customer;
   site: Site;
+  /** "signed" (default) renders the signature images + signed date.
+   *  "review" is the unsigned copy sent to the customer to read before
+   *  signing: signature blocks show a "To be signed on the visit"
+   *  placeholder, the signed date is omitted, and a review banner is added. */
+  mode?: "signed" | "review";
 }
 
 export function renderAgreementHtml({
   agreement,
   customer,
   site,
+  mode = "signed",
 }: AgreementTemplateData): string {
+  const review = mode === "review";
   const pests = agreement.pest_species ?? [];
   const addr = [site.address_line_1, site.address_line_2, site.town, site.county, site.postcode]
     .filter(Boolean)
@@ -57,7 +64,7 @@ export function renderAgreementHtml({
   const ref = agreement.reference_number ?? agreement.id.slice(0, 8).toUpperCase();
   const headerMeta = [
     { label: "Agreement Date", value: formatDate(agreement.start_date) },
-    ...(agreement.signed_date
+    ...(!review && agreement.signed_date
       ? [{ label: "Signed", value: formatDate(agreement.signed_date) }]
       : []),
     { label: "Reference", value: ref },
@@ -71,6 +78,8 @@ export function renderAgreementHtml({
 </head>
 <body>
 <div class="page">
+
+  ${review ? `<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-weight:700;font-size:13px;text-align:center;padding:10px;border-radius:8px;margin-bottom:16px;letter-spacing:0.06em;">FOR REVIEW, NOT YET SIGNED</div>` : ""}
 
   <!-- Header (shared branded partial) -->
   ${renderDocHeader({
@@ -181,13 +190,13 @@ export function renderAgreementHtml({
     <div class="sig-grid">
       <div class="sig-box">
         <div class="sig-label">GEM Services Representative</div>
-        ${agreement.gem_signature_url
+        ${!review && agreement.gem_signature_url
           ? `<img class="sig-img" src="${agreement.gem_signature_url}" />`
-          : `<div class="sig-empty">Awaiting signature</div>`}
+          : `<div class="sig-empty">${review ? "To be signed on the visit" : "Awaiting signature"}</div>`}
         <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
           <div style="font-size: 9px; color: #9ca3af;">Name</div>
           <div style="font-size: 11px; color: #374151;">GEM Services</div>
-          ${agreement.signed_date ? `
+          ${!review && agreement.signed_date ? `
           <div style="font-size: 9px; color: #9ca3af; margin-top: 4px;">Date</div>
           <div style="font-size: 11px; color: #374151;">${formatDate(agreement.signed_date)}</div>
           ` : ""}
@@ -195,13 +204,13 @@ export function renderAgreementHtml({
       </div>
       <div class="sig-box">
         <div class="sig-label">Client Authorised Signatory</div>
-        ${agreement.client_signature_url
+        ${!review && agreement.client_signature_url
           ? `<img class="sig-img" src="${agreement.client_signature_url}" />`
-          : `<div class="sig-empty">Awaiting signature</div>`}
+          : `<div class="sig-empty">${review ? "To be signed on the visit" : "Awaiting signature"}</div>`}
         <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
           <div style="font-size: 9px; color: #9ca3af;">Name</div>
-          <div style="font-size: 11px; color: #374151;">${agreement.client_signatory_name ? escape(agreement.client_signatory_name) : "—"}</div>
-          ${agreement.signed_date ? `
+          <div style="font-size: 11px; color: #374151;">${!review && agreement.client_signatory_name ? escape(agreement.client_signatory_name) : "—"}</div>
+          ${!review && agreement.signed_date ? `
           <div style="font-size: 9px; color: #9ca3af; margin-top: 4px;">Date</div>
           <div style="font-size: 11px; color: #374151;">${formatDate(agreement.signed_date)}</div>
           ` : ""}

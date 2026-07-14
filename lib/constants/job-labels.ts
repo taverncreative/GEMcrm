@@ -42,12 +42,14 @@ export const JOB_STATUS_COLORS: Record<JobStatus, string> = {
 export const JOB_STATUSES: JobStatus[] = ["scheduled", "in_progress", "completed"];
 
 export const AGREEMENT_STATUS_LABELS: Record<AgreementStatus, string> = {
+  draft: "Draft, unsigned",
   active: "Active",
   paused: "Paused",
   cancelled: "Cancelled",
 };
 
 export const AGREEMENT_STATUS_COLORS: Record<AgreementStatus, string> = {
+  draft: "bg-gray-100 text-gray-600",
   active: "bg-brand-soft text-brand-darker",
   paused: "bg-amber-100 text-amber-700",
   cancelled: "bg-red-100 text-red-700",

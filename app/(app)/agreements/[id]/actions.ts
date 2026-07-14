@@ -1,16 +1,25 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { updateAgreementStatus, getAgreementById } from "@/lib/data/agreements";
+import {
+  updateAgreementStatus,
+  getAgreementById,
+  getAgreementWithContext,
+} from "@/lib/data/agreements";
 import { getCustomerById } from "@/lib/data/customers";
-import { sendAgreement } from "@/lib/services/email";
+import { sendAgreement, sendAgreementReview } from "@/lib/services/email";
+import { generateAgreementPdf } from "@/lib/pdf/generate-agreement-pdf";
+import { uploadPdf } from "@/lib/storage/upload";
+import { createClient } from "@/lib/supabase/server";
 import { validateRecipients } from "@/lib/validation/recipients";
 import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
-import type { AgreementStatus } from "@/types/database";
 
-const VALID: AgreementStatus[] = ["active", "paused", "cancelled"];
+// Draft is deliberately excluded: a draft is FINALISED (signatures captured,
+// Slice 2), not flipped via this status action.
+const VALID = ["active", "paused", "cancelled"] as const;
+type UpdatableStatus = (typeof VALID)[number];
 
 export async function updateAgreementStatusAction(
   _prev: ActionState,
@@ -23,12 +32,12 @@ export async function updateAgreementStatusAction(
   if (!id) {
     return { success: false, errors: {}, message: "Missing agreement ID" };
   }
-  if (!VALID.includes(status as AgreementStatus)) {
+  if (!VALID.includes(status as UpdatableStatus)) {
     return { success: false, errors: {}, message: "Invalid status" };
   }
 
   try {
-    await updateAgreementStatus(id, status as AgreementStatus);
+    await updateAgreementStatus(id, status as UpdatableStatus);
   } catch (err) {
     return {
       success: false,
@@ -83,5 +92,70 @@ export async function sendAgreementNowAction(
     return { success: false, message: "Email failed to send. Try again." };
   }
 
+  return { success: true, emailedTo: validated.emails.join(", ") };
+}
+
+/**
+ * Send the UNSIGNED review copy of a DRAFT agreement to one or more
+ * recipients. Renders the watermarked review PDF on demand, stores it at
+ * agreements/<id>/review.pdf (its URL in contract_pdf_url), and emails a
+ * signed 7-day link with the review subject. Only valid for a draft;
+ * re-runnable (a re-send regenerates the review PDF). Online-only.
+ */
+export async function sendAgreementReviewAction(
+  agreementId: string,
+  recipients: string[]
+): Promise<{ success: boolean; message?: string; emailedTo?: string }> {
+  await requireUser();
+  if (!agreementId) return { success: false, message: "Missing agreement ID" };
+
+  const validated = validateRecipients(recipients ?? []);
+  if (!validated.ok) {
+    return { success: false, message: validated.error };
+  }
+
+  const agreement = await getAgreementWithContext(agreementId);
+  if (!agreement) return { success: false, message: "Agreement not found" };
+  if (agreement.status !== "draft") {
+    return {
+      success: false,
+      message: "Only a draft agreement can be sent for review.",
+    };
+  }
+
+  try {
+    const pdfBuffer = await generateAgreementPdf({
+      agreement,
+      customer: agreement.customer,
+      site: agreement.site,
+      mode: "review",
+    });
+    const pdfUrl = await uploadPdf(
+      pdfBuffer,
+      `agreements/${agreementId}/review.pdf`
+    );
+
+    const supabase = await createClient();
+    await supabase
+      .from("agreements")
+      .update({ contract_pdf_url: pdfUrl })
+      .eq("id", agreementId);
+
+    const sendRes = await sendAgreementReview(
+      agreement.customer,
+      pdfUrl,
+      validated.emails
+    );
+    if (!sendRes.success) {
+      return { success: false, message: "Email failed to send. Try again." };
+    }
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to send review copy",
+    };
+  }
+
+  revalidatePath(`${ROUTES.AGREEMENTS}/${agreementId}`);
   return { success: true, emailedTo: validated.emails.join(", ") };
 }

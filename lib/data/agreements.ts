@@ -150,7 +150,7 @@ export interface AgreementWithContext extends Agreement {
 }
 
 interface GetAllAgreementsOptions {
-  status?: "active" | "paused" | "cancelled" | "all";
+  status?: "draft" | "active" | "paused" | "cancelled" | "all";
   search?: string;
 }
 

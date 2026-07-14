@@ -7,6 +7,7 @@ import {
 import { ROUTES } from "@/lib/constants/routes";
 import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import { AgreementSend } from "@/components/agreements/agreement-send";
+import { AgreementReviewSend } from "@/components/agreements/agreement-review-send";
 import { formatAddress } from "@/lib/utils/format-address";
 import { todayUk } from "@/lib/utils/today-uk";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
@@ -128,10 +129,19 @@ export default async function AgreementDetailPage({
           >
             {AGREEMENT_STATUS_LABELS[agreement.status as AgreementStatus]}
           </span>
-          <AgreementStatusActions
-            agreementId={agreement.id}
-            currentStatus={agreement.status as AgreementStatus}
-          />
+          {/* A draft is not yet a live agreement, so the active/paused/
+              cancelled controls do not apply. Finalising (capturing
+              signatures) arrives in the next slice. */}
+          {agreement.status === "draft" ? (
+            <span className="text-xs text-gray-400">
+              Finalising comes next. Send the review copy below.
+            </span>
+          ) : (
+            <AgreementStatusActions
+              agreementId={agreement.id}
+              currentStatus={agreement.status as AgreementStatus}
+            />
+          )}
         </div>
       </div>
 
@@ -365,18 +375,29 @@ export default async function AgreementDetailPage({
                     d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
                   />
                 </svg>
-                View contract PDF
+                {agreement.status === "draft"
+                  ? "View review copy"
+                  : "View contract PDF"}
               </a>
             ) : (
               <p className="text-sm text-gray-400">
-                No contract document available.
+                {agreement.status === "draft"
+                  ? "No review copy generated yet. Send for review below."
+                  : "No contract document available."}
               </p>
             )}
-            {agreement.contract_pdf_url && (
-              <AgreementSend
+            {agreement.status === "draft" ? (
+              <AgreementReviewSend
                 agreementId={agreement.id}
                 defaultEmail={agreement.contact_email}
               />
+            ) : (
+              agreement.contract_pdf_url && (
+                <AgreementSend
+                  agreementId={agreement.id}
+                  defaultEmail={agreement.contact_email}
+                />
+              )
             )}
           </SectionCard>
 

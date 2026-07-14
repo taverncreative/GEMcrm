@@ -216,6 +216,33 @@ export async function sendAgreement(
   });
 }
 
+/**
+ * Send the UNSIGNED review copy of an agreement (draft flow): the customer
+ * reads it before signing. Same multi-recipient + signed-link plumbing as
+ * sendAgreement, but a distinct subject and a review-specific body.
+ */
+export async function sendAgreementReview(
+  customer: Customer,
+  pdfUrl: string,
+  recipients?: string[]
+): Promise<SendEmailResult> {
+  const to =
+    recipients && recipients.length > 0
+      ? recipients
+      : customer.email
+        ? [customer.email]
+        : [];
+  if (to.length === 0) {
+    return { success: false, error: "Customer has no email" };
+  }
+  const link = await signedEmailLink(pdfUrl);
+  return sendEmail({
+    to,
+    subject: `${BUSINESS.name} – Your pest management agreement to review`,
+    html: agreementReviewHtml(customer.name, link),
+  });
+}
+
 // ── HTML Templates ─────────────────────────────────────────
 
 function emailWrapper(content: string): string {
@@ -271,6 +298,30 @@ function serviceReportHtml(name: string, pdfUrl: string): string {
     </a>
     <p style="font-size:14px;color:#374151;line-height:1.6;margin:24px 0 0;">
       If you have any questions, please don't hesitate to get in touch.
+    </p>
+    <p style="font-size:14px;color:#6b7280;margin:16px 0 0;">
+      Kind regards,<br />
+      <strong style="color:#1f2937;">${escapeHtml(BUSINESS.name)}</strong>
+    </p>
+  `);
+}
+
+function agreementReviewHtml(name: string, pdfUrl: string): string {
+  const safeName = escapeHtml(name);
+  const safeUrl = escapeHtml(pdfUrl);
+  return emailWrapper(`
+    <p style="font-size:15px;color:#1f2937;margin:0 0 16px;">Dear ${safeName},</p>
+    <p style="font-size:14px;color:#374151;line-height:1.6;margin:0 0 16px;">
+      Please take a moment to read through your pest management agreement below before we sign it together. This is a copy for your review only. It has not yet been signed.
+    </p>
+    <p style="font-size:14px;color:#374151;line-height:1.6;margin:0 0 24px;">
+      It sets out the services we will provide, the visit frequency, and our terms. We will go through it and sign together on our visit.
+    </p>
+    <a href="${safeUrl}" style="display:inline-block;background:#75B845;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">
+      View Agreement
+    </a>
+    <p style="font-size:14px;color:#374151;line-height:1.6;margin:24px 0 0;">
+      If you have any questions before then, please get in touch.
     </p>
     <p style="font-size:14px;color:#6b7280;margin:16px 0 0;">
       Kind regards,<br />

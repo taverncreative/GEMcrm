@@ -424,12 +424,29 @@ export function CustomerSidePanel({
 
           {detail && (
             <div className="space-y-6">
+              {/* A draft proposal is out for review. Shown instead of the
+                  "set up a PMA" nudge so the operator knows one is pending. */}
+              {!(agreements ?? []).some((a) => a.status === "active") &&
+                (agreements ?? []).some((a) => a.status === "draft") && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                    <p className="text-sm font-medium text-gray-700">
+                      Draft agreement awaiting signature
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      A proposal has been sent for the customer to review.
+                      Finalise it by capturing signatures on the visit.
+                    </p>
+                  </div>
+                )}
+
               {/* PMA prompt — same soft framing for both customer types.
                   PMAs are a contract framework for recurring work; they're
                   optional for one-off jobs regardless of whether the
                   customer is commercial or domestic. Surfaces only when
-                  no active agreement exists. */}
-              {!(agreements ?? []).some((a) => a.status === "active") &&
+                  no active agreement AND no draft exists. */}
+              {!(agreements ?? []).some(
+                (a) => a.status === "active" || a.status === "draft"
+              ) &&
                 (sites ?? [])[0] && (
                   <Link
                     href={`${ROUTES.siteDetail((sites ?? [])[0].id)}#agreements`}

@@ -6,13 +6,16 @@ interface AgreementReportData {
   agreement: Agreement;
   customer: Customer;
   site: Site;
+  /** "review" produces the unsigned watermarked copy (see renderAgreementHtml). */
+  mode?: "signed" | "review";
 }
 
 export async function generateAgreementPdf({
   agreement,
   customer,
   site,
+  mode = "signed",
 }: AgreementReportData): Promise<Buffer> {
-  const html = renderAgreementHtml({ agreement, customer, site });
+  const html = renderAgreementHtml({ agreement, customer, site, mode });
   return htmlToPdf(html);
 }

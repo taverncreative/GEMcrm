@@ -77,6 +77,9 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
     .from("agreements")
     .select("id, reference_number, contract_pdf_url, created_at, end_date, customer:customers(id, name, company_name)")
     .not("contract_pdf_url", "is", null)
+    // A draft's contract_pdf_url holds its UNSIGNED review copy, which is not
+    // a filed document — keep drafts out of the Documents list.
+    .neq("status", "draft")
     .order("created_at", { ascending: false })
     .limit(200);
 

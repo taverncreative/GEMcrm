@@ -5,6 +5,7 @@ import { useState, useCallback, useRef } from "react";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
   { value: "active", label: "Active" },
   { value: "paused", label: "Paused" },
   { value: "cancelled", label: "Cancelled" },

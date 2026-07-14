@@ -18,7 +18,7 @@ interface AgreementsPageProps {
   }>;
 }
 
-const VALID_STATUSES = new Set(["active", "paused", "cancelled", "all"]);
+const VALID_STATUSES = new Set(["draft", "active", "paused", "cancelled", "all"]);
 
 async function AgreementsTable({
   status,
@@ -28,7 +28,7 @@ async function AgreementsTable({
   search?: string;
 }) {
   const normalizedStatus = status && VALID_STATUSES.has(status)
-    ? (status as "active" | "paused" | "cancelled" | "all")
+    ? (status as "draft" | "active" | "paused" | "cancelled" | "all")
     : "all";
 
   const agreements = await getAllAgreements({

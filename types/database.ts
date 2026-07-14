@@ -178,7 +178,7 @@ export interface InvoiceJob {
   created_at: string;
 }
 
-export type AgreementStatus = "active" | "paused" | "cancelled";
+export type AgreementStatus = "draft" | "active" | "paused" | "cancelled";
 
 export interface Agreement {
   id: string;

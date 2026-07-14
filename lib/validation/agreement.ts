@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const AGREEMENT_STATUSES = ["active", "paused", "cancelled"] as const;
+const AGREEMENT_STATUSES = ["draft", "active", "paused", "cancelled"] as const;
 
 const optionalString = z.string().optional().default("");
 
@@ -54,3 +54,18 @@ export const AgreementSchema = z.object({
 export { AGREEMENT_STATUSES };
 
 export type AgreementInput = z.infer<typeof AgreementSchema>;
+
+/**
+ * A DRAFT agreement: the full personalised proposal MINUS the signatures.
+ * Everything the review copy needs (reference, contact, dates, visits,
+ * value, pests, callout terms, terms) stays required, so the customer
+ * reviews a complete document; only the three signature fields become
+ * optional (they are captured later at finalise, Slice 2).
+ */
+export const DraftAgreementSchema = AgreementSchema.extend({
+  client_signature: optionalString,
+  gem_signature: optionalString,
+  client_signatory_name: optionalString,
+});
+
+export type DraftAgreementInput = z.infer<typeof DraftAgreementSchema>;
