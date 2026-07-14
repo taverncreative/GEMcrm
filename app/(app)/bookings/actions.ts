@@ -2,7 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { createCustomer, getCustomerById } from "@/lib/data/customers";
+import {
+  createCustomer,
+  getCustomerById,
+  updateCustomerDocDetails,
+} from "@/lib/data/customers";
 import { createSite, getSiteById } from "@/lib/data/sites";
 import { searchCustomers, getCustomers } from "@/lib/data/customers";
 import { getSitesByCustomer } from "@/lib/data/sites";
@@ -231,6 +235,37 @@ export async function createQuickBookingAction(
       errors: {},
       message: err instanceof Error ? err.message : "Failed to create site",
     };
+  }
+
+  // Keep a brand-new customer's registered address in sync with the site the
+  // operator just entered. applyLocal already mirrored this to Dexie; without
+  // persisting it here, the next pull would blank the customer address back
+  // out (server row wins on updated_at). Best-effort, and never for an
+  // existing customer (they keep their own address). Idempotent on replay.
+  if (data.mode_customer === "new" && data.mode_site === "new") {
+    const hasSiteAddress =
+      data.site_line1.trim() ||
+      data.site_town.trim() ||
+      data.site_postcode.trim();
+    if (hasSiteAddress) {
+      try {
+        await updateCustomerDocDetails(customerId, {
+          address_line_1: data.site_line1,
+          address_line_2: data.site_line2,
+          town: data.site_town,
+          // Raw county only — never the "—" bare-site placeholder.
+          county: data.site_county,
+          // Uppercased to match the site + applyLocal, so a later pull
+          // doesn't leave customer and site postcodes out of sync.
+          postcode: data.site_postcode.toUpperCase(),
+        });
+      } catch (err) {
+        console.error(
+          "[createQuickBookingAction] customer address copy-back failed",
+          err
+        );
+      }
+    }
   }
 
   // Step 3 — booking. Lenient create schema: call_type may be blank

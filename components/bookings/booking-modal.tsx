@@ -185,11 +185,15 @@ export function makeBookingMeta(): WrapMeta<BookingWrapInput> {
           mobile: null,
           position: null,
           address: null,
-          address_line_1: null,
-          address_line_2: null,
-          town: null,
-          county: null,
-          postcode: null,
+          // Copy the entered site address onto the new customer so their
+          // record and their site stay in sync (a new customer has no
+          // existing site, so the site fields are the address they typed).
+          // The "—" county placeholder is deliberately NOT copied here.
+          address_line_1: f.site_line1.trim() || null,
+          address_line_2: f.site_line2.trim() || null,
+          town: f.site_town.trim() || null,
+          county: f.site_county.trim() || null,
+          postcode: f.site_postcode.trim().toUpperCase() || null,
           website: null,
           notes: null,
           annual_contract_value: null,
@@ -300,6 +304,64 @@ type SiteMode = "existing" | "new";
 
 const todayIso = () => todayUk();
 
+/** An address block is "usable" once it has line 1 + town — the same rule
+ *  resolve-sheet-address uses to decide a site/customer address is real. */
+function isUsableAddress(
+  a: { address_line_1: string | null; town: string | null } | null
+): boolean {
+  return !!a?.address_line_1?.trim() && !!a?.town?.trim();
+}
+
+/** One-line address, e.g. "12 High St, Testford, SW1A 1AA". */
+function formatShortAddress(a: {
+  address_line_1: string | null;
+  town: string | null;
+  postcode: string | null;
+}): string {
+  return [a.address_line_1, a.town, a.postcode]
+    .map((p) => p?.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+/** Does a site describe the customer's registered address? Compared on
+ *  line 1 + town + postcode, trimmed and case-insensitive. */
+function sameRegisteredAddress(site: Site, customer: Customer): boolean {
+  const norm = (v: string | null) => (v ?? "").trim().toLowerCase();
+  return (
+    norm(site.address_line_1) === norm(customer.address_line_1) &&
+    norm(site.town) === norm(customer.town) &&
+    norm(site.postcode) === norm(customer.postcode)
+  );
+}
+
+/**
+ * The customer's PRIMARY site — the one the "use the customer's address"
+ * default points at. Chosen deterministically:
+ *   1. the site matching the customer's registered address, else
+ *   2. the OLDEST site (first created = the address captured when the
+ *      customer was added).
+ *
+ * This pins the site-ordering inconsistency: reads elsewhere disagree
+ * (the customer list orders sites oldest-first, getSitesForCustomerLocal
+ * newest-first), so the modal sorts a copy oldest-first here and never
+ * relies on the incoming order. Replaces the old "most-recent site" pick.
+ */
+export function pickPrimarySite(
+  customer: Customer | null,
+  sites: Site[]
+): Site | null {
+  if (sites.length === 0) return null;
+  const oldestFirst = [...sites].sort((a, b) =>
+    (a.created_at ?? "").localeCompare(b.created_at ?? "")
+  );
+  if (customer && isUsableAddress(customer)) {
+    const match = oldestFirst.find((s) => sameRegisteredAddress(s, customer));
+    if (match) return match;
+  }
+  return oldestFirst[0];
+}
+
 /**
  * Single-modal quick booking with everything controlled.
  *
@@ -339,6 +401,11 @@ export function BookingModal({
   const [newSiteTown, setNewSiteTown] = useState("");
   const [newSiteCounty, setNewSiteCounty] = useState("");
   const [newSitePostcode, setNewSitePostcode] = useState("");
+  // "Different site" opt-in. Off by default: when the customer has a usable
+  // default address (a primary site, or an address on their record), the
+  // Location section collapses to a one-line summary. Ticking this reveals
+  // the full existing/new site controls.
+  const [differentSite, setDifferentSite] = useState(false);
 
   // ── Booking state ──
   const [jobDate, setJobDate] = useState(todayIso);
@@ -414,6 +481,26 @@ export function BookingModal({
     setNewSitePostcode(c.postcode ?? "");
   }
 
+  /** Re-select the customer's default location: their primary site if any,
+   *  else pre-fill from the customer's registered address. Used when the
+   *  operator unticks "Different site" to restore the default. */
+  function applyDefaultSite() {
+    const primary = pickPrimarySite(selectedCustomer, sites);
+    if (primary) {
+      setSiteMode("existing");
+      setSelectedSite(primary);
+    } else if (selectedCustomer) {
+      prefillSiteFromCustomer(selectedCustomer);
+    }
+  }
+
+  function handleDifferentSiteToggle(checked: boolean) {
+    setDifferentSite(checked);
+    // Unticking restores the customer-address default; ticking leaves the
+    // current selection so the operator can change it.
+    if (!checked) applyDefaultSite();
+  }
+
   // Reset state on every fresh open. The guard means re-renders while open
   // don't wipe the user's input.
   useEffect(() => {
@@ -436,6 +523,7 @@ export function BookingModal({
     // customer page) keeps "existing" and loads their sites.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSiteMode(presetCustomer ? "existing" : "new");
+    setDifferentSite(false);
     // H4: clear the sticky action state so this open starts from
     // success:false and the next save is a real false->true transition.
     resetAction();
@@ -474,8 +562,9 @@ export function BookingModal({
         setSites(s);
         setLoadingSites(false);
         if (!presetSite && s.length > 0) {
-          // Sites are ordered newest-first; default to the most recent.
-          setSelectedSite(s[0]);
+          // Default to the customer's PRIMARY (registered-address) site,
+          // not the most recent.
+          setSelectedSite(pickPrimarySite(presetCustomer, s));
         } else if (s.length === 0) {
           // No sites yet — fall back to the customer's registered address
           // if they have one. Pre-fills the new-site form so the operator
@@ -565,13 +654,14 @@ export function BookingModal({
     setSelectedCustomer(c);
     setSelectedSite(null);
     setSiteMode("existing");
+    setDifferentSite(false);
     setLoadingSites(true);
     const list = await getSitesForCustomerLocal(c.id);
     setSites(list);
     setLoadingSites(false);
     if (list.length > 0) {
-      // Auto-pick the most recently created site.
-      setSelectedSite(list[0]);
+      // Default to the customer's PRIMARY (registered-address) site.
+      setSelectedSite(pickPrimarySite(c, list));
     } else {
       // Customer has no sites — try to pre-fill from their registered
       // address so a fresh "+ Add site" form isn't blank.
@@ -652,6 +742,17 @@ export function BookingModal({
   // Server-returned errors (online) overlaid with client validation errors.
   const errors: Record<string, string> = { ...state.errors, ...clientErrors };
   const hasClientErrors = Object.keys(clientErrors).length > 0;
+
+  // Location default: the primary site (reused, no new row) if one is picked,
+  // else the customer's registered address. When a default exists and
+  // "Different site" is unticked, the Location section collapses to a summary.
+  const defaultSiteText = selectedSite
+    ? formatShortAddress(selectedSite)
+    : selectedCustomer && isUsableAddress(selectedCustomer)
+      ? formatShortAddress(selectedCustomer)
+      : null;
+  const hasDefaultSite = !!defaultSiteText && defaultSiteText.length > 0;
+  const locationCollapsed = hasDefaultSite && !differentSite;
 
   return (
     // Full-screen on mobile (no padding, no rounded corners — feels native);
@@ -897,15 +998,17 @@ export function BookingModal({
               <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                 Location
               </h3>
+              {!locationCollapsed && (
               <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5 text-xs">
                 <button
                   type="button"
                   disabled={!selectedCustomer}
                   onClick={() => {
                     setSiteMode("existing");
-                    // Re-select the most-recent site if none is currently picked.
+                    // Re-select the primary (registered-address) site if none
+                    // is currently picked.
                     if (!selectedSite && sites.length > 0) {
-                      setSelectedSite(sites[0]);
+                      setSelectedSite(pickPrimarySite(selectedCustomer, sites));
                     }
                   }}
                   className={`rounded-md px-2.5 py-1 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -928,10 +1031,46 @@ export function BookingModal({
                   + New
                 </button>
               </div>
+              )}
             </div>
 
-            {siteMode === "existing" ? (
-              <div className="mt-2">
+            {locationCollapsed ? (
+              <div className="mt-2 space-y-2">
+                <div className="rounded-lg border border-brand bg-brand-soft px-3 py-2">
+                  <p className="text-[11px] font-medium uppercase tracking-wider text-brand-darker">
+                    Using the customer&apos;s address
+                  </p>
+                  <p className="truncate text-sm font-medium text-brand-darker">
+                    {defaultSiteText}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={differentSite}
+                    onChange={(e) => handleDifferentSiteToggle(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
+                  />
+                  Different site
+                </label>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-3">
+                {hasDefaultSite && (
+                  <label className="flex items-center gap-2 text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={differentSite}
+                      onChange={(e) =>
+                        handleDifferentSiteToggle(e.target.checked)
+                      }
+                      className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
+                    />
+                    Different site
+                  </label>
+                )}
+                {siteMode === "existing" ? (
+              <div>
                 {!selectedCustomer ? (
                   <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
                     Pick a customer first.
@@ -961,7 +1100,7 @@ export function BookingModal({
                     </div>
                     {sites.length > 1 && (
                       <p className="mt-1 text-[11px] text-gray-400">
-                        Most recent site auto-selected.
+                        Primary site auto-selected.
                       </p>
                     )}
                   </>
@@ -1025,8 +1164,8 @@ export function BookingModal({
                   </p>
                 )}
               </div>
-            ) : (
-              <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <label htmlFor="bn-site_line1" className={labelClass}>
                     Address Line 1                  </label>
@@ -1077,6 +1216,8 @@ export function BookingModal({
                     </p>
                   )}
                 </div>
+              </div>
+                )}
               </div>
             )}
           </section>
