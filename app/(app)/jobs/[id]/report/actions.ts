@@ -37,7 +37,7 @@ export async function generateReportAction(
     return {
       success: false,
       errors: {},
-      message: "Service sheet not filled in — complete it before generating a report.",
+      message: "Service sheet not filled in. Complete it before generating a report.",
     };
   }
 
@@ -108,7 +108,7 @@ export async function sendReportNowAction(
   if (!report?.pdf_url) {
     return {
       success: false,
-      message: "No report PDF yet — regenerate the report first",
+      message: "No report PDF yet. Regenerate the report first.",
     };
   }
 
@@ -118,7 +118,7 @@ export async function sendReportNowAction(
     validated.emails
   );
   if (!sendRes.success) {
-    return { success: false, message: "Email failed to send — try again" };
+    return { success: false, message: "Email failed to send. Try again." };
   }
 
   const emailedTo = validated.emails.join(", ");
