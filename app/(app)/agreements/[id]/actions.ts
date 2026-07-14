@@ -67,7 +67,7 @@ export async function sendAgreementNowAction(
   if (!agreement.contract_pdf_url) {
     return {
       success: false,
-      message: "No agreement PDF yet — nothing to send.",
+      message: "No agreement PDF yet, nothing to send.",
     };
   }
 
@@ -80,7 +80,7 @@ export async function sendAgreementNowAction(
     validated.emails
   );
   if (!sendRes.success) {
-    return { success: false, message: "Email failed to send — try again" };
+    return { success: false, message: "Email failed to send. Try again." };
   }
 
   return { success: true, emailedTo: validated.emails.join(", ") };

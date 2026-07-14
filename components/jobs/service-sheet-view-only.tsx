@@ -419,7 +419,7 @@ function ReportEmailStatus({
           setError(res.message ?? "Failed to send");
         }
       } catch {
-        setError("Couldn't reach the server — try again online");
+        setError("Couldn't reach the server. Try again online.");
       }
     });
   }
@@ -468,7 +468,7 @@ function ReportEmailStatus({
       />
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-gray-400">
-          Separate multiple emails with commas — all go on one email.
+          Separate multiple emails with commas. They all go on one email.
         </p>
         <button
           type="button"
