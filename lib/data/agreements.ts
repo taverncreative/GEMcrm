@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { todayUk, dateUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { newId } from "@/lib/utils/id";
 import type { Agreement, Customer, Site } from "@/types/database";
@@ -17,6 +18,7 @@ export async function getAgreementsByCustomer(
     .from("agreements")
     .select("*")
     .eq("customer_id", customerId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -35,6 +37,7 @@ export async function getAgreementsBySite(
     .from("agreements")
     .select("*")
     .eq("site_id", siteId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -134,6 +137,7 @@ export async function getActiveAgreements(): Promise<Agreement[]> {
     .select("*")
     .eq("status", "active")
     .not("visit_frequency", "is", null)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -175,6 +179,10 @@ export async function getAllAgreements(
   let query = supabase
     .from("agreements")
     .select("*, customer:customers!inner(*), site:sites!inner(*)")
+    // Discarded drafts (and any other soft-deleted agreement) never list.
+    // RLS also hides them for user-scoped reads; this keeps the intent
+    // explicit and holds if this fn ever runs under the service role.
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -274,6 +282,7 @@ export async function getExpiringAgreements(
     .from("agreements")
     .select("*, customer:customers(*), site:sites(*)")
     .eq("status", "active")
+    .is("deleted_at", null)
     .gte("end_date", today)
     .lte("end_date", cutoffStr)
     .order("end_date", { ascending: true });
@@ -284,4 +293,33 @@ export async function getExpiringAgreements(
   }
 
   return (data ?? []) as unknown as AgreementWithContext[];
+}
+
+/**
+ * Soft-delete an agreement (Discard draft).
+ *
+ * Runs on the ADMIN client, not the user client: the RLS SELECT policy is
+ * `deleted_at IS NULL` (migration 029), so a user-scoped self-hiding update
+ * is rejected with 42501 (PostgREST's RETURNING row fails the read policy —
+ * see the CLAUDE.md standing note). customers/jobs solved this with a
+ * SECURITY DEFINER `soft_delete_<table>` RPC; agreements has none yet and
+ * this slice is no-schema, so the requireUser-gated server action calls
+ * this admin-client twin instead (same auth gate + privileged write shape
+ * as the RPC). Follow-up debt: migration 043 `soft_delete_agreement`, then
+ * swap this to the RPC for consistency with 032/038.
+ *
+ * The `deleted_at is null` predicate makes a replayed discard a no-op.
+ */
+export async function softDeleteAgreement(id: string): Promise<void> {
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("agreements")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("deleted_at", null);
+
+  if (error) {
+    console.error("[softDeleteAgreement]", error.code, error.message);
+    throw new Error(`Failed to discard agreement: ${error.message}`);
+  }
 }

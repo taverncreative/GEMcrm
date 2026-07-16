@@ -69,3 +69,17 @@ export const DraftAgreementSchema = AgreementSchema.extend({
 });
 
 export type DraftAgreementInput = z.infer<typeof DraftAgreementSchema>;
+
+/**
+ * Finalising a draft (Slice 2): exactly what the draft deferred — both
+ * signatures and the signatory name, to the same standard the sign-now
+ * path requires. signed_date stays optional (defaults to today at write).
+ */
+export const FinaliseAgreementSchema = z.object({
+  client_signature: z.string().min(1, "Client signature is required"),
+  gem_signature: z.string().min(1, "GEM Services signature is required"),
+  client_signatory_name: z.string().min(1, "Signee name is required"),
+  signed_date: optionalString,
+});
+
+export type FinaliseAgreementInput = z.infer<typeof FinaliseAgreementSchema>;

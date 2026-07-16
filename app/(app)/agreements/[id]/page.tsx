@@ -8,6 +8,7 @@ import { ROUTES } from "@/lib/constants/routes";
 import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import { AgreementSend } from "@/components/agreements/agreement-send";
 import { AgreementReviewSend } from "@/components/agreements/agreement-review-send";
+import { AgreementFinalise } from "@/components/agreements/agreement-finalise";
 import { formatAddress } from "@/lib/utils/format-address";
 import { todayUk } from "@/lib/utils/today-uk";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
@@ -130,13 +131,9 @@ export default async function AgreementDetailPage({
             {AGREEMENT_STATUS_LABELS[agreement.status as AgreementStatus]}
           </span>
           {/* A draft is not yet a live agreement, so the active/paused/
-              cancelled controls do not apply. Finalising (capturing
-              signatures) arrives in the next slice. */}
-          {agreement.status === "draft" ? (
-            <span className="text-xs text-gray-400">
-              Finalising comes next. Send the review copy below.
-            </span>
-          ) : (
+              cancelled controls do not apply — it is finalised (signatures
+              captured) or discarded via the panel below. */}
+          {agreement.status !== "draft" && (
             <AgreementStatusActions
               agreementId={agreement.id}
               currentStatus={agreement.status as AgreementStatus}
@@ -147,6 +144,14 @@ export default async function AgreementDetailPage({
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="space-y-6">
+          {agreement.status === "draft" && (
+            <SectionCard title="Finalise">
+              <AgreementFinalise
+                agreementId={agreement.id}
+                defaultSignatoryName={agreement.contact_name}
+              />
+            </SectionCard>
+          )}
           <SectionCard title="Agreement">
             <dl className="space-y-3">
               <Field
