@@ -13,6 +13,9 @@ import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 
 interface SiteDetailPageProps {
   params: Promise<{ id: string }>;
+  /** `?new=agreement` (from the Agreements list front door) opens the
+   *  agreement wizard on arrival, so the operator lands straight in it. */
+  searchParams?: Promise<{ new?: string }>;
 }
 
 function DetailField({ label, value }: { label: string; value: string }) {
@@ -44,8 +47,12 @@ function SectionCard({
   );
 }
 
-export default async function SiteDetailPage({ params }: SiteDetailPageProps) {
+export default async function SiteDetailPage({
+  params,
+  searchParams,
+}: SiteDetailPageProps) {
   const { id } = await params;
+  const openAgreementWizard = (await searchParams)?.new === "agreement";
   const site = await getSiteById(id);
 
   if (!site) {
@@ -239,7 +246,11 @@ export default async function SiteDetailPage({ params }: SiteDetailPageProps) {
                 ))}
               </ul>
             )}
-            <AddAgreementForm siteId={id} customer={customer} />
+            <AddAgreementForm
+              siteId={id}
+              customer={customer}
+              defaultOpen={openAgreementWizard}
+            />
           </SectionCard>
         </div>
       </div>

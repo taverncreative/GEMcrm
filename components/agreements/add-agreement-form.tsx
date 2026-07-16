@@ -48,9 +48,14 @@ function getErrorStep(errors: Record<string, string>): number | null {
 export function AddAgreementForm({
   siteId,
   customer,
+  defaultOpen = false,
 }: {
   siteId: string;
   customer?: Customer | null;
+  /** Open the wizard on mount instead of showing the "New Agreement"
+   *  button — used when arriving from the Agreements list front door,
+   *  which has already resolved the customer + site. */
+  defaultOpen?: boolean;
 }) {
   const [state, action, isPending] = useActionState(
     createAgreementAction,
@@ -110,7 +115,7 @@ export function AddAgreementForm({
   const [clientSig, setClientSig] = useState("");
   const [gemSig, setGemSig] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(defaultOpen);
   const prevErrorsRef = useRef<Record<string, string>>({});
 
   // Navigate to the offending step when server-side validation errors arrive.

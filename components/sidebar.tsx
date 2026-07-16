@@ -25,13 +25,18 @@ const NAV_SECTIONS = [
     items: [
       { label: "Customers", href: ROUTES.CUSTOMERS, icon: "customers" },
       { label: "Jobs", href: ROUTES.JOBS, icon: "jobs" },
+      // Agreements is back as a first-class destination. Documentation only
+      // lists agreements that have a stored PDF, and it deliberately excludes
+      // DRAFTS, so the draft flow left no way to find an unsigned proposal.
+      // This list is also the only place to manage status/renewals.
+      { label: "Agreements", href: ROUTES.AGREEMENTS, icon: "agreements" },
     ],
   },
   {
     label: "Tools",
     items: [
-      // Documentation rolls up invoices, service sheets, and agreements
-      // — the standalone Agreements nav entry is gone; deep-links still work.
+      // Documentation rolls up the stored PDFs (invoices, service sheets,
+      // signed agreements). Agreement management lives under Operations.
       { label: "Documentation", href: ROUTES.REPORTS, icon: "reports" },
       { label: "Settings", href: ROUTES.SETTINGS, icon: "settings" },
     ],

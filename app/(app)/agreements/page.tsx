@@ -9,6 +9,7 @@ import {
   AGREEMENT_STATUS_COLORS,
 } from "@/lib/constants/job-labels";
 import { AgreementsFilter } from "@/components/agreements/agreements-filter";
+import { NewAgreementLauncher } from "@/components/agreements/new-agreement-launcher";
 import type { AgreementStatus } from "@/types/database";
 
 interface AgreementsPageProps {
@@ -179,6 +180,7 @@ export default async function AgreementsPage({
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Agreements</h1>
         </div>
+        <NewAgreementLauncher />
       </div>
 
       <div className="mt-6">
