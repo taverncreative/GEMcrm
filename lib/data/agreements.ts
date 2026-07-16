@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { todayUk, dateUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { newId } from "@/lib/utils/id";
 import type { Agreement, Customer, Site } from "@/types/database";
@@ -298,25 +297,16 @@ export async function getExpiringAgreements(
 /**
  * Soft-delete an agreement (Discard draft).
  *
- * Runs on the ADMIN client, not the user client: the RLS SELECT policy is
- * `deleted_at IS NULL` (migration 029), so a user-scoped self-hiding update
- * is rejected with 42501 (PostgREST's RETURNING row fails the read policy —
- * see the CLAUDE.md standing note). customers/jobs solved this with a
- * SECURITY DEFINER `soft_delete_<table>` RPC; agreements has none yet and
- * this slice is no-schema, so the requireUser-gated server action calls
- * this admin-client twin instead (same auth gate + privileged write shape
- * as the RPC). Follow-up debt: migration 043 `soft_delete_agreement`, then
- * swap this to the RPC for consistency with 032/038.
- *
- * The `deleted_at is null` predicate makes a replayed discard a no-op.
+ * Goes through the soft_delete_agreement SECURITY DEFINER RPC (migration
+ * 043), the same pattern as soft_delete_customer (032) and soft_delete_job
+ * (038): the RLS SELECT policy is `deleted_at IS NULL` (029), so a plain
+ * user-scoped self-hiding update is rejected with 42501 — the RPC is the
+ * narrowest bypass. Its `deleted_at is null` predicate makes a replayed
+ * discard a no-op.
  */
 export async function softDeleteAgreement(id: string): Promise<void> {
-  const admin = createAdminClient();
-  const { error } = await admin
-    .from("agreements")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", id)
-    .is("deleted_at", null);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("soft_delete_agreement", { p_id: id });
 
   if (error) {
     console.error("[softDeleteAgreement]", error.code, error.message);
