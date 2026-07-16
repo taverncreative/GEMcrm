@@ -454,10 +454,20 @@ export function AddAgreementForm({
             {/* Save an unsigned draft to send for review. Not gated on the
                 "I agree" tick (the customer has not agreed yet); signatures
                 are captured later. Submits the whole form (all steps are in
-                the DOM) with empty signatures. */}
+                the DOM) with empty signatures.
+
+                formNoValidate is LOAD-BEARING: every step stays mounted
+                (CSS-hidden), so step 4's required signee field is empty and
+                invisible at this point. Without it the browser blocks the
+                submit on constraint validation and cannot anchor the
+                validation bubble to an invisible control — the click just
+                dies (the live "unresponsive Save as draft" bug).
+                DraftAgreementSchema is the real gate; its errors surface
+                inline and route to the offending step. */}
             <button
               type="submit"
               formAction={handleSaveDraft}
+              formNoValidate
               disabled={pending}
               className="rounded-xl border border-gray-200 px-5 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
             >
@@ -516,8 +526,13 @@ export function AddAgreementForm({
         )}
         <div className="flex justify-between pt-4">
           <button type="button" onClick={() => setStep(3)} className="rounded-xl px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">Back</button>
+          {/* Same hidden-required-field trap as Save as draft: steps 1-3 are
+              CSS-hidden here, so an unfilled earlier step would silently
+              block this submit too. AgreementSchema validates server-side
+              and its errors route to the offending step. */}
           <button
             type="submit"
+            formNoValidate
             disabled={pending}
             className="rounded-xl bg-brand px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
           >
