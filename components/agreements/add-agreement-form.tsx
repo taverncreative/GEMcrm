@@ -118,6 +118,39 @@ export function AddAgreementForm({
   const [showForm, setShowForm] = useState(defaultOpen);
   const prevErrorsRef = useRef<Record<string, string>>({});
 
+  // Every text/date/number input is CONTROLLED, like BookingModal (see its
+  // header comment): React's form-action behaviour resets uncontrolled
+  // inputs on submit, INCLUDING failed submits. Uncontrolled, a validation
+  // failure wiped a fully-filled contract form and the retry submitted the
+  // emptied fields (the live bug). Controlled state survives the round trip,
+  // so a failure re-renders with everything the user typed still present.
+  const [fields, setFields] = useState(() => ({
+    reference_number: "",
+    contact_name: "",
+    invoice_address: "",
+    contact_phone: "",
+    mobile: "",
+    contact_email: "",
+    contract_value: "",
+    start_date: todayUk(),
+    end_date: (() => {
+      const d = new Date();
+      d.setFullYear(d.getFullYear() + 1);
+      return dateUk(d);
+    })(),
+    visit_frequency: "12",
+    callout_terms: "",
+    terms_text: DEFAULT_TERMS,
+    signed_date: todayUk(),
+    client_signatory_name: "",
+  }));
+  const setField =
+    (key: keyof typeof fields) =>
+    (
+      e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    ) =>
+      setFields((prev) => ({ ...prev, [key]: e.target.value }));
+
   // Navigate to the offending step when server-side validation errors arrive.
   useEffect(() => {
     const prev = prevErrorsRef.current;
@@ -224,6 +257,8 @@ export function AddAgreementForm({
             id="reference_number"
             type="text"
             name="reference_number"
+            value={fields.reference_number}
+            onChange={setField("reference_number")}
             placeholder="e.g. GEM-2026-001"
             autoFocus
             required
@@ -241,6 +276,8 @@ export function AddAgreementForm({
             id="contact_name"
             type="text"
             name="contact_name"
+            value={fields.contact_name}
+            onChange={setField("contact_name")}
             required
             placeholder="Business name or primary contact"
             className={inputClass}
@@ -256,6 +293,8 @@ export function AddAgreementForm({
           <textarea
             id="invoice_address"
             name="invoice_address"
+            value={fields.invoice_address}
+            onChange={setField("invoice_address")}
             rows={3}
             required
             placeholder="Street, Town, County, Postcode"
@@ -270,21 +309,21 @@ export function AddAgreementForm({
             <label htmlFor="contact_phone" className={labelClass}>
               Telephone <span className="text-red-500">*</span>
             </label>
-            <input id="contact_phone" type="tel" name="contact_phone" required placeholder="01xxx xxx xxx" className={inputClass} />
+            <input id="contact_phone" type="tel" name="contact_phone" value={fields.contact_phone} onChange={setField("contact_phone")} required placeholder="01xxx xxx xxx" className={inputClass} />
             {formErrors.contact_phone && (
               <p className="mt-1 text-xs text-red-500">{formErrors.contact_phone}</p>
             )}
           </div>
           <div>
             <label htmlFor="mobile" className={labelClass}>Mobile</label>
-            <input id="mobile" type="tel" name="mobile" placeholder="07xxx xxx xxx" className={inputClass} />
+            <input id="mobile" type="tel" name="mobile" value={fields.mobile} onChange={setField("mobile")} placeholder="07xxx xxx xxx" className={inputClass} />
           </div>
         </div>
         <div>
           <label htmlFor="contact_email" className={labelClass}>
             Email <span className="text-red-500">*</span>
           </label>
-          <input id="contact_email" type="email" name="contact_email" required placeholder="contact@example.com" className={inputClass} />
+          <input id="contact_email" type="email" name="contact_email" value={fields.contact_email} onChange={setField("contact_email")} required placeholder="contact@example.com" className={inputClass} />
           {formErrors.contact_email && (
             <p className="mt-1 text-xs text-red-500">{formErrors.contact_email}</p>
           )}
@@ -312,7 +351,7 @@ export function AddAgreementForm({
             </label>
             <div className="relative">
               <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">&pound;</span>
-              <input id="contract_value" type="number" name="contract_value" required min={0} step="0.01" placeholder="0.00" className={`${inputClass} pl-8`} />
+              <input id="contract_value" type="number" name="contract_value" value={fields.contract_value} onChange={setField("contract_value")} required min={0} step="0.01" placeholder="0.00" className={`${inputClass} pl-8`} />
             </div>
             {formErrors.contract_value && <p className="mt-1 text-xs text-red-500">{formErrors.contract_value}</p>}
           </div>
@@ -325,7 +364,8 @@ export function AddAgreementForm({
               type="date"
               name="start_date"
               required
-              defaultValue={todayUk()}
+              value={fields.start_date}
+              onChange={setField("start_date")}
               className={inputClass}
             />
             {formErrors.start_date && <p className="mt-1 text-xs text-red-500">{formErrors.start_date}</p>}
@@ -338,11 +378,8 @@ export function AddAgreementForm({
               id="end_date"
               type="date"
               name="end_date"
-              defaultValue={(() => {
-                const d = new Date();
-                d.setFullYear(d.getFullYear() + 1);
-                return dateUk(d);
-              })()}
+              value={fields.end_date}
+              onChange={setField("end_date")}
               className={inputClass}
             />
             <p className="mt-1 text-xs text-gray-400">
@@ -405,7 +442,8 @@ export function AddAgreementForm({
             required
             min={1}
             max={52}
-            defaultValue={12}
+            value={fields.visit_frequency}
+            onChange={setField("visit_frequency")}
             className={inputClass}
           />
           {formErrors.visit_frequency && <p className="mt-1 text-xs text-red-500">{formErrors.visit_frequency}</p>}
@@ -414,7 +452,7 @@ export function AddAgreementForm({
           <label htmlFor="callout_terms" className={labelClass}>
             Call Out Arrangement <span className="text-red-500">*</span>
           </label>
-          <textarea id="callout_terms" name="callout_terms" rows={3} required placeholder="e.g. Response within 24 hours, included in agreement for covered pests. Out-of-hours rates apply for evenings/weekends." className={inputClass} />
+          <textarea id="callout_terms" name="callout_terms" value={fields.callout_terms} onChange={setField("callout_terms")} rows={3} required placeholder="e.g. Response within 24 hours, included in agreement for covered pests. Out-of-hours rates apply for evenings/weekends." className={inputClass} />
           {formErrors.callout_terms && <p className="mt-1 text-xs text-red-500">{formErrors.callout_terms}</p>}
         </div>
         <div className="flex justify-between pt-4">
@@ -431,7 +469,8 @@ export function AddAgreementForm({
             id="terms_text"
             name="terms_text"
             rows={16}
-            defaultValue={DEFAULT_TERMS}
+            value={fields.terms_text}
+            onChange={setField("terms_text")}
             className="mt-1 block w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm leading-relaxed text-gray-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
           />
           <p className="mt-2 text-xs text-gray-400">Standard PMA terms are pre-filled. Edit only if required for this agreement.</p>
@@ -502,7 +541,8 @@ export function AddAgreementForm({
               id="signed_date"
               type="date"
               name="signed_date"
-              defaultValue={todayUk()}
+              value={fields.signed_date}
+              onChange={setField("signed_date")}
               className={inputClass}
             />
           </div>
@@ -510,7 +550,7 @@ export function AddAgreementForm({
             <label htmlFor="client_signatory_name" className={labelClass}>
               Name Of Signee <span className="text-red-500">*</span>
             </label>
-            <input id="client_signatory_name" type="text" name="client_signatory_name" required placeholder="Full name of person signing" className={inputClass} />
+            <input id="client_signatory_name" type="text" name="client_signatory_name" value={fields.client_signatory_name} onChange={setField("client_signatory_name")} required placeholder="Full name of person signing" className={inputClass} />
             {formErrors.client_signatory_name && (
               <p className="mt-1 text-xs text-red-500">{formErrors.client_signatory_name}</p>
             )}
