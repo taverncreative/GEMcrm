@@ -68,3 +68,17 @@ export function agreementVisitDates(
   }
   return dates;
 }
+
+/**
+ * Default offset (days from today) for hand-booking the NEXT routine
+ * visit from the service-sheet Sign-off step. When the site has an
+ * active agreement, follow its cadence (365 / visits-per-year, so
+ * 4/yr → ~91 days, 12/yr → ~30); otherwise a plain month out. Freely
+ * editable in the UI — this is only the starting suggestion.
+ */
+export function nextRoutineOffsetDays(
+  visitFrequency: number | null | undefined
+): number {
+  if (!visitFrequency || visitFrequency < 1) return 30;
+  return Math.max(1, Math.round(365 / visitFrequency));
+}

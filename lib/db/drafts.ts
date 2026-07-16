@@ -62,6 +62,13 @@ export interface ServiceSheetDraft {
   photo_data_urls: string[];
   schedule_follow_up: boolean;
   follow_up_date: string;
+  /** "Schedule next routine visit" card state (optional so drafts written
+   *  before these fields existed load cleanly). routine_date is only
+   *  persisted once the operator has touched it — an untouched value stays
+   *  undefined so the cadence-derived default can still apply on reload.
+   *  Non-indexed → no Dexie version bump. */
+  schedule_routine?: boolean;
+  routine_date?: string;
   /** "Invoice required" checkbox state (optional so drafts written before
    *  this field existed load cleanly). Non-indexed → no Dexie version bump. */
   invoice_required?: boolean;

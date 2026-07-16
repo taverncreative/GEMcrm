@@ -32,6 +32,8 @@ import {
 } from "@/lib/db/drafts";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
+import { nextRoutineOffsetDays } from "@/lib/services/agreement-schedule";
+import { findClashingJobLocal } from "@/lib/db/lookups";
 
 /** Sheet input + the combined-finalize flag (offline-pwa pass B) and
  *  the amend flag (L2). The flags ride along so applyLocal knows
@@ -369,9 +371,63 @@ function ServiceSheetFormBody({
   const [followUpDate, setFollowUpDate] = useState(
     () => draft?.follow_up_date ?? dateUkOffset(14)
   );
+  // "Schedule next routine visit" — mirrors the follow-up card. The date
+  // default follows the site's agreement cadence when one is active
+  // (365 / visits-per-year), else a plain +30 days; see the effect below.
+  const [scheduleRoutine, setScheduleRoutine] = useState(
+    draft?.schedule_routine ?? false
+  );
+  const [routineDate, setRoutineDate] = useState(
+    () => draft?.routine_date ?? dateUkOffset(30)
+  );
+  const routineDateTouchedRef = useRef(!!draft?.routine_date);
   const [invoiceRequired, setInvoiceRequired] = useState(
     draft?.invoice_required ?? false
   );
+
+  // The site's ACTIVE agreement (Dexie, offline-fine): drives the routine
+  // date default and the "scheduled by the agreement" note. Also find the
+  // next agreement-generated visit for that note.
+  const siteAgreement = useLiveQuery(async () => {
+    if (!siteId) return null;
+    const all = await db.agreements
+      .where("status")
+      .equals("active")
+      .toArray();
+    return (
+      all.find((a) => a.site_id === siteId && !a.deleted_at) ?? null
+    );
+  }, [siteId]);
+  const nextAgreementVisit = useLiveQuery(async () => {
+    if (!siteAgreement) return null;
+    const today = todayUk();
+    const jobs = await db.jobs
+      .where("site_id")
+      .equals(siteAgreement.site_id)
+      .toArray();
+    const upcoming = jobs
+      .filter(
+        (j) =>
+          j.agreement_id === siteAgreement.id &&
+          !j.deleted_at &&
+          j.job_status === "scheduled" &&
+          j.job_date >= today
+      )
+      .sort((a, b) => a.job_date.localeCompare(b.job_date));
+    return upcoming[0]?.job_date ?? null;
+  }, [siteAgreement]);
+
+  // Cadence-derived default: applied once the agreement loads, and only
+  // while the operator hasn't touched the field (a draft value counts as
+  // touched). Freely editable afterwards.
+  useEffect(() => {
+    if (!siteAgreement?.visit_frequency) return;
+    if (routineDateTouchedRef.current) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRoutineDate(
+      dateUkOffset(nextRoutineOffsetDays(siteAgreement.visit_frequency))
+    );
+  }, [siteAgreement]);
   const prevErrorsRef = useRef<Record<string, string>>({});
   const router = useRouter();
 
@@ -394,6 +450,14 @@ function ServiceSheetFormBody({
   // choices live here; confirm enqueues the combined entry.
   const [reviewOpen, setReviewOpen] = useState(false);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  // Booking clash pre-check (decision 5): the completion is optimistic —
+  // the server is never called at submit — so a server-side JobClashError
+  // has no channel back to this form. Instead the SAME predicate the DB
+  // index enforces runs against Dexie at review time, and a clash shows a
+  // named amber warning in the review modal BEFORE confirm. Completion is
+  // never blocked; the clashing booking is simply skipped server-side
+  // (and named in the action's warnings for online/replay logs).
+  const [bookingWarnings, setBookingWarnings] = useState<string[]>([]);
   const formRef = useRef<HTMLFormElement | null>(null);
   const ensureReady = useEnsureCustomerDocReady();
 
@@ -446,7 +510,43 @@ function ServiceSheetFormBody({
       return;
     }
     setClientErrors({});
+    setBookingWarnings([]);
     setReviewOpen(true);
+    // Clash pre-check for the requested bookings (Dexie — works offline).
+    // Fire-and-forget: the modal is already open; warnings render when the
+    // lookups resolve (fast — an indexed compound-key get).
+    if (siteId) {
+      void (async () => {
+        const found: string[] = [];
+        if (scheduleFollowUp && followUpDate) {
+          const clash = await findClashingJobLocal(
+            siteId,
+            followUpDate,
+            "followup",
+            jobId
+          );
+          if (clash) {
+            found.push(
+              `The follow-up on ${followUpDate} will not be booked: this site already has a follow-up visit that day.`
+            );
+          }
+        }
+        if (scheduleRoutine && routineDate) {
+          const clash = await findClashingJobLocal(
+            siteId,
+            routineDate,
+            "routine",
+            jobId
+          );
+          if (clash) {
+            found.push(
+              `The routine visit on ${routineDate} will not be booked: this site already has a routine visit that day.`
+            );
+          }
+        }
+        if (found.length > 0) setBookingWarnings(found);
+      })();
+    }
   }
 
   function handleConfirmComplete(opts: { sendEmail: boolean }) {
@@ -575,6 +675,8 @@ function ServiceSheetFormBody({
         photo_data_urls: photoDataUrls,
         schedule_follow_up: scheduleFollowUp,
         follow_up_date: followUpDate,
+        schedule_routine: scheduleRoutine,
+        routine_date: routineDateTouchedRef.current ? routineDate : undefined,
         invoice_required: invoiceRequired,
       });
     }, 500);
@@ -600,6 +702,8 @@ function ServiceSheetFormBody({
     photoDataUrls,
     scheduleFollowUp,
     followUpDate,
+    scheduleRoutine,
+    routineDate,
     invoiceRequired,
   ]);
 
@@ -675,6 +779,16 @@ function ServiceSheetFormBody({
         type="hidden"
         name="follow_up_date"
         value={scheduleFollowUp ? followUpDate : ""}
+      />
+      <input
+        type="hidden"
+        name="schedule_routine"
+        value={scheduleRoutine ? "true" : ""}
+      />
+      <input
+        type="hidden"
+        name="routine_date"
+        value={scheduleRoutine ? routineDate : ""}
       />
 
       {/* Customer header strip — pre-filled from the booking, read-only */}
@@ -1193,6 +1307,55 @@ function ServiceSheetFormBody({
           )}
         </div>
 
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={scheduleRoutine}
+              onChange={(e) => setScheduleRoutine(e.target.checked)}
+              className="mt-0.5 h-5 w-5 rounded border-gray-300 text-brand-darker focus:ring-brand"
+            />
+            <div className="flex-1">
+              <span className="block text-sm font-medium text-gray-900">
+                Schedule next routine visit
+              </span>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Adds the next routine booking to the calendar for this site.
+              </p>
+            </div>
+          </label>
+          {siteAgreement && (
+            <p className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              This site&apos;s routine visits are scheduled by the agreement
+              {nextAgreementVisit
+                ? ` (next: ${new Date(nextAgreementVisit).toLocaleDateString(
+                    "en-GB",
+                    { day: "numeric", month: "short", year: "numeric" }
+                  )})`
+                : ""}
+              .
+            </p>
+          )}
+          {scheduleRoutine && (
+            <div className="mt-4">
+              <label htmlFor="routine_date_input" className={labelClass}>
+                Routine visit date
+              </label>
+              <input
+                id="routine_date_input"
+                type="date"
+                value={routineDate}
+                min={todayUk()}
+                onChange={(e) => {
+                  routineDateTouchedRef.current = true;
+                  setRoutineDate(e.target.value);
+                }}
+                className={inputClass}
+              />
+            </div>
+          )}
+        </div>
+
         <div className="flex justify-between pt-4">
           <button type="button" onClick={() => setStep(4)} className="rounded-xl px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">Back</button>
           <button
@@ -1286,7 +1449,23 @@ function ServiceSheetFormBody({
                   {`Booking on ${followUpDate}`}
                 </ReviewRow>
               )}
+              {scheduleRoutine && (
+                <ReviewRow label="Next routine">
+                  {`Booking on ${routineDate}`}
+                </ReviewRow>
+              )}
             </dl>
+            {bookingWarnings.length > 0 && (
+              <div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                {bookingWarnings.map((w) => (
+                  <p key={w}>{w}</p>
+                ))}
+                <p className="text-amber-700">
+                  You can still complete; that booking will be skipped. Go
+                  back to change the date if you want it booked.
+                </p>
+              </div>
+            )}
             <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500">
               The report PDF is generated when the sheet syncs — completing
               works with no signal, and everything sends itself once

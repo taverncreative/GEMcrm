@@ -11,6 +11,7 @@ import {
   createBooking,
   getJobById,
   markReportEmailed,
+  JobClashError,
 } from "@/lib/data/jobs";
 import { hasPendingEmailReportTask, createTask } from "@/lib/data/tasks";
 import { todayUk } from "@/lib/utils/today-uk";
@@ -45,6 +46,10 @@ export interface SaveServiceSheetResult extends ActionState {
   jobId?: string;
   /** True when the combined path (finalize="true") completed the job. */
   finalized?: boolean;
+  /** Best-effort side effects that were skipped (e.g. a follow-up or
+   *  routine booking that clashed with an existing visit). The completion
+   *  itself still succeeded; these name what did NOT happen and why. */
+  warnings?: string[];
 }
 
 /**
@@ -202,6 +207,7 @@ export async function completeServiceSheetAction(
 
   // ─── Optional in-action finalize (offline-pwa pass A) ──────────────
   let finalized = false;
+  let warnings: string[] | undefined;
   if (str("finalize") === "true") {
     if (existing.job_status === "completed") {
       // Re-drain of an already-finalized completion (the outbox entry
@@ -220,7 +226,10 @@ export async function completeServiceSheetAction(
         sendEmail: str("send_email") === "true",
         scheduleFollowUp: str("schedule_follow_up") === "true",
         followUpDate: str("follow_up_date") || null,
+        scheduleRoutine: str("schedule_routine") === "true",
+        routineDate: str("routine_date") || null,
       });
+      warnings = approveRes.warnings;
       if (!approveRes.success) {
         // Sheet data is saved; finalize failed. Returning failure keeps
         // the outbox entry alive — the retry re-runs save (idempotent,
@@ -249,6 +258,7 @@ export async function completeServiceSheetAction(
     pdfUrl,
     jobId,
     finalized,
+    warnings,
   };
 }
 
@@ -259,12 +269,16 @@ export interface ApproveResult {
   message?: string;
   /** L3: set iff the report email actually sent (recorded on the job). */
   emailedTo?: string | null;
+  /** Best-effort bookings that were skipped (clash or error), named. */
+  warnings?: string[];
 }
 
 interface ApproveOptions {
   sendEmail?: boolean;
   scheduleFollowUp?: boolean;
   followUpDate?: string | null;
+  scheduleRoutine?: boolean;
+  routineDate?: string | null;
 }
 
 export async function approveServiceSheetAction(
@@ -354,30 +368,66 @@ export async function approveServiceSheetAction(
       }
     }
 
-    if (options.scheduleFollowUp && options.followUpDate && site) {
+    // Post-completion bookings — best-effort, NEVER fail the completion.
+    // A clash (same site + date + visit type already booked) or any other
+    // booking error is collected as a named warning instead of the old
+    // silent console swallow, so the operator learns what did not happen.
+    const warnings: string[] = [];
+    const bookVisit = async (
+      label: string,
+      jobDate: string,
+      callType: "followup" | "routine",
+      parentJobId: string
+    ) => {
       try {
         await createBooking({
-          site_id: site.id,
-          job_date: options.followUpDate,
-          // Follow-ups inherit no specific time/window — operator can
-          // edit the booking afterwards to add one.
+          site_id: site!.id,
+          job_date: jobDate,
+          // No time/window inherited — the operator can edit the booking
+          // afterwards to add one.
           job_time: "",
           job_time_end: "",
-          call_type: "followup",
+          call_type: callType,
           pest_species: updated.pest_species ?? [],
           report_notes: "",
-          parent_job_id: updated.id,
+          parent_job_id: parentJobId,
         });
-      } catch (followErr) {
-        console.error("[approveServiceSheetAction] follow-up booking:", followErr);
+      } catch (err) {
+        console.error(`[approveServiceSheetAction] ${label} booking:`, err);
+        warnings.push(
+          err instanceof JobClashError
+            ? `${label} on ${jobDate} was not booked: this site already has a ${
+                callType === "routine" ? "routine" : "follow-up"
+              } visit that day.`
+            : `${label} on ${jobDate} could not be booked.`
+        );
       }
+    };
+
+    if (options.scheduleFollowUp && options.followUpDate && site) {
+      // Chained to the completed job (parent_job_id → <parent-ref>-N).
+      await bookVisit(
+        "Follow-up visit",
+        options.followUpDate,
+        "followup",
+        updated.id
+      );
+    }
+    if (options.scheduleRoutine && options.routineDate && site) {
+      // A fresh top-level visit, NOT chained: a routine isn't remedial,
+      // so it gets its own reference (no parent_job_id).
+      await bookVisit("Routine visit", options.routineDate, "routine", "");
     }
 
     revalidatePath(ROUTES.jobDetail(jobId));
     revalidatePath(ROUTES.JOBS);
     revalidatePath(ROUTES.CALENDAR);
     revalidatePath(ROUTES.DASHBOARD);
-    return { success: true, emailedTo };
+    return {
+      success: true,
+      emailedTo,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
   } catch (err) {
     return {
       success: false,
