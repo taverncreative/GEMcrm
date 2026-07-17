@@ -45,6 +45,7 @@ vi.mock("@/lib/data/sites", () => ({
     id: "site1",
     customer_id: "cust1",
     address_line_1: "1 Test Way",
+    town: "Testville",
   })),
 }));
 vi.mock("@/lib/data/reports", () => ({

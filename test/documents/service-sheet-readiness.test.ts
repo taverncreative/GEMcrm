@@ -101,9 +101,15 @@ describe("customerServiceSheetReadiness", () => {
     ]);
   });
 
-  // ─── Customer-address fallback (feat: sheet prefill) ─────────────────
+  // ─── The SITE must carry the address (require-site-address) ──────────
+  // The customer-address fallback still PREFILLS the sheet header, but it
+  // may NOT satisfy completion: a bare quick-add site backed only by a
+  // customer address must block, or the sheet would finalise with the
+  // customer's address printed as the site where the work was done. This
+  // reverses the earlier "prefill" behaviour on purpose (client gate now
+  // matches the server completion guard).
 
-  it("does NOT re-ask for a site address when the customer record has one (bare site)", () => {
+  it("BLOCKS on a bare site even when the customer record has an address", () => {
     const r = customerServiceSheetReadiness(
       {
         ...fullCustomer,
@@ -112,8 +118,26 @@ describe("customerServiceSheetReadiness", () => {
       },
       { address_line_1: null, town: null }
     );
+    expect(r.ready).toBe(false);
+    expect(r.missing.map((f) => f.key)).toEqual(["site_address"]);
+  });
+
+  it("is READY when the SITE itself carries line 1 + town", () => {
+    const r = customerServiceSheetReadiness(fullCustomer, {
+      address_line_1: "1 Industrial Way",
+      town: "Testford",
+    });
     expect(r.ready).toBe(true);
     expect(r.missing).toEqual([]);
+  });
+
+  it("blocks on site address when the site has line 1 but no town", () => {
+    const r = customerServiceSheetReadiness(fullCustomer, {
+      address_line_1: "1 Industrial Way",
+      town: null,
+    });
+    expect(r.ready).toBe(false);
+    expect(r.missing.map((f) => f.key)).toEqual(["site_address"]);
   });
 
   it("still blocks on site address when NEITHER the site nor the customer has one", () => {

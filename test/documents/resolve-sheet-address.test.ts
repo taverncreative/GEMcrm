@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   resolveSheetAddress,
   formatSheetAddress,
+  siteHasUsableAddress,
 } from "@/lib/documents/resolve-sheet-address";
 
 const siteAddr = {
@@ -79,5 +80,24 @@ describe("formatSheetAddress", () => {
 
   it("is empty for a 'none' resolution", () => {
     expect(formatSheetAddress(resolveSheetAddress(null, null))).toBe("");
+  });
+});
+
+describe("siteHasUsableAddress — the completion bar (site row only)", () => {
+  it("true when the site has line 1 + town", () => {
+    expect(siteHasUsableAddress(siteAddr)).toBe(true);
+  });
+
+  it("false for line 1 without town, or town without line 1", () => {
+    expect(siteHasUsableAddress({ address_line_1: "1 Industrial Way", town: null })).toBe(false);
+    expect(siteHasUsableAddress({ address_line_1: null, town: "Testford" })).toBe(false);
+  });
+
+  it("false for whitespace-only fields (matches isBlank)", () => {
+    expect(siteHasUsableAddress({ address_line_1: "  ", town: "  " })).toBe(false);
+  });
+
+  it("false for null", () => {
+    expect(siteHasUsableAddress(null)).toBe(false);
   });
 });

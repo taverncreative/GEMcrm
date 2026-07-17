@@ -21,6 +21,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const finalizeServiceSheetMock = vi.fn();
 const saveServiceSheetMock = vi.fn();
 const getJobByIdMock = vi.fn();
+const getSiteByIdMock = vi.fn();
 
 vi.mock("@/lib/data/jobs", () => ({
   finalizeServiceSheet: (...args: unknown[]) =>
@@ -39,17 +40,20 @@ vi.mock("@/lib/data/jobs", () => ({
   markReportEmailed: vi.fn(async () => undefined),
 }));
 vi.mock("@/lib/data/sites", () => ({
-  getSiteById: vi.fn(async () => ({
-    id: "site1",
-    customer_id: "cust1",
-    address_line_1: "1 Test Way",
-  })),
+  getSiteById: (...args: unknown[]) =>
+    (getSiteByIdMock as unknown as (...a: unknown[]) => Promise<unknown>)(
+      ...args
+    ),
 }));
 vi.mock("@/lib/data/customers", () => ({
+  // The customer DOES carry an address — proving the guard reads the SITE
+  // only, so the customer-address fallback can't satisfy completion.
   getCustomerById: vi.fn(async () => ({
     id: "cust1",
     name: "Test Customer",
     email: null,
+    address_line_1: "99 Customer Home",
+    town: "Customerton",
   })),
 }));
 vi.mock("@/lib/data/reports", () => ({
@@ -146,6 +150,14 @@ beforeEach(() => {
   saveServiceSheetMock.mockReset();
   saveServiceSheetMock.mockResolvedValue({ ...FILLED_JOB });
   getJobByIdMock.mockReset();
+  // Default: the SITE carries a usable address (line 1 + town).
+  getSiteByIdMock.mockReset();
+  getSiteByIdMock.mockResolvedValue({
+    id: "site1",
+    customer_id: "cust1",
+    address_line_1: "1 Test Way",
+    town: "Testville",
+  });
 });
 
 describe("approveServiceSheetAction — L0 filled-sheet invariant", () => {
@@ -161,6 +173,49 @@ describe("approveServiceSheetAction — L0 filled-sheet invariant", () => {
 
   it("filled sheet → finalize proceeds", async () => {
     getJobByIdMock.mockResolvedValue(FILLED_JOB);
+
+    const res = await approveServiceSheetAction("job1");
+
+    expect(res.success).toBe(true);
+    expect(finalizeServiceSheetMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("approveServiceSheetAction — L0 site-address invariant", () => {
+  it("site has NO address → rejected even though the customer has one; finalize never runs", async () => {
+    getJobByIdMock.mockResolvedValue(FILLED_JOB);
+    getSiteByIdMock.mockResolvedValue({
+      id: "site1",
+      customer_id: "cust1",
+      address_line_1: null,
+      town: null,
+    });
+
+    const res = await approveServiceSheetAction("job1");
+
+    expect(res.success).toBe(false);
+    expect(res.message).toMatch(/site has no address/i);
+    expect(finalizeServiceSheetMock).not.toHaveBeenCalled();
+  });
+
+  it("site has line 1 but no town → rejected", async () => {
+    getJobByIdMock.mockResolvedValue(FILLED_JOB);
+    getSiteByIdMock.mockResolvedValue({
+      id: "site1",
+      customer_id: "cust1",
+      address_line_1: "1 Test Way",
+      town: "   ", // whitespace is blank
+    });
+
+    const res = await approveServiceSheetAction("job1");
+
+    expect(res.success).toBe(false);
+    expect(finalizeServiceSheetMock).not.toHaveBeenCalled();
+  });
+
+  it("site has line 1 + town → finalize proceeds", async () => {
+    getJobByIdMock.mockResolvedValue(FILLED_JOB);
+    // default mock already carries a usable address
 
     const res = await approveServiceSheetAction("job1");
 
@@ -191,6 +246,31 @@ describe("completeServiceSheetAction — combined path and stale replays", () =>
     // saveServiceSheet or finalize can touch the job.
     expect(Object.keys(res.errors).length).toBeGreaterThan(0);
     expect(saveServiceSheetMock).not.toHaveBeenCalled();
+    expect(finalizeServiceSheetMock).not.toHaveBeenCalled();
+  });
+
+  it("offline replay whose server SITE has no address → NOT finalized, returns failure (→ conflicts inbox)", async () => {
+    // A filled, Zod-valid submission replays on the server, but the
+    // server's copy of the site has no address (e.g. the site-edit outbox
+    // entry hasn't replayed yet). The sheet fields save (in_progress), but
+    // the address guard blocks finalize: the action returns success:false,
+    // so the outbox entry stays alive and, after retries, lands in the
+    // conflicts inbox — never a silent address-less completion.
+    getJobByIdMock.mockResolvedValue(FILLED_JOB);
+    getSiteByIdMock.mockResolvedValue({
+      id: "site1",
+      customer_id: "cust1",
+      address_line_1: null,
+      town: null,
+    });
+
+    const res = await completeServiceSheetAction(INITIAL, filledFormData());
+
+    expect(res.success).toBe(false);
+    expect(res.message).toMatch(/site has no address/i);
+    // Save ran (idempotent, in_progress); finalize did NOT — the job stays
+    // un-completed until a site address exists.
+    expect(saveServiceSheetMock).toHaveBeenCalledTimes(1);
     expect(finalizeServiceSheetMock).not.toHaveBeenCalled();
   });
 });

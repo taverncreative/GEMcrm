@@ -1,7 +1,7 @@
 import type { Customer } from "@/types/database";
 import { isBlank } from "@/lib/documents/doc-readiness";
 import {
-  resolveSheetAddress,
+  siteHasUsableAddress,
   type AddressLike,
 } from "@/lib/documents/resolve-sheet-address";
 
@@ -63,11 +63,14 @@ export function customerServiceSheetReadiness(
     missing.push({ key: "email", label: "an email address", fixOn: "customer" });
   }
 
-  // The address that prints on the sheet: the job's site if it has one,
-  // else the customer's own address block (feat: prefill from the customer
-  // record so a bare quick-add site doesn't re-ask for an address the
-  // customer already has). Only truly-missing-everywhere blocks.
-  if (resolveSheetAddress(site, customer).source === "none") {
+  // The SITE row itself must carry the address that prints on the sheet.
+  // The customer-address fallback still PREFILLS the header (see
+  // resolveSheetAddress), but it may NOT satisfy completion: a bare
+  // quick-add site backed only by a customer address would otherwise
+  // finalise with the customer's address printed as the site. Requiring
+  // the site here matches the server completion guard, so the operator is
+  // caught early online and routed to fix the site.
+  if (!siteHasUsableAddress(site)) {
     missing.push({ key: "site_address", label: "a site address", fixOn: "site" });
   }
 

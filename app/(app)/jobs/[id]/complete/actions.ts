@@ -17,6 +17,7 @@ import { hasPendingEmailReportTask, createTask } from "@/lib/data/tasks";
 import { todayUk } from "@/lib/utils/today-uk";
 import { getSiteById } from "@/lib/data/sites";
 import { getCustomerById } from "@/lib/data/customers";
+import { siteHasUsableAddress } from "@/lib/documents/resolve-sheet-address";
 import { getReportByJobId, createReport } from "@/lib/data/reports";
 import { generateJobReport } from "@/lib/pdf/generate-job-report";
 import { uploadPdf } from "@/lib/storage/upload";
@@ -307,6 +308,26 @@ export async function approveServiceSheetAction(
       success: false,
       message:
         "Service sheet not filled in — complete the sheet before finalising the job.",
+    };
+  }
+
+  // L0 server invariant (site address): the sheet's site address must be
+  // real — the SITE row itself must carry line 1 + town. The
+  // customer-address fallback prefills the header for UX but CANNOT satisfy
+  // completion, or a bare quick-add site would finalise with the customer's
+  // address (or nothing) printed as the site where the work was done —
+  // exactly the "sheet with no site address" Nate reported. Same pure rule
+  // as the client gate. This is THE choke point, so an offline replay that
+  // reaches the server without a site address is rejected here: the caller
+  // (completeServiceSheetAction) returns failure, the outbox entry stays
+  // alive and, after retries, lands in the conflicts inbox — identical
+  // handling to a stale unfilled-sheet replay. Never silently completes.
+  const guardSite = job.site_id ? await getSiteById(job.site_id) : null;
+  if (!siteHasUsableAddress(guardSite)) {
+    return {
+      success: false,
+      message:
+        "This job's site has no address. Add the site address before completing the sheet.",
     };
   }
 

@@ -44,6 +44,24 @@ function usable(parts: AddressLike | null): boolean {
   return !isBlank(parts.address_line_1) && !isBlank(parts.town);
 }
 
+/**
+ * True when the SITE row ITSELF carries a usable address (line 1 + town).
+ *
+ * This is the bar to COMPLETE a service sheet — deliberately stricter than
+ * resolveSheetAddress, which falls back to the customer's address to
+ * PREFILL the header. A sheet may prefill from the customer, but it must
+ * not be completable on that fallback alone: a bare quick-add site backed
+ * only by a customer address would otherwise finalise with the customer's
+ * address (or nothing) printed as the site where the work was done. Nate's
+ * "sheets with no site address" is exactly that case.
+ *
+ * Pure + offline-safe (same isBlank rule as the resolver), so the client
+ * gate and the server completion guard share one definition.
+ */
+export function siteHasUsableAddress(site: AddressLike | null): boolean {
+  return usable(site);
+}
+
 function pick(parts: AddressLike, source: SheetAddressSource): ResolvedSheetAddress {
   return {
     address_line_1: parts.address_line_1 ?? null,
