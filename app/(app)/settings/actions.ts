@@ -6,6 +6,7 @@ import { runRenewalCheck } from "@/lib/services/agreement-renewal";
 import { finishDay } from "@/lib/data/daily-stats";
 import { createFeatureRequest, type RequestType } from "@/lib/data/feature-requests";
 import { sendEmail } from "@/lib/services/email";
+import { sendFeedbackToSpotlight } from "@/lib/services/spotlight";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ChangePasswordSchema, InviteUserSchema } from "@/lib/validation/account";
@@ -111,7 +112,9 @@ export async function submitFeatureRequestAction(
   const submitterEmail = emailParse.data === "" ? null : emailParse.data;
 
   try {
-    await createFeatureRequest({
+    // The row is the record of the request, and its id is Spotlight's
+    // idempotency key below — so capture it rather than discarding it.
+    const created = await createFeatureRequest({
       request_type: type as RequestType,
       message,
       submitter_email: submitterEmail,
@@ -129,6 +132,26 @@ export async function submitFeatureRequestAction(
         message,
       ].join("\n"),
     });
+
+    // Push into Spotlight so John gets a triageable list. BEST EFFORT, and
+    // deliberately LAST: the row and the email above are the backstops and
+    // have already succeeded, so nothing here may change the outcome.
+    //
+    // sendFeedbackToSpotlight is fenced internally and never throws; this
+    // try/catch is belt and braces so that even a future refactor of it
+    // can't make Spotlight the reason Nate's submit fails. If it did, he'd
+    // resubmit a request that was already logged and duplicate it.
+    // No-ops silently until the SPOTLIGHT_INGEST_* env vars are set.
+    try {
+      await sendFeedbackToSpotlight({
+        message,
+        request_id: created.id,
+        type,
+        client_name: BUSINESS.signoffName,
+      });
+    } catch (spotlightErr) {
+      console.error("[submitFeatureRequestAction] spotlight:", spotlightErr);
+    }
 
     revalidatePath(ROUTES.SETTINGS);
     return { success: true, errors: {}, message: "Thanks — request logged." };

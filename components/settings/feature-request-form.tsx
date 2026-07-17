@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { submitFeatureRequestAction } from "@/app/(app)/settings/actions";
 import { BUSINESS } from "@/lib/constants/branding";
+import { useIsOnline } from "@/lib/hooks/use-is-online";
 import type { ActionState } from "@/types/actions";
 
 const initialState: ActionState = {
@@ -27,6 +28,12 @@ export function FeatureRequestForm({ currentUserEmail }: FeatureRequestFormProps
     initialState
   );
   const [type, setType] = useState<string>("feature");
+  // Feedback is ONLINE-ONLY: feature_requests has no Dexie mirror and no
+  // outbox entry, so a submit made offline would reach nothing. Block it
+  // and say so plainly rather than let the form look like it sent. The
+  // text the operator has typed is deliberately left intact — a blip
+  // shouldn't cost them the message.
+  const online = useIsOnline();
 
   return (
     <form action={action} className="space-y-3">
@@ -74,16 +81,23 @@ export function FeatureRequestForm({ currentUserEmail }: FeatureRequestFormProps
         )}
       </div>
 
+      {!online && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          You&apos;re offline, feedback needs a connection. Your message is
+          safe here — send it once you&apos;re back online.
+        </p>
+      )}
+
       <div className="flex items-center justify-between">
         <p className="text-[11px] text-gray-400">
           Sends to <span className="font-mono">{BUSINESS.supportEmail}</span>
         </p>
         <button
           type="submit"
-          disabled={isPending}
+          disabled={isPending || !online}
           className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
         >
-          {isPending ? "Sending…" : "Send"}
+          {isPending ? "Sending…" : online ? "Send" : "Offline"}
         </button>
       </div>
 
