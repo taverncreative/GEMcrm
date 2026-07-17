@@ -52,7 +52,8 @@ See `.env.example` for the full list and inline notes. Required in production:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Settings → API | Safe to expose; RLS enforces auth. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → `service_role` | **Server-only — never expose.** Required for Settings → Invite teammate. |
 | `RESEND_API_KEY` | [resend.com](https://resend.com) → API Keys | Used by `lib/services/email.ts`. Missing → emails log to console. |
-| `RESEND_FROM_EMAIL` | Must be a verified Resend sender | Format: `"GEM Services <nate@gemservices.uk>"`. |
+| `RESEND_FROM_EMAIL` | Must be a verified Resend sender | Format: `"GEM Services <reports@gemservices.uk>"`. Verification is at the domain root, so any mailbox on it is already authorised. |
+| `RESEND_REPLY_TO` | Optional | Reply-To on **every** send, e.g. `nate@gemservices.uk`. Lets the From be systematic (`reports@`) while replies still reach a real inbox. Unset → no Reply-To header. |
 | `CRON_SECRET` | Generated: `openssl rand -hex 32` | Protects `/api/cron/*` endpoints. Vercel cron sends this automatically as `Authorization: Bearer`. |
 
 Optional:

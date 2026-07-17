@@ -10,7 +10,15 @@
  *
  * Required env (production):
  *   RESEND_API_KEY      — from https://resend.com/api-keys
- *   RESEND_FROM_EMAIL   — verified sender, e.g. "GEM Services <nate@gemservices.uk>"
+ *   RESEND_FROM_EMAIL   — verified sender, e.g. "GEM Services <reports@gemservices.uk>"
+ *
+ * Optional env:
+ *   RESEND_REPLY_TO     — Reply-To applied to EVERY send, e.g.
+ *                         "nate@gemservices.uk". Lets the From be a
+ *                         systematic address (reports@) while customer
+ *                         replies still land in a real inbox. Unset means
+ *                         no Reply-To header at all, which is the
+ *                         pre-existing behaviour and the safe default.
  *
  * Other email-sending modules in this app (`invoice-email.ts`,
  * `review-message.ts`) delegate to `sendEmail` here, so swapping providers
@@ -103,6 +111,9 @@ interface SendEmailInput {
   text?: string;
   /** Override the default sender for one-off cases (e.g. forwarding). */
   from?: string;
+  /** Override the default Reply-To for one-off cases. Omit to inherit
+   *  RESEND_REPLY_TO (see defaultReplyTo). */
+  replyTo?: string | string[];
   /** Resend-style attachments: filename + base64 / Buffer content. */
   attachments?: Array<{ filename: string; content: string | Buffer }>;
 }
@@ -133,6 +144,23 @@ function defaultFrom(): string {
 }
 
 /**
+ * Reply-To applied to every send, from RESEND_REPLY_TO.
+ *
+ * The From is a systematic address (reports@…) so the automated mail reads
+ * as system mail rather than personal mail; this points replies at a real
+ * inbox so a customer hitting Reply still reaches a human — and so a reply
+ * never bounces off an address with no mailbox behind it.
+ *
+ * Read at call time (like defaultFrom) rather than at module load, so the
+ * env can change between sends without a restart. Unset, empty, or
+ * whitespace all mean NO Reply-To header — the pre-existing behaviour.
+ */
+function defaultReplyTo(): string | undefined {
+  const value = process.env.RESEND_REPLY_TO?.trim();
+  return value ? value : undefined;
+}
+
+/**
  * Send an email. Idempotent at the call-site sense — Resend handles
  * retries; we don't.
  */
@@ -152,6 +180,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
   const resend = getResend();
   const from = input.from ?? defaultFrom();
+  const replyTo = input.replyTo ?? defaultReplyTo();
 
   // Dev fallback — log a digest so workflows are testable without Resend.
   if (!resend) {
@@ -167,7 +196,11 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       );
       const textUrl = !anchor ? input.text?.match(/https?:\/\/\S+/) : null;
       console.log(
-        `[email:stub] from=${from} to=${recipients.join(", ")} subject=${input.subject}` +
+        `[email:stub] from=${from}` +
+          (replyTo
+            ? ` reply_to=${Array.isArray(replyTo) ? replyTo.join(", ") : replyTo}`
+            : "") +
+          ` to=${recipients.join(", ")} subject=${input.subject}` +
           (attachDigest ? ` attachments=${attachDigest}` : "") +
           (anchor ? ` link="${anchor[2]}" -> ${anchor[1]}` : "") +
           (textUrl ? ` link=${textUrl[0]}` : "")
@@ -189,6 +222,9 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       subject: input.subject,
       ...(input.html ? { html: input.html } : {}),
       ...(input.text ? { text: input.text } : {}),
+      // The SDK takes camelCase `replyTo` and puts `reply_to` on the wire.
+      // Omitted entirely when unset, so no empty header is sent.
+      ...(replyTo ? { replyTo } : {}),
       ...(input.attachments ? { attachments: input.attachments } : {}),
     } as Parameters<typeof resend.emails.send>[0];
 
