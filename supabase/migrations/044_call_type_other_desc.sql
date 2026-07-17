@@ -1,0 +1,21 @@
+-- ============================================================
+-- 044: free-text description for call_type "other"
+-- ============================================================
+-- jobs.call_type is a scalar with a CHECK constraint (migration 018:
+-- routine / callout / followup / survey / other), so unlike the pest and
+-- treatment-method "Other" (which are text[] columns and fold
+-- "Other: <desc>" inline via lib/utils/other-describe.ts), a call-type
+-- description cannot fold in and needs its own column.
+--
+-- Nullable, additive, non-breaking. Only populated when call_type =
+-- 'other'; the app clears it to NULL whenever the type changes away from
+-- 'other'. No CHECK constraint (the "describe required" rule lives in the
+-- Zod schemas + client reveal, matching the pest pattern) so an offline
+-- replay can never be rejected for a transient null.
+--
+-- Outside every uniqueness key: the partial-unique idx_jobs_site_date_unique
+-- and the Dexie [site_id+job_date+call_type] index both key on call_type
+-- only, so two same-day "Other" jobs at one site still clash regardless of
+-- their descriptions.
+
+alter table jobs add column if not exists call_type_other_desc text;

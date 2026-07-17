@@ -8,6 +8,30 @@ export const CALL_TYPE_LABELS: Record<CallType, string> = {
   other: "Other",
 };
 
+/**
+ * Human label for a job's call type, folding the "Other" free-text
+ * description in as "Other: <desc>" — the scalar analogue of how the
+ * pest/method "Other: <desc>" strings print inline (see
+ * lib/utils/other-describe.ts). Used on the DETAIL surfaces (job detail,
+ * service-sheet view, customer PDF, review-request message). Compact
+ * chips deliberately call CALL_TYPE_LABELS directly and stay plain
+ * "Other" to avoid layout blow-out from a long description.
+ *
+ * Falls back to the plain label when the type is not "other" or the
+ * description is empty, and to the raw value for an unknown type.
+ */
+export function formatCallType(
+  callType: string | null | undefined,
+  otherDesc?: string | null
+): string {
+  if (!callType) return "";
+  const label =
+    CALL_TYPE_LABELS[callType as CallType] ?? callType;
+  const desc = otherDesc?.trim();
+  if (callType === "other" && desc) return `Other: ${desc}`;
+  return label;
+}
+
 export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
   low: "Low Risk",
   medium: "Moderate Risk",

@@ -14,6 +14,7 @@ import {
 import { CALL_TYPES } from "@/lib/validation/booking";
 import { CALL_TYPE_LABELS, COMMON_PESTS } from "@/lib/constants/job-labels";
 import { OTHER_PILL, encodeOther } from "@/lib/utils/other-describe";
+import { callTypeOtherDescForStorage } from "@/lib/utils/call-type-other";
 import { todayUk } from "@/lib/utils/today-uk";
 import {
   useLocalFirstAction,
@@ -72,6 +73,7 @@ export interface BookingWrapInput {
     job_time: string;
     job_time_end: string;
     call_type: string;
+    call_type_other_desc: string;
     pest_species: string[];
     value: string;
     report_notes: string;
@@ -165,6 +167,7 @@ export function makeBookingMeta(): WrapMeta<BookingWrapInput> {
           job_time: s(formData, "job_time"),
           job_time_end: s(formData, "job_time_end"),
           call_type: callType,
+          call_type_other_desc: s(formData, "call_type_other_desc"),
           pest_species: parseBookingPests(formData),
           value: s(formData, "value"),
           report_notes: s(formData, "report_notes"),
@@ -236,6 +239,11 @@ export function makeBookingMeta(): WrapMeta<BookingWrapInput> {
         job_time_end: f.job_time_end.trim() || null,
         capture_note: null,
         call_type: (f.call_type || null) as Job["call_type"],
+        // Mirror the server rule: only kept when the type is "other".
+        call_type_other_desc: callTypeOtherDescForStorage(
+          f.call_type,
+          f.call_type_other_desc
+        ),
         pest_species: f.pest_species,
         findings: null,
         recommendations: null,
@@ -433,6 +441,7 @@ export function BookingModal({
   const [jobTime, setJobTime] = useState("");
   const [jobTimeEnd, setJobTimeEnd] = useState("");
   const [callType, setCallType] = useState("");
+  const [callTypeOtherDesc, setCallTypeOtherDesc] = useState("");
   const [value, setValue] = useState("");
   const [reportNotes, setReportNotes] = useState("");
   const [selectedPests, setSelectedPests] = useState<string[]>([]);
@@ -723,6 +732,10 @@ export function BookingModal({
     if (selectedPests.includes(OTHER_PILL) && !otherPest.trim()) {
       errs.other_pest = "Describe the other pest";
     }
+    // Same gate for an "Other" call type: a description is required.
+    if (callType === "other" && !callTypeOtherDesc.trim()) {
+      errs.call_type_other_desc = "Describe the other call type";
+    }
     return errs;
   }
 
@@ -874,6 +887,11 @@ export function BookingModal({
           <input type="hidden" name="job_time" value={jobTime} />
           <input type="hidden" name="job_time_end" value={jobTimeEnd} />
           <input type="hidden" name="call_type" value={callType} />
+          <input
+            type="hidden"
+            name="call_type_other_desc"
+            value={callType === "other" ? callTypeOtherDesc : ""}
+          />
           <input type="hidden" name="value" value={value} />
           <input type="hidden" name="report_notes" value={reportNotes} />
           <input
@@ -1329,6 +1347,27 @@ export function BookingModal({
                   <p className="mt-1 text-xs text-red-500">
                     {errors.call_type}
                   </p>
+                )}
+                {callType === "other" && (
+                  <div className="mt-3">
+                    <label htmlFor="bn-call_type_other" className={labelClass}>
+                      Describe the other call type{" "}
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="bn-call_type_other"
+                      type="text"
+                      value={callTypeOtherDesc}
+                      onChange={(e) => setCallTypeOtherDesc(e.target.value)}
+                      placeholder="e.g. Insect identification"
+                      className={inputClass}
+                    />
+                    {errors.call_type_other_desc && (
+                      <p className="mt-1 text-xs text-red-500">
+                        {errors.call_type_other_desc}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
               <div>

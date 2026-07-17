@@ -1,5 +1,5 @@
 import type { Job, Site, Customer } from "@/types/database";
-import { CALL_TYPE_LABELS, RISK_LEVEL_LABELS } from "@/lib/constants/job-labels";
+import { formatCallType, RISK_LEVEL_LABELS } from "@/lib/constants/job-labels";
 import { PDF_STYLES } from "./styles";
 import { renderDocHeader } from "./partials";
 
@@ -132,7 +132,7 @@ export function renderJobReportHtml({
         ${job.call_type ? `
         <div class="field">
           <div class="field-label">Call Type</div>
-          <div class="field-value-large">${escape(CALL_TYPE_LABELS[job.call_type] ?? job.call_type)}</div>
+          <div class="field-value-large">${escape(formatCallType(job.call_type, job.call_type_other_desc))}</div>
         </div>` : ""}
         <div class="field">
           <div class="field-label">Status</div>

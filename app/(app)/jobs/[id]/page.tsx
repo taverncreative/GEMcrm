@@ -32,7 +32,7 @@ import { getReportByJobIdAction } from "@/app/(app)/jobs/[id]/actions";
 import { ROUTES } from "@/lib/constants/routes";
 import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import {
-  CALL_TYPE_LABELS,
+  formatCallType,
   RISK_LEVEL_LABELS,
   RISK_COLORS,
 } from "@/lib/constants/job-labels";
@@ -118,7 +118,7 @@ function VisitDetailsSection({
         {job.call_type && (
           <DetailField
             label="Call Type"
-            value={CALL_TYPE_LABELS[job.call_type] ?? job.call_type}
+            value={formatCallType(job.call_type, job.call_type_other_desc)}
           />
         )}
         {job.pest_species.length > 0 && (

@@ -40,9 +40,9 @@ import { db } from "@/lib/db";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { sendReportNowAction } from "@/app/(app)/jobs/[id]/report/actions";
 import { parseAndValidateRecipients } from "@/lib/validation/recipients";
-import type { Job, Site, Customer, CallType, RiskLevel } from "@/types/database";
+import type { Job, Site, Customer, RiskLevel } from "@/types/database";
 import {
-  CALL_TYPE_LABELS,
+  formatCallType,
   RISK_LEVEL_LABELS,
 } from "@/lib/constants/job-labels";
 import { ROUTES } from "@/lib/constants/routes";
@@ -182,7 +182,7 @@ export function ServiceSheetViewOnly({
   onAmend,
 }: ServiceSheetViewOnlyProps) {
   const callTypeLabel = job.call_type
-    ? CALL_TYPE_LABELS[job.call_type as CallType] ?? job.call_type
+    ? formatCallType(job.call_type, job.call_type_other_desc)
     : "—";
   const riskLevelLabel = job.risk_level
     ? RISK_LEVEL_LABELS[job.risk_level as RiskLevel] ?? job.risk_level

@@ -31,6 +31,10 @@ export const ServiceSheetSchema = z.object({
   job_id: z.string().min(1, "Job ID required"),
 
   call_type: z.enum(CALL_TYPES, { message: "Select a call type" }),
+  /** Free-text description, required when call_type is "other" (enforced by
+   *  the superRefine below). Stored in jobs.call_type_other_desc; the data
+   *  layer clears it to null whenever the type is not "other". */
+  call_type_other_desc: optionalString,
 
   pest_species: z
     .array(z.string())
@@ -63,6 +67,15 @@ export const ServiceSheetSchema = z.object({
    *  billing checklist. Coerced + defaulted like client_present so an
    *  unchecked box (absent key) is a clean false. */
   invoice_required: z.coerce.boolean().default(false),
+}).superRefine((val, ctx) => {
+  // Required-when-Other, mirroring the pest/method "Other" gate.
+  if (val.call_type === "other" && !val.call_type_other_desc.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Describe the other call type",
+      path: ["call_type_other_desc"],
+    });
+  }
 });
 
 export type ServiceSheetInput = z.infer<typeof ServiceSheetSchema>;

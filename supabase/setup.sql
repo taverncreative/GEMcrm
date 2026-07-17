@@ -964,3 +964,15 @@ alter table tasks add constraint tasks_task_type_check
   check (task_type in ('general', 'follow_up', 'review_request', 'contract_renewal', 'todo'));
 
 alter table tasks add column if not exists notes text;
+
+-- ============================================================
+-- 044: free-text description for call_type "other"
+-- ============================================================
+-- See supabase/migrations/044_call_type_other_desc.sql. jobs.call_type is
+-- a scalar with a CHECK constraint, so a call-type "Other" description
+-- cannot fold into it the way the pest/method text[] "Other: <desc>"
+-- strings do; it needs its own column. Nullable, additive; populated only
+-- when call_type = 'other' and cleared to NULL otherwise. No CHECK (the
+-- required rule is app-level). Outside every uniqueness key, so two
+-- same-day "Other" jobs at one site still clash.
+alter table jobs add column if not exists call_type_other_desc text;

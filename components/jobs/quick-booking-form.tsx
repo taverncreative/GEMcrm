@@ -46,6 +46,10 @@ export function QuickBookingForm({
   const [selectedPests, setSelectedPests] = useState<string[]>(pestSeed.pills);
   const [otherPest, setOtherPest] = useState(pestSeed.otherText);
   const [otherPestError, setOtherPestError] = useState<string | null>(null);
+  // Call type is controlled so the "Other" description box can reveal.
+  const [callType, setCallType] = useState(defaultCallType ?? "");
+  const [otherCallDesc, setOtherCallDesc] = useState("");
+  const [otherCallError, setOtherCallError] = useState<string | null>(null);
 
   function togglePest(pest: string) {
     setSelectedPests((prev) =>
@@ -56,11 +60,20 @@ export function QuickBookingForm({
   // Gate the submit: an "Other" pill with no description must not save a
   // bare "Other". Everything else proceeds to the server action unchanged.
   function handleSubmit(formData: FormData) {
+    let blocked = false;
     if (selectedPests.includes(OTHER_PILL) && !otherPest.trim()) {
       setOtherPestError("Describe the other pest");
-      return;
+      blocked = true;
+    } else {
+      setOtherPestError(null);
     }
-    setOtherPestError(null);
+    if (callType === "other" && !otherCallDesc.trim()) {
+      setOtherCallError("Describe the other call type");
+      blocked = true;
+    } else {
+      setOtherCallError(null);
+    }
+    if (blocked) return;
     action(formData);
   }
 
@@ -135,7 +148,8 @@ export function QuickBookingForm({
             id="call_type"
             name="call_type"
             required
-            defaultValue={defaultCallType ?? ""}
+            value={callType}
+            onChange={(e) => setCallType(e.target.value)}
             className={inputClass}
           >
             <option value="" disabled>
@@ -149,6 +163,31 @@ export function QuickBookingForm({
           </select>
           {state.errors.call_type && (
             <p className="mt-1 text-sm text-red-500">{state.errors.call_type}</p>
+          )}
+          {callType === "other" && (
+            <div className="mt-3">
+              <label htmlFor="call_type_other" className={labelClass}>
+                Describe the other call type{" "}
+                <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="call_type_other"
+                name="call_type_other_desc"
+                type="text"
+                value={otherCallDesc}
+                onChange={(e) => {
+                  setOtherCallDesc(e.target.value);
+                  if (otherCallError) setOtherCallError(null);
+                }}
+                placeholder="e.g. Insect identification"
+                className={inputClass}
+              />
+              {(otherCallError || state.errors.call_type_other_desc) && (
+                <p className="mt-1 text-sm text-red-500">
+                  {otherCallError ?? state.errors.call_type_other_desc}
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>

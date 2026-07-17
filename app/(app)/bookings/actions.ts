@@ -74,6 +74,9 @@ const BookingPayloadSchema = z.object({
     .or(z.literal(""))
     .optional()
     .default(""),
+  // Required-when-Other is enforced by BookingCreateSchema below (and the
+  // modal blocks a blank client-side); lenient here so the replay parses.
+  call_type_other_desc: z.string().optional().default(""),
   pest_species: z.array(z.string()).default([]),
   value: z.string().optional().default(""),
   report_notes: z.string().optional().default(""),
@@ -117,6 +120,8 @@ export async function createQuickBookingAction(
     job_time: (formData.get("job_time") as string) ?? "",
     job_time_end: (formData.get("job_time_end") as string) ?? "",
     call_type: (formData.get("call_type") as string) ?? "",
+    call_type_other_desc:
+      (formData.get("call_type_other_desc") as string) ?? "",
     pest_species: parseJsonArray(formData.get("pest_species") as string | null),
     value: (formData.get("value") as string) ?? "",
     report_notes: (formData.get("report_notes") as string) ?? "",
@@ -276,6 +281,7 @@ export async function createQuickBookingAction(
     job_time: data.job_time,
     job_time_end: data.job_time_end,
     call_type: data.call_type,
+    call_type_other_desc: data.call_type_other_desc,
     pest_species: data.pest_species,
     value: data.value,
     report_notes: data.report_notes,

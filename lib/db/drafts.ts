@@ -40,6 +40,11 @@ export interface ServiceSheetDraft {
   // ─── Form state mirror ─────────────────────────────────────────
   step: number;
   call_type: string;
+  /** Free-text description captured when the call type is "Other" (optional
+   *  so drafts written before this field existed load cleanly). Persisted
+   *  and re-seeded like other_pest; stored to jobs.call_type_other_desc at
+   *  submit. Not indexed → no Dexie version bump. */
+  call_type_other_desc?: string;
   selected_pests: string[];
   selected_methods: string[];
   /** Free-text description captured when the "Other" pest pill is

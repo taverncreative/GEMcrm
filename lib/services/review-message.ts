@@ -1,5 +1,5 @@
 import type { Customer, Job } from "@/types/database";
-import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
+import { formatCallType } from "@/lib/constants/job-labels";
 import { sendEmail as sendEmailViaResend } from "@/lib/services/email";
 import { BUSINESS } from "@/lib/constants/branding";
 
@@ -21,7 +21,7 @@ export function generateSMS(
   if (!customer.phone) return null;
 
   const serviceType = job.call_type
-    ? CALL_TYPE_LABELS[job.call_type] ?? job.call_type
+    ? formatCallType(job.call_type, job.call_type_other_desc)
     : "pest control service";
 
   const body = [
@@ -48,7 +48,7 @@ export function generateEmail(
   if (!customer.email) return null;
 
   const serviceType = job.call_type
-    ? CALL_TYPE_LABELS[job.call_type] ?? job.call_type
+    ? formatCallType(job.call_type, job.call_type_other_desc)
     : "pest control service";
 
   const jobDate = new Date(job.job_date).toLocaleDateString("en-GB", {

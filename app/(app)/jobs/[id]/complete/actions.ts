@@ -113,6 +113,7 @@ export async function completeServiceSheetAction(
   const raw = {
     job_id: jobId,
     call_type: str("call_type"),
+    call_type_other_desc: str("call_type_other_desc"),
     pest_species: pestSpecies,
     findings: str("findings"),
     recommendations: str("recommendations"),
@@ -398,6 +399,8 @@ export async function approveServiceSheetAction(
           job_time: "",
           job_time_end: "",
           call_type: callType,
+          // Follow-up/routine bookings are never "other", so no description.
+          call_type_other_desc: "",
           pest_species: updated.pest_species ?? [],
           report_notes: "",
           parent_job_id: parentJobId,

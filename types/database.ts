@@ -87,6 +87,11 @@ export interface Job {
   draft_contact_name?: string | null;
   draft_contact_phone?: string | null;
   call_type: CallType | null;
+  /** Free-text description when call_type is "other". NULL for every other
+   *  call type (the app clears it when the type changes away from "other").
+   *  Added in migration 044; rows synced before it carry `undefined` until
+   *  re-pulled, so readers use `?? null`. */
+  call_type_other_desc?: string | null;
   pest_species: string[];
   findings: string | null;
   recommendations: string | null;

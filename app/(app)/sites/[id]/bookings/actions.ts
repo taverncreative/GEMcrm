@@ -55,6 +55,7 @@ export async function createBookingAction(
     site_id: siteId,
     job_date: str("job_date"),
     call_type: str("call_type"),
+    call_type_other_desc: str("call_type_other_desc"),
     pest_species: pestSpecies,
     value: str("value"),
     report_notes: str("report_notes"),

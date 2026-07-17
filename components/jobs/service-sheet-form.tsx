@@ -16,6 +16,7 @@ import {
   RISK_LEVEL_LABELS,
   COMMON_PESTS,
   CALL_TYPE_LABELS,
+  formatCallType,
 } from "@/lib/constants/job-labels";
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { PhotoUpload } from "@/components/ui/photo-upload";
@@ -61,6 +62,8 @@ function buildRawSheetInput(formData: FormData) {
   return {
     job_id: (formData.get("job_id") as string) ?? "",
     call_type: (formData.get("call_type") as string) ?? "",
+    call_type_other_desc:
+      (formData.get("call_type_other_desc") as string) ?? "",
     pest_species: parseJsonArray(formData.get("pest_species") as string | null),
     findings: (formData.get("findings") as string) ?? "",
     recommendations: (formData.get("recommendations") as string) ?? "",
@@ -201,7 +204,7 @@ const completeServiceSheetOpts = {
 const STEP_LABELS = ["Visit", "Service", "Risk", "Photos", "Sign off"] as const;
 
 function getErrorStep(errors: Record<string, string>): number | null {
-  if (errors.call_type) return 1;
+  if (errors.call_type || errors.call_type_other_desc) return 1;
   if (
     errors.findings ||
     errors.recommendations ||
@@ -220,6 +223,7 @@ function getErrorStep(errors: Record<string, string>): number | null {
 interface ServiceSheetFormProps {
   jobId: string;
   defaultCallType?: string;
+  defaultCallTypeOtherDesc?: string;
   defaultPests?: string[];
   defaultMethods?: string[];
   defaultRiskLevel?: string;
@@ -290,6 +294,7 @@ interface ServiceSheetFormBodyProps extends ServiceSheetFormProps {
 function ServiceSheetFormBody({
   jobId,
   defaultCallType = "",
+  defaultCallTypeOtherDesc = "",
   defaultPests = [],
   defaultMethods = [],
   defaultRiskLevel = "low",
@@ -321,6 +326,11 @@ function ServiceSheetFormBody({
   // one-shot mounting (it renders the body only once `draft !== undefined`).
   const [step, setStep] = useState<number>(draft?.step ?? 1);
   const [callType, setCallType] = useState(draft?.call_type ?? defaultCallType);
+  // Free-text description for call type "Other". Seeded from the draft if
+  // present, else the job's stored value. Persisted + re-seeded like otherPest.
+  const [otherCallDesc, setOtherCallDesc] = useState(
+    draft?.call_type_other_desc ?? defaultCallTypeOtherDesc
+  );
   // Seed the pest/method pills + their "Other" free-text. A draft stores
   // bare pills alongside a separate other_* field; the job row's defaults
   // may carry an encoded "Other: <desc>" entry, so split those apart.
@@ -503,6 +513,9 @@ function ServiceSheetFormBody({
     if (selectedMethods.includes(OTHER_PILL) && !otherMethod.trim()) {
       validationErrors.other_method = "Describe the other treatment";
     }
+    if (callType === "other" && !otherCallDesc.trim()) {
+      validationErrors.call_type_other_desc = "Describe the other call type";
+    }
     if (Object.keys(validationErrors).length > 0) {
       setClientErrors(validationErrors);
       const errorStep = getErrorStep(validationErrors);
@@ -658,6 +671,7 @@ function ServiceSheetFormBody({
         job_id: jobId,
         step,
         call_type: callType,
+        call_type_other_desc: otherCallDesc,
         selected_pests: selectedPests,
         selected_methods: selectedMethods,
         other_pest: otherPest,
@@ -685,6 +699,7 @@ function ServiceSheetFormBody({
     jobId,
     step,
     callType,
+    otherCallDesc,
     selectedPests,
     selectedMethods,
     otherPest,
@@ -751,6 +766,11 @@ function ServiceSheetFormBody({
     >
       <input type="hidden" name="job_id" value={jobId} />
       <input type="hidden" name="call_type" value={callType} />
+      <input
+        type="hidden"
+        name="call_type_other_desc"
+        value={callType === "other" ? otherCallDesc : ""}
+      />
       <input
         type="hidden"
         name="pest_species"
@@ -925,6 +945,27 @@ function ServiceSheetFormBody({
           </div>
           {errors.call_type && (
             <p className="mt-1 text-sm text-red-500">{errors.call_type}</p>
+          )}
+          {callType === "other" && (
+            <div className="mt-3">
+              <label htmlFor="call_type_other" className={labelClass}>
+                Describe the other call type{" "}
+                <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="call_type_other"
+                type="text"
+                value={otherCallDesc}
+                onChange={(e) => setOtherCallDesc(e.target.value)}
+                placeholder="e.g. Insect identification"
+                className={inputClass}
+              />
+              {errors.call_type_other_desc && (
+                <p className="mt-1 text-sm text-red-500">
+                  {errors.call_type_other_desc}
+                </p>
+              )}
+            </div>
           )}
         </div>
 
@@ -1410,8 +1451,7 @@ function ServiceSheetFormBody({
           <div className="max-h-[55vh] space-y-3 overflow-y-auto p-5">
             <dl className="space-y-3 text-sm">
               <ReviewRow label="Call type">
-                {CALL_TYPE_LABELS[callType as keyof typeof CALL_TYPE_LABELS] ??
-                  callType}
+                {formatCallType(callType, otherCallDesc)}
               </ReviewRow>
               <ReviewRow label="Pests">
                 {selectedPests.length > 0

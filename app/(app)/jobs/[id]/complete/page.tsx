@@ -325,6 +325,7 @@ export default function CompleteServiceSheetPage() {
         <ServiceSheetForm
           jobId={job.id}
           defaultCallType={job.call_type ?? ""}
+          defaultCallTypeOtherDesc={job.call_type_other_desc ?? ""}
           defaultPests={job.pest_species ?? []}
           defaultMethods={job.method_used ?? []}
           defaultRiskLevel={job.risk_level ?? "low"}

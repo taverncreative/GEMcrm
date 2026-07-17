@@ -11,6 +11,7 @@ import {
   PHOTO_BUCKET,
 } from "@/lib/photos/path";
 import { generateJobReference } from "@/lib/data/job-references";
+import { callTypeOtherDescForStorage } from "@/lib/utils/call-type-other";
 
 function emptyToNull(value: string | undefined): string | null {
   return value && value.trim() !== "" ? value.trim() : null;
@@ -527,6 +528,12 @@ export async function createBooking(
         // "" (quick add, no call type chosen) → null (the column's CHECK
         // allows null but rejects ""). Valid enum values pass through.
         call_type: input.call_type || null,
+        // Only carried when the type is "other"; any stale description is
+        // dropped to null otherwise, so it can never linger past a type change.
+        call_type_other_desc: callTypeOtherDescForStorage(
+          input.call_type,
+          input.call_type_other_desc
+        ),
         pest_species: input.pest_species,
         value: input.value ?? null,
         report_notes: emptyToNull(input.report_notes),
@@ -723,6 +730,12 @@ async function writeServiceSheet(
     .from("jobs")
     .update({
       call_type: input.call_type,
+      // Cleared to null unless the type is "other", so a description never
+      // lingers after the operator switches the call type on Step 1.
+      call_type_other_desc: callTypeOtherDescForStorage(
+        input.call_type,
+        input.call_type_other_desc
+      ),
       pest_species: input.pest_species,
       findings: emptyToNull(input.findings),
       recommendations: emptyToNull(input.recommendations),
