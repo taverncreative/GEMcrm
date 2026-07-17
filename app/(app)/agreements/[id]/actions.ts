@@ -108,7 +108,8 @@ export async function sendAgreementNowAction(
   const sendRes = await sendAgreement(
     customer,
     agreement.contract_pdf_url,
-    validated.emails
+    validated.emails,
+    agreement.reference_number ?? undefined
   );
   if (!sendRes.success) {
     return { success: false, message: "Email failed to send. Try again." };
@@ -166,7 +167,8 @@ export async function sendAgreementReviewAction(
     const sendRes = await sendAgreementReview(
       agreement.customer,
       pdfUrl,
-      validated.emails
+      validated.emails,
+      agreement.reference_number ?? undefined
     );
     if (!sendRes.success) {
       return { success: false, message: "Email failed to send. Try again." };
@@ -289,7 +291,12 @@ export async function finaliseDraftAgreementAction(
       .eq("id", agreementId);
 
     if (agreement.customer.email) {
-      await sendAgreement(agreement.customer, pdfUrl);
+      await sendAgreement(
+        agreement.customer,
+        pdfUrl,
+        undefined,
+        agreement.reference_number ?? undefined
+      );
     }
   } catch (pdfErr) {
     console.error(

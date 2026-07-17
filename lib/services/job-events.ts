@@ -105,7 +105,7 @@ export async function onJobCompleted(
       const customer = await getCustomerById(context.customerId);
       const report = await getReportByJobId(job.id);
       if (customer && report?.pdf_url) {
-        await sendServiceReport(customer, report.pdf_url);
+        await sendServiceReport(customer, report.pdf_url, undefined, job.job_date);
       }
     }
 

@@ -33,7 +33,7 @@ import { storageObjectPath } from "@/lib/storage/asset-url";
  */
 const EMAIL_LINK_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-async function signedEmailLink(storedUrl: string): Promise<string> {
+export async function signedEmailLink(storedUrl: string): Promise<string> {
   const path = storageObjectPath(storedUrl);
   if (!path) return storedUrl;
   try {
@@ -50,6 +50,48 @@ async function signedEmailLink(storedUrl: string): Promise<string> {
     console.error("[signedEmailLink]", err);
     return storedUrl;
   }
+}
+
+/**
+ * Download a reports-bucket PDF so it can be attached to an email.
+ * Best-effort by design: any failure (not a storage object, download
+ * error, network) returns null and the caller sends link-only — exactly
+ * the pre-attachment email. An attachment problem must never fail a
+ * send, and in particular must never strand an offline completion
+ * replay whose email step is fenced non-fatal.
+ */
+export async function downloadReportPdf(
+  storedUrl: string
+): Promise<Buffer | null> {
+  const path = storageObjectPath(storedUrl);
+  if (!path) return null;
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin.storage.from("reports").download(path);
+    if (error || !data) {
+      console.error(
+        "[downloadReportPdf]",
+        error?.message ?? "no data for " + path
+      );
+      return null;
+    }
+    return Buffer.from(await data.arrayBuffer());
+  } catch (err) {
+    console.error("[downloadReportPdf]", err);
+    return null;
+  }
+}
+
+/** "23 July 2026" — for attachment filenames. Falls back to the raw
+ *  value if the date doesn't parse (never throws over a filename). */
+function ukDateForFilename(isoDate: string): string {
+  const d = new Date(isoDate);
+  if (isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 }
 
 interface SendEmailInput {
@@ -114,8 +156,21 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   // Dev fallback — log a digest so workflows are testable without Resend.
   if (!resend) {
     if (process.env.NODE_ENV !== "production") {
+      const attachDigest = (input.attachments ?? [])
+        .map((a) => `${a.filename}(${Buffer.byteLength(a.content as string | Buffer)}B)`)
+        .join(", ");
+      // First anchor in the html (label + href), or the first URL in a
+      // plain-text body — so link-bearing emails can be eyeballed from
+      // the server log alone.
+      const anchor = input.html?.match(
+        /<a\s+href="([^"]+)"[^>]*>\s*([^<]+?)\s*<\/a>/
+      );
+      const textUrl = !anchor ? input.text?.match(/https?:\/\/\S+/) : null;
       console.log(
-        `[email:stub] from=${from} to=${recipients.join(", ")} subject=${input.subject}`
+        `[email:stub] from=${from} to=${recipients.join(", ")} subject=${input.subject}` +
+          (attachDigest ? ` attachments=${attachDigest}` : "") +
+          (anchor ? ` link="${anchor[2]}" -> ${anchor[1]}` : "") +
+          (textUrl ? ` link=${textUrl[0]}` : "")
       );
       return { success: true, id: "stub" };
     }
@@ -170,7 +225,10 @@ function escapeHtml(value: string): string {
 export async function sendServiceReport(
   customer: Customer,
   pdfUrl: string,
-  recipients?: string[]
+  recipients?: string[],
+  /** Job date (ISO) — names the attachment "Service Report - 23 July
+   *  2026.pdf". Omitted → "Service Report.pdf". */
+  jobDate?: string
 ): Promise<SendEmailResult> {
   // Recipients default to the customer's own email (backward compatible
   // with the deferred completion path); the "Send report now" flow passes
@@ -185,10 +243,15 @@ export async function sendServiceReport(
     return { success: false, error: "Customer has no email" };
   }
   const link = await signedEmailLink(pdfUrl);
+  const pdf = await downloadReportPdf(pdfUrl);
+  const filename = jobDate
+    ? `Service Report - ${ukDateForFilename(jobDate)}.pdf`
+    : "Service Report.pdf";
   return sendEmail({
     to,
     subject: `${BUSINESS.name} – Your Service Report`,
     html: serviceReportHtml(customer.name, link),
+    ...(pdf ? { attachments: [{ filename, content: pdf }] } : {}),
   });
 }
 
@@ -197,7 +260,10 @@ export async function sendServiceReport(
 export async function sendAgreement(
   customer: Customer,
   pdfUrl: string,
-  recipients?: string[]
+  recipients?: string[],
+  /** Agreement reference — names the attachment "Agreement -
+   *  <reference>.pdf". Omitted → "Agreement.pdf". */
+  reference?: string
 ): Promise<SendEmailResult> {
   const to =
     recipients && recipients.length > 0
@@ -209,10 +275,15 @@ export async function sendAgreement(
     return { success: false, error: "Customer has no email" };
   }
   const link = await signedEmailLink(pdfUrl);
+  const pdf = await downloadReportPdf(pdfUrl);
+  const filename = reference
+    ? `Agreement - ${reference}.pdf`
+    : "Agreement.pdf";
   return sendEmail({
     to,
     subject: `${BUSINESS.name} – Your Pest Management Agreement`,
     html: agreementHtml(customer.name, link),
+    ...(pdf ? { attachments: [{ filename, content: pdf }] } : {}),
   });
 }
 
@@ -224,7 +295,10 @@ export async function sendAgreement(
 export async function sendAgreementReview(
   customer: Customer,
   pdfUrl: string,
-  recipients?: string[]
+  recipients?: string[],
+  /** Agreement reference — names the attachment "Agreement for review -
+   *  <reference>.pdf". Omitted → "Agreement for review.pdf". */
+  reference?: string
 ): Promise<SendEmailResult> {
   const to =
     recipients && recipients.length > 0
@@ -236,10 +310,15 @@ export async function sendAgreementReview(
     return { success: false, error: "Customer has no email" };
   }
   const link = await signedEmailLink(pdfUrl);
+  const pdf = await downloadReportPdf(pdfUrl);
+  const filename = reference
+    ? `Agreement for review - ${reference}.pdf`
+    : "Agreement for review.pdf";
   return sendEmail({
     to,
     subject: `${BUSINESS.name} – Your pest management agreement to review`,
     html: agreementReviewHtml(customer.name, link),
+    ...(pdf ? { attachments: [{ filename, content: pdf }] } : {}),
   });
 }
 
@@ -294,7 +373,7 @@ function serviceReportHtml(name: string, pdfUrl: string): string {
       The report includes details of the visit, findings, any treatments carried out, and our recommendations.
     </p>
     <a href="${safeUrl}" style="display:inline-block;background:#75B845;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">
-      View Report
+      View online copy
     </a>
     <p style="font-size:14px;color:#374151;line-height:1.6;margin:24px 0 0;">
       If you have any questions, please don't hesitate to get in touch.
@@ -318,7 +397,7 @@ function agreementReviewHtml(name: string, pdfUrl: string): string {
       It sets out the services we will provide, the visit frequency, and our terms. We will go through it and sign together on our visit.
     </p>
     <a href="${safeUrl}" style="display:inline-block;background:#75B845;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">
-      View Agreement
+      View online copy
     </a>
     <p style="font-size:14px;color:#374151;line-height:1.6;margin:24px 0 0;">
       If you have any questions before then, please get in touch.
@@ -342,7 +421,7 @@ function agreementHtml(name: string, pdfUrl: string): string {
       This agreement outlines the services we will provide, visit frequency, and terms of our arrangement.
     </p>
     <a href="${safeUrl}" style="display:inline-block;background:#75B845;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">
-      View Agreement
+      View online copy
     </a>
     <p style="font-size:14px;color:#374151;line-height:1.6;margin:24px 0 0;">
       We look forward to working with you. If you have any questions, please get in touch.

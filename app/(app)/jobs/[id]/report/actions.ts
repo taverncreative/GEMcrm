@@ -115,7 +115,8 @@ export async function sendReportNowAction(
   const sendRes = await sendServiceReport(
     customer,
     report.pdf_url,
-    validated.emails
+    validated.emails,
+    job.job_date
   );
   if (!sendRes.success) {
     return { success: false, message: "Email failed to send. Try again." };

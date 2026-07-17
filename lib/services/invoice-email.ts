@@ -1,5 +1,5 @@
 import type { Customer, Invoice } from "@/types/database";
-import { sendEmail } from "@/lib/services/email";
+import { sendEmail, signedEmailLink } from "@/lib/services/email";
 import { BUSINESS } from "@/lib/constants/branding";
 
 function formatGbp(value: number): string {
@@ -68,8 +68,11 @@ export async function sendInvoiceEmail(
   const body = override?.body ?? defaults.body;
 
   // Add the PDF link as a final line so the recipient has a clickable URL
-  // even when their client renders only plain text.
-  const bodyWithLink = `${body}\n\nInvoice PDF: ${pdfUrl}`;
+  // even when their client renders only plain text. The stored URL points
+  // into the PRIVATE reports bucket — an unauthenticated recipient needs a
+  // signed URL, exactly like the report/agreement emails.
+  const link = await signedEmailLink(pdfUrl);
+  const bodyWithLink = `${body}\n\nInvoice PDF: ${link}`;
 
   return sendEmail({
     to: customer.email,

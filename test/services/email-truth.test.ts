@@ -194,12 +194,15 @@ describe("sendReportNowAction — multi-recipient", () => {
     ]);
     expect(res.success).toBe(true);
     expect(res.emailedTo).toBe("a@example.test, b@example.test");
-    // One send, recipient list forwarded to sendServiceReport as the 3rd arg.
+    // One send, recipient list forwarded to sendServiceReport as the 3rd arg
+    // (4th arg: the job date for the attachment filename — undefined here,
+    // the mocked job has no job_date).
     expect(sendServiceReportMock).toHaveBeenCalledTimes(1);
     expect(sendServiceReportMock).toHaveBeenCalledWith(
       WITH_EMAIL,
       "https://example.test/service-sheet.pdf",
-      ["a@example.test", "b@example.test"]
+      ["a@example.test", "b@example.test"],
+      undefined
     );
     expect(markReportEmailedMock).toHaveBeenCalledWith(
       "job1",

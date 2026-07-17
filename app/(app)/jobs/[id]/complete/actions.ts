@@ -185,7 +185,12 @@ export async function completeServiceSheetAction(
       const customer = site ? await getCustomerById(site.customer_id) : null;
       const report = await getReportByJobId(jobId);
       if (customer?.email && report?.pdf_url) {
-        const sendRes = await sendServiceReport(customer, report.pdf_url);
+        const sendRes = await sendServiceReport(
+          customer,
+          report.pdf_url,
+          undefined,
+          updated.job_date
+        );
         // L3 truth: record only an ACTUAL send — never intent.
         if (sendRes.success) {
           await markReportEmailed(jobId, customer.email);
@@ -335,7 +340,12 @@ export async function approveServiceSheetAction(
     if (options.sendEmail && customer?.email) {
       const report = await getReportByJobId(jobId);
       if (report?.pdf_url) {
-        const sendRes = await sendServiceReport(customer, report.pdf_url);
+        const sendRes = await sendServiceReport(
+          customer,
+          report.pdf_url,
+          undefined,
+          updated.job_date
+        );
         if (sendRes.success) {
           await markReportEmailed(jobId, customer.email);
           emailedTo = customer.email;

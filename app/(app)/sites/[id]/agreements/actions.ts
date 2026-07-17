@@ -120,7 +120,12 @@ export async function createAgreementAction(
         // The client gate offers to add an email before submitting, so a
         // willing operator reaches here with one on file.
         if (customer.email) {
-          await sendAgreement(customer, pdfUrl);
+          await sendAgreement(
+            customer,
+            pdfUrl,
+            undefined,
+            agreement.reference_number ?? undefined
+          );
         }
       }
     } catch (pdfErr) {
