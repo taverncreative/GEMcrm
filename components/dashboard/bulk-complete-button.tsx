@@ -27,6 +27,7 @@
  */
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { bulkCompleteTasksAction } from "@/app/(app)/dashboard/actions";
 import { enqueueAction } from "@/lib/db/outbox";
 import { db } from "@/lib/db";
@@ -34,6 +35,7 @@ import { db } from "@/lib/db";
 export function BulkCompleteButton({ taskIds }: { taskIds: string[] }) {
   const [done, setDone] = useState(false);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   async function handleClick() {
     if (taskIds.length === 0) return;
@@ -78,6 +80,12 @@ export function BulkCompleteButton({ taskIds }: { taskIds: string[] }) {
             { success: false, errors: {}, message: null },
             fd
           );
+          // Server has marked them complete — refresh AFTER it resolves (not
+          // before, or the refetch races the write) so the server-rendered
+          // dashboard tile re-fetches and drops the completed rows in place.
+          // Replaces bulkCompleteTasksAction's old revalidatePath (which
+          // purged the whole client cache and stampeded a re-prefetch).
+          router.refresh();
         } catch (err) {
           // Outbox entries remain — sync engine will retry per-task.
           console.warn("[bulk-complete] bulk dispatch failed:", err);

@@ -1,10 +1,8 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { createTask } from "@/lib/data/tasks";
 import { TaskCreateSchema } from "@/lib/validation/task";
 import { requireUser } from "@/lib/auth/require-user";
-import { ROUTES } from "@/lib/constants/routes";
 import type { ActionState } from "@/types/actions";
 
 /**
@@ -64,7 +62,9 @@ export async function createTaskAction(
     };
   }
 
-  revalidatePath(ROUTES.CALENDAR);
-  revalidatePath(ROUTES.DASHBOARD);
+  // No revalidatePath — the NewTaskModal caller runs a scoped router.refresh()
+  // on success (online) and after an offline queue, re-fetching only the
+  // current route to surface the new to-do on the server-rendered
+  // calendar/dashboard. Avoids the client-cache purge / prefetch stampede.
   return { success: true, errors: {}, message: "Task created" };
 }

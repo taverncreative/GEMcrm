@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { completeTaskAction } from "@/app/(app)/dashboard/actions";
 import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
@@ -39,11 +41,23 @@ export const completeTaskMeta: WrapMeta<CompleteTaskInput> = {
 };
 
 export function CompleteTaskButton({ taskId }: { taskId: string }) {
+  const router = useRouter();
   const [state, action, isPending] = useLocalFirstAction(
     completeTaskAction,
     completeTaskInitialState,
     completeTaskMeta
   );
+
+  // On success (online only — the legacy wrap path flips success from the
+  // server result), refresh so the server-rendered dashboard tile re-fetches
+  // and drops the now-complete row in place. This replaces the revalidatePath
+  // that completeTaskAction used to call (which purged the whole client cache
+  // and stampeded a re-prefetch of every link). The calendar chip does the
+  // identical refresh. Offline, success never flips, so this never fires
+  // against stale server data — the row stays until the next sync + refresh.
+  useEffect(() => {
+    if (state.success) router.refresh();
+  }, [state.success, router]);
 
   if (state.success) {
     return (

@@ -27,11 +27,12 @@ export async function completeTaskAction(
     };
   }
 
-  revalidatePath("/dashboard");
-  // The calendar (server-rendered) only shows pending tasks, so a
-  // completion must invalidate it too or a completed to-do/follow-up
-  // lingers on the grid until the next unrelated revalidation.
-  revalidatePath("/calendar");
+  // No revalidatePath. The dashboard task tiles and the calendar are
+  // server-rendered, so the completion is surfaced by a SCOPED
+  // router.refresh() in the caller (CompleteTaskButton / CalendarTaskChip)
+  // that re-fetches only the current route. The old revalidatePath here
+  // purged the whole client router cache and stampeded a re-prefetch of
+  // every link on the page (the app-wide sluggishness).
   return { success: true, errors: {}, message: "Task completed" };
 }
 
@@ -62,7 +63,8 @@ export async function bulkCompleteTasksAction(
     };
   }
 
-  revalidatePath("/dashboard");
+  // No revalidatePath — the BulkCompleteButton runs a scoped router.refresh()
+  // after this resolves, re-fetching only the dashboard. See completeTaskAction.
   return { success: true, errors: {}, message: "All tasks completed" };
 }
 
