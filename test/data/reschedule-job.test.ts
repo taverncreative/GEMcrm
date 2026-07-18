@@ -58,6 +58,7 @@ const { requireUserMock } = vi.hoisted(() => ({
 vi.mock("@/lib/auth/require-user", () => ({ requireUser: requireUserMock }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+import { revalidatePath } from "next/cache";
 import { rescheduleJob, JobClashError } from "@/lib/data/jobs";
 import { rescheduleJobAction } from "@/app/(app)/jobs/[id]/actions";
 
@@ -68,6 +69,7 @@ beforeEach(() => {
   forcedError = null;
   requireUserMock.mockReset();
   requireUserMock.mockResolvedValue({ id: "op" });
+  vi.mocked(revalidatePath).mockClear();
   jobsRows = [
     {
       id: SCHEDULED,
@@ -169,6 +171,17 @@ describe("rescheduleJobAction", () => {
     const row = jobsRows.find((r) => r.id === SCHEDULED)!;
     expect(row.job_date).toBe("2026-07-09");
     expect(row.job_time).toBe("11:00");
+  });
+
+  // Perf (revalidatePath slice 1): the reschedule modal wrote the new date to
+  // Dexie and the job detail/list re-render off useLiveQuery, so the action
+  // must NOT purge the client router cache (prefetch stampede).
+  it("does NOT call revalidatePath on a successful reschedule", async () => {
+    await rescheduleJobAction(
+      { success: false, errors: {}, message: null },
+      fd({ job_id: SCHEDULED, job_date: "2026-07-09", job_time: "11:00", job_time_end: "" })
+    );
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("rejects a missing date without touching the table", async () => {

@@ -83,6 +83,7 @@ const { requireUserMock } = vi.hoisted(() => ({
 vi.mock("@/lib/auth/require-user", () => ({ requireUser: requireUserMock }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+import { revalidatePath } from "next/cache";
 import { deleteJob, getJobById } from "@/lib/data/jobs";
 import { deleteJobAction } from "@/app/(app)/jobs/[id]/actions";
 
@@ -92,6 +93,7 @@ const GONE = "22222222-2222-4222-8222-222222222222";
 beforeEach(() => {
   requireUserMock.mockReset();
   requireUserMock.mockResolvedValue({ id: "op" });
+  vi.mocked(revalidatePath).mockClear();
   rpcMock.mockReset();
   rpcMock.mockImplementation(async (fn: string, params: { p_id: string }) => {
     if (fn === "soft_delete_job") {
@@ -174,6 +176,14 @@ describe("deleteJobAction — auth gate + happy path", () => {
     expect(res).toEqual({ success: true });
     expect(rpcMock).toHaveBeenCalledWith("soft_delete_job", { p_id: LIVE });
     expect(jobsRows.find((r) => r.id === LIVE)!.deleted_at).not.toBeNull();
+  });
+
+  // Perf (revalidatePath slice 1): the delete-confirm dialog mirrors the
+  // soft-delete into Dexie and calls router.refresh() itself, so the action
+  // must NOT purge the client router cache (prefetch stampede).
+  it("does NOT call revalidatePath on a successful delete", async () => {
+    await deleteJobAction(LIVE);
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("returns an error for a missing id, without touching the table", async () => {

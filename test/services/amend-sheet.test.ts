@@ -86,6 +86,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => ({})),
 }));
 
+import { revalidatePath } from "next/cache";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
 
 const COMPLETED_JOB = {
@@ -130,6 +131,7 @@ beforeEach(() => {
   getJobByIdMock.mockResolvedValue(COMPLETED_JOB);
   generateJobReportMock.mockClear();
   sendServiceReportMock.mockClear();
+  vi.mocked(revalidatePath).mockClear();
 });
 
 describe("amend entries — not skipped, no finalize, PDF regenerates", () => {
@@ -144,6 +146,15 @@ describe("amend entries — not skipped, no finalize, PDF regenerates", () => {
     expect(saveServiceSheetMock).toHaveBeenCalledTimes(1);
     expect(generateJobReportMock).toHaveBeenCalledTimes(1);
     expect(finalizeServiceSheetMock).not.toHaveBeenCalled();
+  });
+
+  // Perf (revalidatePath slice 1): the amend path returns before the finalize
+  // branch, and the job detail/list are Dexie-live, so it must NOT purge the
+  // client router cache (prefetch stampede). The fresh-finalize path keeps its
+  // revalidate via approveServiceSheetAction — that's Slice 4, untouched here.
+  it("amend does NOT call revalidatePath", async () => {
+    await completeServiceSheetAction(INITIAL, sheetFormData({ amend: "true" }));
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("amend email default OFF → nothing sent", async () => {

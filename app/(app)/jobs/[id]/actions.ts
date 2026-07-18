@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import {
   updateJobStatus,
   rescheduleJob,
@@ -58,9 +57,10 @@ export async function updateJobStatusAction(
     };
   }
 
-  revalidatePath(`/jobs/${jobId}`);
-  revalidatePath("/jobs");
-  revalidatePath("/dashboard");
+  // No revalidatePath — the jobs list and job detail are Dexie-live
+  // (useLiveQuery) and the status button's applyLocal already wrote the new
+  // status to Dexie, so they re-render off that. See setJobNeedsInvoiceAction
+  // for the rationale (avoids the client-cache purge / prefetch stampede).
   return { success: true, errors: {}, message: null };
 }
 
@@ -101,9 +101,8 @@ export async function rescheduleJobAction(
     };
   }
 
-  revalidatePath(`/jobs/${jobId}`);
-  revalidatePath("/jobs");
-  revalidatePath("/dashboard");
+  // No revalidatePath — the reschedule modal's applyLocal already wrote the
+  // new date to Dexie and the Dexie-live job detail/list re-render off it.
   return { success: true, errors: {}, message: null };
 }
 
@@ -186,9 +185,9 @@ export async function deleteJobAction(
   if (!jobId) return { success: false, message: "Missing job id" };
   try {
     await deleteJob(jobId);
-    revalidatePath(`/jobs/${jobId}`);
-    revalidatePath("/jobs");
-    revalidatePath("/dashboard");
+    // No revalidatePath — the delete-confirm dialog mirrors the soft-delete
+    // into Dexie and calls router.refresh() itself, so the Dexie-live jobs
+    // list drops the row without a client-cache purge / prefetch stampede.
     return { success: true };
   } catch (err) {
     return {

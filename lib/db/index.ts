@@ -8,11 +8,12 @@
  * names, same nullability — so an outbox replay can pass the local row
  * back to a server action without translation.
  *
- * Step 4 of the offline-pwa rollout: this file defines the schema and
- * exposes a singleton `db`. **Nothing in the UI reads from or writes to
- * Dexie yet.** That comes in steps 5/6 (outbox + sync engine). For now,
- * the existence of the local store + a smoke-test page at /dev/db-smoke
- * are the only artefacts.
+ * This file defines the schema and exposes a singleton `db`. The
+ * offline-first UI reads from and writes to Dexie throughout: the jobs
+ * list/detail, customers list, service-sheet form and more read via
+ * `useLiveQuery`, and mutations write here optimistically (see
+ * `lib/actions/wrap.ts`) before the sync engine (outbox push + pull)
+ * reconciles with the server. A dev smoke-test page lives at /dev/db-smoke.
  *
  * ────────────────────────────────────────────────────────────────────
  * SCHEMA VERSIONING DISCIPLINE

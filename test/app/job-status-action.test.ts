@@ -26,6 +26,7 @@ vi.mock("@/lib/auth/require-user", () => ({
   requireUser: vi.fn(async () => ({ id: "op" })),
 }));
 
+import { revalidatePath } from "next/cache";
 import { updateJobStatusAction } from "@/app/(app)/jobs/[id]/actions";
 
 const INITIAL = { success: false, errors: {}, message: null };
@@ -39,6 +40,7 @@ const fd = (status: string) => {
 
 beforeEach(() => {
   updateJobStatusMock.mockClear();
+  vi.mocked(revalidatePath).mockClear();
 });
 
 describe("updateJobStatusAction — L1 target restriction", () => {
@@ -61,5 +63,13 @@ describe("updateJobStatusAction — L1 target restriction", () => {
     expect(res.success).toBe(true);
     expect(updateJobStatusMock).toHaveBeenCalledTimes(1);
     expect(updateJobStatusMock).toHaveBeenCalledWith("job1", "in_progress");
+  });
+
+  // Perf (revalidatePath slice 1): jobs list + detail are Dexie-live and the
+  // status button wrote the change to Dexie optimistically, so the action must
+  // NOT purge the client router cache (prefetch stampede).
+  it("does NOT call revalidatePath on a successful status change", async () => {
+    await updateJobStatusAction(INITIAL, fd("in_progress"));
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

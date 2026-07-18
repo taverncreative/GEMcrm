@@ -615,13 +615,15 @@ export function BookingModal({
   // wrong". A later booking skipped it (serverReachable now false) — that
   // page-dependence was the tell.
   //
-  // We don't need a refresh: every place the new booking shows reads Dexie
-  // via useLiveQuery (Jobs, Customers, the customer profile, the side panel,
-  // the dashboard's Upcoming/Service-sheets sections) and updates the instant
-  // applyLocal writes. Only the dashboard's server-rendered cards (e.g.
-  // Revenue) wait until the next navigation — acceptable, and consistent with
-  // the dashboard-stale decision. Keeping the save fully connectivity-
-  // independent is the whole point of the optimistic redesign.
+  // We don't need a refresh: the surfaces that read Dexie via useLiveQuery —
+  // the Jobs list, the Customers list, and the customer profile / side panel —
+  // update the instant applyLocal writes. The calendar and the dashboard
+  // (including its Upcoming and Service-sheets sections) are server-rendered
+  // from Supabase, not Dexie, so a newly created booking appears there on the
+  // next navigation to them — pages aren't cached, so a forward nav refetches
+  // fresh. That deferred freshness is acceptable and consistent with the
+  // dashboard-stale decision. Keeping the save fully connectivity-independent
+  // is the whole point of the optimistic redesign.
   useEffect(() => {
     // Edge-triggered close: fire onClose only when success flips false->true
     // (a fresh save), not on every render where it's still true. Combined with

@@ -200,8 +200,9 @@ export async function completeServiceSheetAction(
       }
     }
 
-    revalidatePath(ROUTES.jobDetail(jobId));
-    revalidatePath(ROUTES.JOBS);
+    // No revalidatePath — the service-sheet form's applyLocal wrote the
+    // amended fields to Dexie; the Dexie-live job detail/list re-render off
+    // that. (approveServiceSheetAction keeps its own revalidate — Slice 4.)
     return {
       success: true,
       errors: {},
@@ -254,10 +255,10 @@ export async function completeServiceSheetAction(
     }
   }
 
-  revalidatePath(ROUTES.jobDetail(jobId));
-  revalidatePath(ROUTES.JOBS);
-  revalidatePath(ROUTES.DASHBOARD);
-
+  // No revalidatePath here. The job detail/list are Dexie-live and the form
+  // navigates to the job detail on success. On the finalize path,
+  // approveServiceSheetAction still revalidates /calendar + /dashboard for the
+  // server-rendered surfaces its new follow-up/routine visits feed (Slice 4).
   return {
     success: true,
     errors: {},
