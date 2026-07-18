@@ -45,6 +45,27 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({})) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 
+// The Spotlight POST now runs in next/server's after() — scheduled to run
+// AFTER the response is sent, so it never blocks Nate's submit. We capture
+// the callbacks (rather than run them) so a test can assert the action
+// returned WITHOUT the POST having fired, then drain them via runAfter() to
+// exercise the background work.
+const { afterCallbacks } = vi.hoisted(() => ({
+  afterCallbacks: [] as Array<() => unknown | Promise<unknown>>,
+}));
+vi.mock("next/server", () => ({
+  after: (cb: () => unknown | Promise<unknown>) => {
+    afterCallbacks.push(cb);
+  },
+}));
+
+/** Drain the after() callbacks the way the platform would once the response
+ *  has been sent, awaiting each. */
+async function runAfter(): Promise<void> {
+  const cbs = afterCallbacks.splice(0);
+  for (const cb of cbs) await cb();
+}
+
 import { submitFeatureRequestAction } from "@/app/(app)/settings/actions";
 
 function formData(over: Record<string, string> = {}): FormData {
@@ -68,6 +89,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   createFeatureRequestMock.mockClear();
   sendEmailMock.mockClear();
+  afterCallbacks.length = 0;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -76,10 +98,38 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("the POST fires with the right body + auth", () => {
-  it("posts to the configured URL with a bearer token", async () => {
+describe("instant submit — the POST is deferred to after(), never awaited", () => {
+  it("returns success BEFORE the POST fires, even when Spotlight hangs", async () => {
+    // Spotlight is unresponsive: a fetch that never resolves. If the action
+    // awaited it, this test would hang. It returns immediately because the
+    // POST is scheduled in after(), not awaited.
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+
+    const res = await submitFeatureRequestAction(initial, formData());
+
+    expect(res.success).toBe(true);
+    expect(res.message).toBe("Thanks — request logged.");
+    // The POST has NOT run yet — it's queued for after the response.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(afterCallbacks).toHaveLength(1);
+  });
+
+  it("the row + email complete during the request; the POST is only scheduled", async () => {
     const res = await submitFeatureRequestAction(initial, formData());
     expect(res.success).toBe(true);
+    // Backstops happened synchronously, before the response returned.
+    expect(createFeatureRequestMock).toHaveBeenCalledTimes(1);
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    // The POST is deferred, not done.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(afterCallbacks).toHaveLength(1);
+  });
+});
+
+describe("the POST fires with the right body + auth (in after())", () => {
+  it("posts to the configured URL with a bearer token", async () => {
+    await submitFeatureRequestAction(initial, formData());
+    await runAfter();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://spotlight.test/api/inbound/feedback");
@@ -94,6 +144,7 @@ describe("the POST fires with the right body + auth", () => {
 
   it("request_id is the created row id (Spotlight's idempotency key)", async () => {
     await submitFeatureRequestAction(initial, formData());
+    await runAfter();
     const body = JSON.parse(
       (fetchMock.mock.calls[0][1] as RequestInit).body as string
     );
@@ -105,6 +156,7 @@ describe("the POST fires with the right body + auth", () => {
 
   it("does NOT send source_app — the token identifies the app", async () => {
     await submitFeatureRequestAction(initial, formData());
+    await runAfter();
     const body = JSON.parse(
       (fetchMock.mock.calls[0][1] as RequestInit).body as string
     );
@@ -118,19 +170,24 @@ describe("THE FENCE — Spotlight can never fail Nate's submit", () => {
     const res = await submitFeatureRequestAction(initial, formData());
     expect(res.success).toBe(true);
     expect(res.message).toBe("Thanks — request logged.");
+    // Draining the background work must not throw either.
+    await expect(runAfter()).resolves.toBeUndefined();
   });
 
   it("still succeeds when Spotlight returns 401", async () => {
     fetchMock.mockResolvedValue(new Response("nope", { status: 401 }));
     const res = await submitFeatureRequestAction(initial, formData());
     expect(res.success).toBe(true);
+    await expect(runAfter()).resolves.toBeUndefined();
   });
 
   it("still succeeds when Spotlight returns 400 or 500", async () => {
     fetchMock.mockResolvedValue(new Response("bad", { status: 400 }));
     expect((await submitFeatureRequestAction(initial, formData())).success).toBe(true);
+    await runAfter();
     fetchMock.mockResolvedValue(new Response("boom", { status: 500 }));
     expect((await submitFeatureRequestAction(initial, formData())).success).toBe(true);
+    await runAfter();
   });
 
   it("still succeeds when the POST times out (aborted)", async () => {
@@ -143,6 +200,7 @@ describe("THE FENCE — Spotlight can never fail Nate's submit", () => {
     });
     const res = await submitFeatureRequestAction(initial, formData());
     expect(res.success).toBe(true);
+    await expect(runAfter()).resolves.toBeUndefined();
   });
 
   it("the row and the email still happen regardless of Spotlight", async () => {
@@ -157,6 +215,7 @@ describe("skipped when unconfigured", () => {
   it("no POST when the URL is unset — submit still works", async () => {
     delete process.env.SPOTLIGHT_INGEST_URL;
     const res = await submitFeatureRequestAction(initial, formData());
+    await runAfter();
     expect(res.success).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
@@ -165,6 +224,7 @@ describe("skipped when unconfigured", () => {
   it("no POST when the token is unset", async () => {
     delete process.env.SPOTLIGHT_INGEST_TOKEN;
     const res = await submitFeatureRequestAction(initial, formData());
+    await runAfter();
     expect(res.success).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });

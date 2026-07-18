@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 import { runRenewalCheck } from "@/lib/services/agreement-renewal";
 import { finishDay } from "@/lib/data/daily-stats";
@@ -133,25 +134,32 @@ export async function submitFeatureRequestAction(
       ].join("\n"),
     });
 
-    // Push into Spotlight so John gets a triageable list. BEST EFFORT, and
-    // deliberately LAST: the row and the email above are the backstops and
-    // have already succeeded, so nothing here may change the outcome.
+    // Push into Spotlight so John gets a triageable list — but do NOT make
+    // Nate wait for it. The Spotlight endpoint can be slow/unresponsive, and
+    // the POST has a 5s timeout; awaiting it here made the whole submit hang
+    // for up to 5s before "Thanks" returned. The row + email above are the
+    // real record, so Spotlight is pure background work.
     //
-    // sendFeedbackToSpotlight is fenced internally and never throws; this
-    // try/catch is belt and braces so that even a future refactor of it
-    // can't make Spotlight the reason Nate's submit fails. If it did, he'd
-    // resubmit a request that was already logged and duplicate it.
-    // No-ops silently until the SPOTLIGHT_INGEST_* env vars are set.
-    try {
-      await sendFeedbackToSpotlight({
-        message,
-        request_id: created.id,
-        type,
-        client_name: BUSINESS.signoffName,
-      });
-    } catch (spotlightErr) {
-      console.error("[submitFeatureRequestAction] spotlight:", spotlightErr);
-    }
+    // after() runs the callback AFTER this response is sent to Nate, and the
+    // platform keeps the function alive to finish it (up to the route's max
+    // duration — well beyond the POST's 5s cap), so the submit is instant AND
+    // the POST still actually goes out. sendFeedbackToSpotlight is fully
+    // fenced and never throws (a throw/timeout/non-200 logs server-side
+    // only); the try/catch is belt and braces so a future refactor can't
+    // turn Spotlight into the reason a submit fails. No-ops silently until
+    // the SPOTLIGHT_INGEST_* env vars are set.
+    after(async () => {
+      try {
+        await sendFeedbackToSpotlight({
+          message,
+          request_id: created.id,
+          type,
+          client_name: BUSINESS.signoffName,
+        });
+      } catch (spotlightErr) {
+        console.error("[submitFeatureRequestAction] spotlight:", spotlightErr);
+      }
+    });
 
     revalidatePath(ROUTES.SETTINGS);
     return { success: true, errors: {}, message: "Thanks — request logged." };

@@ -2,7 +2,6 @@
 
 import { useActionState, useState } from "react";
 import { submitFeatureRequestAction } from "@/app/(app)/settings/actions";
-import { BUSINESS } from "@/lib/constants/branding";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import type { ActionState } from "@/types/actions";
 
@@ -88,10 +87,7 @@ export function FeatureRequestForm({ currentUserEmail }: FeatureRequestFormProps
         </p>
       )}
 
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] text-gray-400">
-          Sends to <span className="font-mono">{BUSINESS.supportEmail}</span>
-        </p>
+      <div className="flex items-center justify-end">
         <button
           type="submit"
           disabled={isPending || !online}
