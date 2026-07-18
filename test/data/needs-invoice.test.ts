@@ -92,6 +92,7 @@ const { requireUserMock } = vi.hoisted(() => ({
 vi.mock("@/lib/auth/require-user", () => ({ requireUser: requireUserMock }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+import { revalidatePath } from "next/cache";
 import { getJobsNeedingInvoice, setJobNeedsInvoice } from "@/lib/data/jobs";
 import { setJobNeedsInvoiceAction } from "@/app/(app)/jobs/[id]/actions";
 
@@ -102,6 +103,7 @@ const C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 beforeEach(() => {
   requireUserMock.mockReset();
   requireUserMock.mockResolvedValue({ id: "op" });
+  vi.mocked(revalidatePath).mockClear();
   jobsRows = [
     { id: A, needs_invoice: true, is_archived: false, job_date: "2026-07-10" },
     { id: B, needs_invoice: false, is_archived: false, job_date: "2026-07-20" },
@@ -164,5 +166,15 @@ describe("setJobNeedsInvoiceAction", () => {
     const res = await setJobNeedsInvoiceAction("", true);
     expect(res.success).toBe(false);
     expect(res.message).toBeTruthy();
+  });
+
+  // Perf (revalidatePath slice, canary): both surfaces that show this flag
+  // read Dexie via useLiveQuery, so the action must NOT call revalidatePath —
+  // that purges the whole client router cache and stampedes a re-prefetch of
+  // every link in production. The Dexie write at the wrapAction call site is
+  // what updates the UI.
+  it("does NOT call revalidatePath (no client-cache purge / prefetch stampede)", async () => {
+    await setJobNeedsInvoiceAction(B, true);
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

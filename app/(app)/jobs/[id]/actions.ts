@@ -120,8 +120,15 @@ export async function setJobNeedsInvoiceAction(
   if (!jobId) return { success: false, message: "Missing job id" };
   try {
     await setJobNeedsInvoice(jobId, needsInvoice);
-    revalidatePath(`/jobs/${jobId}`);
-    revalidatePath("/dashboard");
+    // No revalidatePath. Both surfaces that show this flag read Dexie via
+    // useLiveQuery — the job-detail NeedsInvoiceToggle and the dashboard
+    // jobs-to-invoice tile — and the wrapAction call site already wrote the
+    // flag to Dexie optimistically, so they re-render off that. A
+    // revalidatePath here purges the whole client router cache (Next docs:
+    // "purge the Client Cache … all previously visited pages refresh"),
+    // which in production stampedes a re-prefetch of every link on the page
+    // — the app-wide sluggishness — while refreshing a server render neither
+    // surface reads. See feature-request-form for the same fix.
     return { success: true };
   } catch (err) {
     return {
