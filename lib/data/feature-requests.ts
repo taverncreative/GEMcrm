@@ -36,6 +36,44 @@ export async function createFeatureRequest(input: {
   return data;
 }
 
+/**
+ * HARD delete one request. Unlike the five syncable tables, feature_requests
+ * has no deleted_at column and a single permissive RLS policy (setup.sql
+ * §022: `for all to authenticated using(true) with check(true)`), so a plain
+ * authenticated delete works — no SECURITY DEFINER RPC needed. The row is
+ * the operator's own feedback and the request already lives on in Spotlight
+ * and the developer inbox, so losing the local copy loses nothing.
+ */
+export async function deleteFeatureRequest(id: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("feature_requests")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    console.error("[deleteFeatureRequest]", error.code, error.message);
+    throw new Error(`Failed to delete request: ${error.message}`);
+  }
+}
+
+/**
+ * HARD delete every request (the "Clear all" action). PostgREST refuses an
+ * unfiltered DELETE, so filter on the primary key being present — true for
+ * every row. Returns how many rows went, for the confirmation message.
+ */
+export async function clearFeatureRequests(): Promise<number> {
+  const supabase = await createClient();
+  const { error, count } = await supabase
+    .from("feature_requests")
+    .delete({ count: "exact" })
+    .not("id", "is", null);
+  if (error) {
+    console.error("[clearFeatureRequests]", error.code, error.message);
+    throw new Error(`Failed to clear requests: ${error.message}`);
+  }
+  return count ?? 0;
+}
+
 export async function getRecentFeatureRequests(
   limit: number = 20
 ): Promise<FeatureRequest[]> {

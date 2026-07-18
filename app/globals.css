@@ -46,3 +46,22 @@ html,
 body {
   overflow-x: hidden;
 }
+
+/* ─── Feedback submit confirmation flash ─────────────────────────
+ * The confirmation line is keyed on the submit timestamp, so each
+ * successful submit remounts it and this runs again — a visible
+ * per-submit pulse even when the text is otherwise unchanged.
+ * ─────────────────────────────────────────────────────────────── */
+
+@keyframes feedback-flash {
+  from {
+    background-color: var(--color-brand-soft);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.animate-feedback-flash {
+  animation: feedback-flash 1.2s ease-out;
+}

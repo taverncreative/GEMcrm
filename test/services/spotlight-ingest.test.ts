@@ -108,7 +108,7 @@ describe("instant submit — the POST is deferred to after(), never awaited", ()
     const res = await submitFeatureRequestAction(initial, formData());
 
     expect(res.success).toBe(true);
-    expect(res.message).toBe("Thanks — request logged.");
+    expect(res.message).toBe("Thanks, request logged.");
     // The POST has NOT run yet — it's queued for after the response.
     expect(fetchMock).not.toHaveBeenCalled();
     expect(afterCallbacks).toHaveLength(1);
@@ -169,7 +169,7 @@ describe("THE FENCE — Spotlight can never fail Nate's submit", () => {
     fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
     const res = await submitFeatureRequestAction(initial, formData());
     expect(res.success).toBe(true);
-    expect(res.message).toBe("Thanks — request logged.");
+    expect(res.message).toBe("Thanks, request logged.");
     // Draining the background work must not throw either.
     await expect(runAfter()).resolves.toBeUndefined();
   });

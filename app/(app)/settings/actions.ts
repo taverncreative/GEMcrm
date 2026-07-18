@@ -5,7 +5,12 @@ import { after } from "next/server";
 import { z } from "zod";
 import { runRenewalCheck } from "@/lib/services/agreement-renewal";
 import { finishDay } from "@/lib/data/daily-stats";
-import { createFeatureRequest, type RequestType } from "@/lib/data/feature-requests";
+import {
+  clearFeatureRequests,
+  createFeatureRequest,
+  deleteFeatureRequest,
+  type RequestType,
+} from "@/lib/data/feature-requests";
 import { sendEmail } from "@/lib/services/email";
 import { sendFeedbackToSpotlight } from "@/lib/services/spotlight";
 import { createClient } from "@/lib/supabase/server";
@@ -14,7 +19,7 @@ import { ChangePasswordSchema, InviteUserSchema } from "@/lib/validation/account
 import { ROUTES } from "@/lib/constants/routes";
 import { BUSINESS } from "@/lib/constants/branding";
 import { requireUser } from "@/lib/auth/require-user";
-import type { ActionState } from "@/types/actions";
+import type { ActionState, FeedbackActionState } from "@/types/actions";
 
 export async function runRenewalCheckAction(
   _prev: ActionState,
@@ -78,9 +83,9 @@ const submitterEmailSchema = z
   .default("");
 
 export async function submitFeatureRequestAction(
-  _prev: ActionState,
+  _prev: FeedbackActionState,
   formData: FormData
-): Promise<ActionState> {
+): Promise<FeedbackActionState> {
   await requireUser();
 
   const type = formData.get("request_type") as string;
@@ -161,14 +166,75 @@ export async function submitFeatureRequestAction(
       }
     });
 
-    revalidatePath(ROUTES.SETTINGS);
-    return { success: true, errors: {}, message: "Thanks — request logged." };
+    // Deliberately NO revalidatePath here. In this Next version a
+    // revalidatePath from a server action purges the ENTIRE client router
+    // cache, and in production that fires a re-prefetch stampede of every
+    // link on whatever page the submit came from (~50 SSR invocations from
+    // /jobs) — a second submit sent into that storm is what made repeat
+    // submits feel ~5s slow. This action fires from the header sheet on
+    // EVERY page, so it must not invalidate anything. The past-requests
+    // list on Settings still updates: the form runs a scoped
+    // router.refresh() on success when it's rendered there.
+    return {
+      success: true,
+      errors: {},
+      message: "Thanks, request logged.",
+      submittedAt: new Date().toISOString(),
+    };
   } catch (err) {
     return {
       success: false,
       errors: {},
       message:
         err instanceof Error ? err.message : "Failed to submit request",
+    };
+  }
+}
+
+/**
+ * HARD delete one past request (operator housekeeping on the Settings
+ * list). Direct-call action — invoked from a button, not a form. No
+ * revalidatePath (see submitFeatureRequestAction); the caller runs
+ * router.refresh() so only the Settings page re-renders.
+ */
+export async function deleteFeatureRequestAction(
+  id: string
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!id) return { success: false, message: "Missing request id" };
+  try {
+    await deleteFeatureRequest(id);
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to delete request",
+    };
+  }
+}
+
+/**
+ * HARD delete every past request ("Clear all"). Same shape and same
+ * no-revalidate rule as the single delete.
+ */
+export async function clearFeatureRequestsAction(): Promise<{
+  success: boolean;
+  message?: string;
+}> {
+  await requireUser();
+  try {
+    const cleared = await clearFeatureRequests();
+    return {
+      success: true,
+      message:
+        cleared === 0
+          ? "Nothing to clear."
+          : `Cleared ${cleared} request${cleared === 1 ? "" : "s"}.`,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to clear requests",
     };
   }
 }

@@ -4,6 +4,10 @@ import {
   SignOutButton,
 } from "@/components/settings/settings-actions";
 import { FeatureRequestForm } from "@/components/settings/feature-request-form";
+import {
+  ClearRequestsButton,
+  DeleteRequestButton,
+} from "@/components/settings/past-request-actions";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
 import { InviteUserForm } from "@/components/settings/invite-user-form";
 import { getRecentFeatureRequests } from "@/lib/data/feature-requests";
@@ -173,9 +177,12 @@ export default async function SettingsPage() {
 
       {/* Past requests */}
       <div className="mt-10">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
-          Past requests
-        </h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Past requests
+          </h2>
+          {requests.length > 0 && <ClearRequestsButton />}
+        </div>
         {requests.length === 0 ? (
           <div className="rounded-xl bg-white p-12 text-center text-sm text-gray-500 shadow-sm">
             No requests yet.
@@ -191,6 +198,9 @@ export default async function SettingsPage() {
                     <th className="px-4 py-3">Message</th>
                     <th className="whitespace-nowrap px-4 py-3">From</th>
                     <th className="whitespace-nowrap px-4 py-3">Status</th>
+                    <th className="whitespace-nowrap px-4 py-3">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -220,6 +230,9 @@ export default async function SettingsPage() {
                         >
                           {STATUS_LABEL[r.status] ?? r.status}
                         </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right">
+                        <DeleteRequestButton id={r.id} />
                       </td>
                     </tr>
                   ))}
