@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   createCustomer,
@@ -13,7 +12,6 @@ import { getSitesByCustomer } from "@/lib/data/sites";
 import { createBooking, JobClashError } from "@/lib/data/jobs";
 import { CustomerSchema } from "@/lib/validation/customer";
 import { BookingCreateSchema } from "@/lib/validation/booking";
-import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
 import type { Customer, Site } from "@/types/database";
@@ -318,13 +316,15 @@ export async function createQuickBookingAction(
     };
   }
 
-  // Freshen all the places this booking will show up.
-  revalidatePath(ROUTES.DASHBOARD);
-  revalidatePath(ROUTES.JOBS);
-  revalidatePath(ROUTES.CALENDAR);
-  revalidatePath(ROUTES.CUSTOMERS);
-  revalidatePath(ROUTES.siteDetail(siteId));
-  revalidatePath(ROUTES.customerDetail(customerId));
-
+  // No revalidatePath. The surfaces that show a new booking are either
+  // Dexie-live (the jobs list, customers list, customer profile / side panel
+  // — the modal's applyLocal wrote the customer + site + job to Dexie before
+  // this ran, so useLiveQuery re-renders them instantly) or server-rendered
+  // (the calendar + dashboard, which read Supabase, not Dexie). The latter
+  // pick the booking up on the next navigation to them — pages aren't cached,
+  // so a forward nav refetches fresh; that deferred freshness is acceptable
+  // (see the booking modal's success effect). A revalidatePath here would
+  // purge the whole client router cache and stampede a re-prefetch of every
+  // link on the page (~25-50 SSR calls) — the app-wide sluggishness.
   return { success: true, errors: {}, message: "Booking created" };
 }

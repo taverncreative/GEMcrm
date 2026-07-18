@@ -139,6 +139,7 @@ vi.mock("@/lib/auth/require-user", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+import { revalidatePath } from "next/cache";
 import { makeBookingMeta } from "@/components/bookings/booking-modal";
 import { enqueueAction } from "@/lib/db/outbox";
 import { drainOutbox } from "@/lib/sync/push";
@@ -242,5 +243,11 @@ describe("sparse booking: offline optimistic write → drain → server", () => 
     expect(store.tables.jobs[0].site_id).toBe(input!.newSiteId);
     expect(store.tables.jobs[0].job_status).toBe("scheduled");
     expect(store.tables.jobs[0].call_type).toBeNull();
+
+    // Perf (revalidatePath slice 3): createQuickBookingAction must NOT call
+    // revalidatePath — the Dexie-live surfaces update reactively and the modal
+    // does a scoped router.refresh() on calendar/dashboard. A revalidatePath
+    // would purge the whole client router cache and stampede a re-prefetch.
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

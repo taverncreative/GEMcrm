@@ -608,22 +608,23 @@ export function BookingModal({
   }, [open, presetCustomer, presetSite, resetAction]);
 
   // Close on successful submission — and that's it. The post-save NEVER
-  // touches the network. router.refresh() used to live here, but it's the
-  // wrong tool: on the FIRST offline booking serverReachable is still `true`
-  // (it only flips false after a sync fails), so even a serverReachable-gated
-  // refresh fired an offline RSC fetch → route error → "something went
-  // wrong". A later booking skipped it (serverReachable now false) — that
-  // page-dependence was the tell.
+  // touches the network here.
   //
-  // We don't need a refresh: the surfaces that read Dexie via useLiveQuery —
-  // the Jobs list, the Customers list, and the customer profile / side panel —
-  // update the instant applyLocal writes. The calendar and the dashboard
-  // (including its Upcoming and Service-sheets sections) are server-rendered
-  // from Supabase, not Dexie, so a newly created booking appears there on the
-  // next navigation to them — pages aren't cached, so a forward nav refetches
-  // fresh. That deferred freshness is acceptable and consistent with the
-  // dashboard-stale decision. Keeping the save fully connectivity-independent
-  // is the whole point of the optimistic redesign.
+  // The Dexie-live surfaces — the Jobs list, the Customers list, and the
+  // customer profile / side panel — update the instant applyLocal writes
+  // (customer + site + job), so they need nothing. The calendar and the
+  // dashboard are server-rendered from Supabase, not Dexie, so a newly
+  // created booking appears there on the next navigation to them — pages
+  // aren't cached, so a forward nav refetches fresh. That deferred freshness
+  // is acceptable and consistent with the dashboard-stale decision, and it
+  // keeps the save fully connectivity-independent (the whole point of the
+  // optimistic redesign). We do NOT revalidatePath in the action either — it
+  // purged the whole client router cache and stampeded a re-prefetch of every
+  // link. (No in-place refresh for a booking made WHILE ON calendar/dashboard:
+  // on the optimistic path the server write lands only at the outbox drain, so
+  // an immediate router.refresh() races ahead of it and re-renders stale.
+  // Correctly refreshing would mean waiting for sync completion; that rare
+  // workflow deliberately falls back to the forward-nav freshness above.)
   useEffect(() => {
     // Edge-triggered close: fire onClose only when success flips false->true
     // (a fresh save), not on every render where it's still true. Combined with
