@@ -5,7 +5,8 @@
  *     sequence trigger (the insert payload carries no quote_number key);
  *   - a standalone prospect (blank customer_id) creates a quote with a NULL
  *     customer_id and the denormalised name;
- *   - the PDF is generated + the action redirects to the new quote;
+ *   - the PDF is NOT generated in create (that is lazy, on first download) — the
+ *     action just inserts and redirects, so create stays fast;
  *   - VAT on vs off both flow through correctly.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -15,7 +16,10 @@ const createQuoteMock = vi.fn(async (input: Record<string, unknown>) => ({
   quote_number: "Q-2026-005",
   ...input,
 }));
-const renderPdfMock = vi.fn(async (_id: string) => "https://x/quotes/quote-123/quote.pdf");
+const renderPdfMock = vi.fn(async (_id: string) => ({
+  pdfUrl: "https://x/quotes/quote-123/quote.pdf",
+  buffer: Buffer.from("PDF"),
+}));
 const redirectMock = vi.fn((_url: string) => undefined);
 
 vi.mock("@/lib/auth/require-user", () => ({
@@ -53,7 +57,7 @@ beforeEach(() => {
 });
 
 describe("createQuoteAction — existing customer, VAT off", () => {
-  it("computes totals server-side, omits quote_number, generates PDF, redirects", async () => {
+  it("computes totals server-side, omits quote_number, does NOT render a PDF, redirects", async () => {
     await createQuoteAction(
       INITIAL_ACTION_STATE,
       fd({
@@ -89,7 +93,8 @@ describe("createQuoteAction — existing customer, VAT off", () => {
     expect(arg.customer_name).toBe("Acme Ltd");
     expect(arg.created_by).toBe("op-1");
 
-    expect(renderPdfMock).toHaveBeenCalledWith("quote-123");
+    // Create must NOT render a PDF (that is lazy on first download).
+    expect(renderPdfMock).not.toHaveBeenCalled();
     expect(redirectMock).toHaveBeenCalledWith("/quotes/quote-123");
   });
 });

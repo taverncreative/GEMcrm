@@ -64,7 +64,8 @@ describe("getAllDocuments — quotes", () => {
     expect(q!.customer?.id).toBe("cust-1");
     expect(q!.partyName).toBe("Acme Ltd");
     expect(q!.subtitle).toBe("£435.00");
-    expect(q!.url).toContain("/reports/quotes/q1/quote.pdf");
+    // Open link points at the on-demand route (renders lazily), not the stored URL.
+    expect(q!.href).toBe("/api/pdf/quote/q1");
   });
 
   it("includes a prospect quote (no customer) carrying the denormalised name", async () => {

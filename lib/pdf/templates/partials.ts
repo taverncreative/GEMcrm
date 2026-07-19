@@ -1,4 +1,5 @@
 import { LOGO_DATA_URI } from "@/lib/pdf/assets";
+import { FOOTER_BAND_DATA_URI } from "@/lib/pdf/footer-band";
 
 /**
  * Shared, branded document partials (Track: document rebrand, Pass 1+2).
@@ -61,4 +62,36 @@ export function renderDocHeader(opts: {
         .join("")}
     </div>
   </div>`;
+}
+
+/**
+ * The shared branded document FOOTER — the green contact + legal band shown on
+ * EVERY page of EVERY generated PDF (quote, service sheet, agreement signed +
+ * review, invoice). This is the single source of the footer markup: htmlToPdf
+ * passes it as Puppeteer's `footerTemplate`, the only mechanism that pins a
+ * footer to the bottom of every page including a partial last page in this
+ * Chromium (a body `position:fixed` footer paints nothing; a table-footer-group
+ * floats up on a short final page).
+ *
+ * The band is a pre-baked IMAGE (lib/pdf/footer-band.ts) rather than markup text
+ * because the footerTemplate renders in a separate context where `@font-face`
+ * does not load — the image bakes in the exact Montserrat + #9AC44B. Its TEXT
+ * (phone / email / web + "trading name … Company number") is sourced from
+ * FOOTER_CONTACT in lib/constants/branding.ts; after editing that, regenerate
+ * the asset with `npx tsx scripts/generate-footer-band.ts`.
+ *
+ * translateY drops the band past Chromium's fixed ~5.3mm footer gap so it bleeds
+ * flush to the bottom edge; width:100% bleeds L/R; line-height:0 kills the
+ * inline-image gap.
+ */
+const FOOTER_BAND_SHIFT_PX = 24;
+
+export function renderDocumentFooter(): string {
+  return (
+    `<div style="margin:0;padding:0;width:100%;line-height:0;` +
+    `transform:translateY(${FOOTER_BAND_SHIFT_PX}px);">` +
+    `<img src="${FOOTER_BAND_DATA_URI}" ` +
+    `style="display:block;width:100%;height:auto;margin:0;padding:0;border:0;" />` +
+    `</div>`
+  );
 }

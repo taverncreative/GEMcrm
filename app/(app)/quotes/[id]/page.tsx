@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getQuoteById } from "@/lib/data/quotes";
-import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import { formatQuoteCurrency } from "@/lib/quotes/money";
 import { ROUTES } from "@/lib/constants/routes";
 
@@ -25,7 +24,10 @@ export default async function QuoteDetailPage({
   const quote = await getQuoteById(id);
   if (!quote) notFound();
 
-  const pdfHref = proxyAssetUrl(quote.quote_pdf_url);
+  // The on-demand route renders the PDF lazily on first hit and caches it, so
+  // this link always yields a PDF even for a just-created quote (no PDF stored
+  // yet). No "not generated" state to handle.
+  const pdfHref = `/api/pdf/quote/${quote.id}`;
   const lineItems = Array.isArray(quote.line_items) ? quote.line_items : [];
 
   return (
@@ -46,20 +48,14 @@ export default async function QuoteDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {pdfHref ? (
-            <a
-              href={pdfHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
-            >
-              Download PDF
-            </a>
-          ) : (
-            <span className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
-              PDF not generated
-            </span>
-          )}
+          <a
+            href={pdfHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+          >
+            Download PDF
+          </a>
         </div>
       </div>
 

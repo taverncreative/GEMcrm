@@ -8,6 +8,11 @@ export interface DocumentItem {
   customer: { id: string; name: string; company_name: string | null } | null;
   url: string;
   date: string;
+  /** A ready-to-use link, used VERBATIM (bypasses proxyAssetUrl) when the doc
+   *  is served by an app route rather than a stored storage object. Quotes set
+   *  this to their on-demand /api/pdf/quote/[id] route, which renders the PDF
+   *  lazily — so the Open link works even before any PDF has been generated. */
+  href?: string;
   /** Quote only: the denormalised bill-to name, so a prospect quote (no
    *  linked customer row) still shows who it is for on the row. */
   partyName?: string | null;
@@ -220,7 +225,10 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
       reference: q.quote_number ?? null,
       customer: cust,
       partyName,
+      // PDF is generated lazily; link at the on-demand route, not the (possibly
+      // still-null) stored URL, so Open always works.
       url: (q as unknown as { quote_pdf_url: string | null }).quote_pdf_url ?? "",
+      href: `/api/pdf/quote/${q.id}`,
       date: q.created_at,
       subtitle: formatGbp(Number((q as unknown as { total: number }).total)),
     });

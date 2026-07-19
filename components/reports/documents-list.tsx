@@ -101,12 +101,16 @@ function KindBadge({ kind }: { kind: DocumentItem["kind"] }) {
 /** The actions cluster (invoice pay/chase + Open / Generate / No PDF), shared
  *  by the desktop table cell and the mobile card so the logic never drifts. */
 function RowActions({ item }: { item: DocumentItem }) {
+  // An explicit `href` (e.g. a quote's on-demand /api/pdf route) is used as-is;
+  // otherwise a stored storage URL is routed through the auth-gated proxy.
+  const openHref =
+    item.href ?? (item.url ? proxyAssetUrl(item.url) ?? item.url : null);
   return (
     <>
       {item.kind === "invoice" && item.invoiceId && <InvoiceActions item={item} />}
-      {item.url ? (
+      {openHref ? (
         <a
-          href={proxyAssetUrl(item.url) ?? item.url}
+          href={openHref}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
