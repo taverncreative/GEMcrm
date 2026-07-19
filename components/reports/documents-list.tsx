@@ -28,12 +28,14 @@ const KIND_LABEL: Record<DocumentItem["kind"], string> = {
   invoice: "Invoices",
   service_sheet: "Service Sheets",
   agreement: "Agreements",
+  quote: "Quotes",
 };
 
 const KIND_COLOR: Record<DocumentItem["kind"], string> = {
   invoice: "bg-brand-soft text-brand-darker",
   service_sheet: "bg-blue-100 text-blue-700",
   agreement: "bg-amber-100 text-amber-700",
+  quote: "bg-purple-100 text-purple-700",
 };
 
 type Filter = "all" | DocumentItem["kind"];
@@ -54,6 +56,8 @@ function kindLabel(kind: DocumentItem["kind"]): string {
  *  to the site address, then a neutral placeholder, so it is never blank. */
 function primaryLine(item: DocumentItem): string {
   if (item.customer) return customerDisplayName(item.customer);
+  // A prospect quote has no linked customer row — show the typed bill-to name.
+  if (item.partyName) return item.partyName;
   if (item.siteAddress) return item.siteAddress;
   return "No customer on file";
 }
@@ -72,6 +76,9 @@ function metaLine(item: DocumentItem): string {
     parts.push(item.subtitle ?? formatDate(item.date));
   } else if (item.kind === "invoice") {
     if (item.subtitle) parts.push(item.subtitle); // amount
+    parts.push(formatDate(item.date));
+  } else if (item.kind === "quote") {
+    if (item.subtitle) parts.push(item.subtitle); // total
     parts.push(formatDate(item.date));
   } else {
     // agreement
@@ -153,6 +160,7 @@ export function DocumentsList({ items }: DocumentsListProps) {
     invoice: searched.filter((i) => i.kind === "invoice").length,
     service_sheet: searched.filter((i) => i.kind === "service_sheet").length,
     agreement: searched.filter((i) => i.kind === "agreement").length,
+    quote: searched.filter((i) => i.kind === "quote").length,
   };
 
   // Apply BOTH filters, then group by customer.
@@ -206,6 +214,11 @@ export function DocumentsList({ items }: DocumentsListProps) {
           label={`Agreements (${counts.agreement})`}
           active={filter === "agreement"}
           onClick={() => setFilter("agreement")}
+        />
+        <FilterPill
+          label={`Quotes (${counts.quote})`}
+          active={filter === "quote"}
+          onClick={() => setFilter("quote")}
         />
         {collapsible && groups.length > 1 && (
           <button

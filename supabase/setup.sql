@@ -976,3 +976,116 @@ alter table tasks add column if not exists notes text;
 -- required rule is app-level). Outside every uniqueness key, so two
 -- same-day "Other" jobs at one site still clash.
 alter table jobs add column if not exists call_type_other_desc text;
+
+
+-- ============================================================
+-- 045: quotes (sales document generator, Slice 1)
+-- ============================================================
+-- See supabase/migrations/045_quotes.sql for the full rationale. A branded
+-- sales quote for an existing customer OR a prospect (nullable customer_id +
+-- denormalised bill-to snapshot, so no customers row is needed). Online-only,
+-- never in Dexie. Dedicated sequence + BEFORE INSERT trigger assigns a
+-- collision-proof Q-YYYY-NNN number (the app never sets it). VAT ships dormant
+-- (vat_registered default false → no VAT line). Soft-delete pattern + RPC ship
+-- now so no second prod migration is needed when a delete action lands.
+-- Placed after 044 but BEFORE the trailing bucket/grants block would be ideal;
+-- kept at the very end for append-simplicity, so this block re-asserts its own
+-- anon revoke (the global one at "039" above already ran).
+create table if not exists quotes (
+  id                uuid primary key default gen_random_uuid(),
+  quote_number      text,
+  customer_id       uuid references customers (id) on delete set null,
+  customer_name     text not null,
+  customer_address  text,
+  customer_email    text,
+  line_items        jsonb not null default '[]'::jsonb,
+  subtotal          numeric not null default 0,
+  vat_registered    boolean not null default false,
+  vat_rate          numeric not null default 20,
+  vat_amount        numeric not null default 0,
+  total             numeric not null default 0,
+  terms             text,
+  valid_until       date,
+  notes             text,
+  status            text not null default 'draft' check (status in ('draft', 'sent')),
+  quote_pdf_url     text,
+  created_by        uuid,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  deleted_at        timestamptz
+);
+
+drop trigger if exists trg_quotes_updated_at on quotes;
+create trigger trg_quotes_updated_at
+  before update on quotes
+  for each row execute function set_updated_at();
+
+create sequence if not exists quote_number_seq start 1;
+
+create or replace function assign_quote_number()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.quote_number is null then
+    new.quote_number := 'Q-' || to_char(coalesce(new.created_at, now()), 'YYYY')
+      || '-' || lpad(nextval('quote_number_seq')::text, 3, '0');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_assign_quote_number on quotes;
+create trigger trg_assign_quote_number
+  before insert on quotes
+  for each row execute function assign_quote_number();
+
+create unique index if not exists quotes_quote_number_unique
+  on quotes (quote_number) where quote_number is not null;
+
+create index if not exists idx_quotes_customer_id on quotes (customer_id);
+create index if not exists idx_quotes_status on quotes (status);
+create index if not exists idx_quotes_live on quotes (id) where deleted_at is null;
+
+alter table quotes enable row level security;
+
+drop policy if exists "Authenticated users can read non-deleted" on quotes;
+create policy "Authenticated users can read non-deleted" on quotes
+  for select to authenticated using (deleted_at is null);
+
+drop policy if exists "Authenticated users can insert" on quotes;
+create policy "Authenticated users can insert" on quotes
+  for insert to authenticated with check (true);
+
+drop policy if exists "Authenticated users can update" on quotes;
+create policy "Authenticated users can update" on quotes
+  for update to authenticated using (true) with check (true);
+
+drop policy if exists "Authenticated users can delete (hard)" on quotes;
+create policy "Authenticated users can delete (hard)" on quotes
+  for delete to authenticated using (true);
+
+revoke all on public.quotes from anon;
+revoke delete, truncate on public.quotes from authenticated;
+
+create or replace function public.soft_delete_quote(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'soft_delete_quote: not authenticated';
+  end if;
+
+  update public.quotes
+     set deleted_at = now()
+   where id = p_id
+     and deleted_at is null;
+end;
+$$;
+
+revoke all on function public.soft_delete_quote(uuid) from public;
+revoke all on function public.soft_delete_quote(uuid) from anon;
+grant execute on function public.soft_delete_quote(uuid) to authenticated;

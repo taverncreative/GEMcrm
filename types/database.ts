@@ -183,6 +183,50 @@ export interface InvoiceJob {
   created_at: string;
 }
 
+export type QuoteStatus = "draft" | "sent";
+
+/** A single quote line: description + qty * unit_price. `line_total` is
+ *  server-computed and stored, so the PDF and totals never re-derive it. */
+export interface QuoteLineItem {
+  description: string;
+  qty: number;
+  unit_price: number;
+  line_total: number;
+}
+
+/**
+ * A branded sales quote (migration 045). Online-only. Works for an existing
+ * customer (customer_id set, fields snapshotted) OR a prospect (customer_id
+ * null, denormalised fields only — no customers row created). Money is stored
+ * as 2dp GBP numerics; `quote_number` is assigned by the DB sequence trigger,
+ * never the app.
+ */
+export interface Quote {
+  id: string;
+  quote_number: string | null;
+  customer_id: string | null;
+  customer_name: string;
+  customer_address: string | null;
+  customer_email: string | null;
+  line_items: QuoteLineItem[];
+  subtotal: number;
+  vat_registered: boolean;
+  vat_rate: number;
+  vat_amount: number;
+  total: number;
+  terms: string | null;
+  valid_until: string | null;
+  notes: string | null;
+  status: QuoteStatus;
+  quote_pdf_url: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Set when soft-deleted (migration 045). RLS filters deleted rows out of
+   *  every read; present for completeness + admin/restore paths. */
+  deleted_at: string | null;
+}
+
 export type AgreementStatus = "draft" | "active" | "paused" | "cancelled";
 
 export interface Agreement {

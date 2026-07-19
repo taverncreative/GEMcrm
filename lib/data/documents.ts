@@ -2,12 +2,15 @@ import { createClient } from "@/lib/supabase/server";
 
 export interface DocumentItem {
   id: string;
-  kind: "invoice" | "service_sheet" | "agreement";
+  kind: "invoice" | "service_sheet" | "agreement" | "quote";
   title: string;
   reference: string | null;
   customer: { id: string; name: string; company_name: string | null } | null;
   url: string;
   date: string;
+  /** Quote only: the denormalised bill-to name, so a prospect quote (no
+   *  linked customer row) still shows who it is for on the row. */
+  partyName?: string | null;
   /** Subtitle for the document, e.g. amount for an invoice. */
   subtitle?: string;
   /** Service-sheet only: site address one-liner (line 1 + town/postcode),
@@ -80,6 +83,14 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
     // A draft's contract_pdf_url holds its UNSIGNED review copy, which is not
     // a filed document — keep drafts out of the Documents list.
     .neq("status", "draft")
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  // Quotes — every live quote. Unlike agreement drafts, a quote's PDF IS the
+  // real document from the moment it is created, so drafts are included.
+  const { data: quotes } = await supabase
+    .from("quotes")
+    .select("id, quote_number, total, quote_pdf_url, created_at, customer_name, customer:customers(id, name, company_name)")
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -193,6 +204,25 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
         : undefined,
       renewalDate: endDate,
       renewalState,
+    });
+  }
+
+  for (const q of quotes ?? []) {
+    const cust = one(
+      (q as unknown as { customer: Joined<{ id: string; name: string; company_name: string | null }> })
+        .customer
+    );
+    const partyName = (q as unknown as { customer_name: string }).customer_name;
+    items.push({
+      id: `quote-${q.id}`,
+      kind: "quote",
+      title: `Quote ${q.quote_number ?? q.id.slice(0, 8)}`,
+      reference: q.quote_number ?? null,
+      customer: cust,
+      partyName,
+      url: (q as unknown as { quote_pdf_url: string | null }).quote_pdf_url ?? "",
+      date: q.created_at,
+      subtitle: formatGbp(Number((q as unknown as { total: number }).total)),
     });
   }
 

@@ -7,6 +7,8 @@ export const ROUTES = {
   SITES: "/sites",
   JOBS: "/jobs",
   AGREEMENTS: "/agreements",
+  QUOTES: "/quotes",
+  QUOTES_NEW: "/quotes/new",
   CALENDAR: "/calendar",
   REPORTS: "/reports",
   SETTINGS: "/settings",
@@ -17,4 +19,5 @@ export const ROUTES = {
   siteDetail: (id: string) => `/sites/${id}` as const,
   siteEdit: (id: string) => `/sites/${id}/edit` as const,
   jobDetail: (id: string) => `/jobs/${id}` as const,
+  quoteDetail: (id: string) => `/quotes/${id}` as const,
 } as const;
