@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import {
   ServiceSheetSchema,
   isServiceSheetFilled,
@@ -23,7 +22,6 @@ import { generateJobReport } from "@/lib/pdf/generate-job-report";
 import { uploadPdf } from "@/lib/storage/upload";
 import { sendServiceReport } from "@/lib/services/email";
 import { onJobCompleted } from "@/lib/services/job-events";
-import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
 
@@ -454,10 +452,16 @@ export async function approveServiceSheetAction(
       await bookVisit("Routine visit", options.routineDate, "routine", "");
     }
 
-    revalidatePath(ROUTES.jobDetail(jobId));
-    revalidatePath(ROUTES.JOBS);
-    revalidatePath(ROUTES.CALENDAR);
-    revalidatePath(ROUTES.DASHBOARD);
+    // No revalidatePath. The follow-up/routine visits this action creates are
+    // server-only (createBooking mints its own ids), but they reach the
+    // Dexie-live jobs list via the PULL half of the same sync run that
+    // replayed this completion (runSync = drain-then-pull), so useLiveQuery
+    // surfaces them there automatically; the server-rendered calendar/dashboard
+    // refetch them on forward navigation (pages aren't cached). A revalidatePath
+    // here purged the whole client router cache and stampeded a re-prefetch of
+    // every link on every completion — for freshness the pull + forward-nav
+    // already provide. (The completed job's own status is in Dexie via the
+    // form's applyLocal.)
     return {
       success: true,
       emailedTo,

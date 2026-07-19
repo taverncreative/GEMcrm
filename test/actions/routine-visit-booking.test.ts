@@ -107,6 +107,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => ({})),
 }));
 
+import { revalidatePath } from "next/cache";
 import { approveServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
 import { JobClashError } from "@/lib/data/jobs";
 import { nextRoutineOffsetDays } from "@/lib/services/agreement-schedule";
@@ -114,6 +115,7 @@ import { nextRoutineOffsetDays } from "@/lib/services/agreement-schedule";
 beforeEach(() => {
   createBookingMock.mockReset();
   createBookingMock.mockResolvedValue({});
+  vi.mocked(revalidatePath).mockClear();
 });
 
 describe("approveServiceSheetAction — routine visit booking", () => {
@@ -175,6 +177,24 @@ describe("approveServiceSheetAction — routine visit booking", () => {
     expect(createBookingMock).toHaveBeenCalledTimes(2);
     expect(res.warnings).toHaveLength(1);
     expect(res.warnings![0]).toContain("Follow-up visit on 2026-08-01");
+  });
+
+  // Perf (revalidatePath slice 4): the created follow-up/routine visits are
+  // server-only, but they reach the Dexie-live jobs list via the pull half of
+  // the completion's own sync run, and the calendar/dashboard refetch on
+  // forward navigation — so the action must NOT purge the whole client router
+  // cache (the per-completion prefetch stampede). Visit creation is unchanged
+  // (asserted by the tests above); this pins that no revalidatePath fires.
+  it("does NOT call revalidatePath while still booking both visits", async () => {
+    const res = await approveServiceSheetAction("job1", {
+      scheduleFollowUp: true,
+      followUpDate: "2026-08-01",
+      scheduleRoutine: true,
+      routineDate: "2026-10-01",
+    });
+    expect(res.success).toBe(true);
+    expect(createBookingMock).toHaveBeenCalledTimes(2);
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
 
