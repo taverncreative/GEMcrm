@@ -51,6 +51,7 @@ import type {
   Job,
   Agreement,
   Task,
+  BlockedPeriod,
 } from "@/types/database";
 import type { ServiceSheetDraft } from "@/lib/db/drafts";
 
@@ -175,6 +176,7 @@ class GemCrmDb extends Dexie {
   jobs!: EntityTable<Job, "id">;
   agreements!: EntityTable<Agreement, "id">;
   tasks!: EntityTable<Task, "id">;
+  blocked_periods!: EntityTable<BlockedPeriod, "id">;
   outbox!: EntityTable<OutboxEntry, "id">;
   photos_pending!: EntityTable<PendingPhoto, "id">;
   sync_meta!: EntityTable<SyncMetaEntry, "key">;
@@ -285,6 +287,23 @@ class GemCrmDb extends Dexie {
     // No upgrade callback — fresh table, no migration needed.
     this.version(4).stores({
       service_sheet_drafts: "job_id, updated_at",
+    });
+
+    // ─── v5: blocked_periods ──────────────────────────────────────
+    //
+    // Personal block-out days (SQL migration 046). Syncable: the sync
+    // pull mirrors server rows here so Slice 2's offline booking warning
+    // can read them, and offline create/edit/delete write here first.
+    //
+    // Adding a store REQUIRES a version bump (Dexie won't register a new
+    // table on an existing version). No upgrade callback — fresh table,
+    // nothing to backfill (same as v4's service_sheet_drafts).
+    //
+    // Index choices: `start_date` + `end_date` for the local range-overlap
+    // scan the booking warning runs, `deleted_at` for the RLS-equivalent
+    // "hide soft-deleted" local filter.
+    this.version(5).stores({
+      blocked_periods: "id, start_date, end_date, deleted_at",
     });
   }
 }

@@ -29,6 +29,7 @@ const pullMocks = vi.hoisted(() => ({
   pullJobsAction: vi.fn(),
   pullAgreementsAction: vi.fn(),
   pullTasksAction: vi.fn(),
+  pullBlockedPeriodsAction: vi.fn(),
 }));
 vi.mock("@/app/(app)/sync/pull-actions", () => pullMocks);
 vi.mock("@/lib/sync/registry", () => ({

@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { getJobsInRange, getTasksInRange } from "@/lib/data/calendar";
+import { getBlockedPeriodsInRange } from "@/lib/data/blocked-periods";
 import { MonthCalendar } from "@/components/calendar/month-calendar";
 import { StartJobButton } from "@/components/jobs/start-job-button";
 import { NewTaskButton } from "@/components/tasks/new-task-button";
+import { BlockOutButton } from "@/components/blocked-periods/block-out-button";
+import { BlockedDaysList } from "@/components/blocked-periods/blocked-days-list";
 import { ROUTES } from "@/lib/constants/routes";
 import { JOB_STATUS_LABELS } from "@/lib/constants/job-labels";
 import { formatAddress } from "@/lib/utils/format-address";
@@ -58,9 +61,10 @@ export default async function CalendarPage({
   const { year, month } = parseMonthParam(m);
   const { start, end } = rangeForMonth(year, month);
 
-  const [jobs, tasks] = await Promise.all([
+  const [jobs, tasks, blockedPeriods] = await Promise.all([
     getJobsInRange(start, end),
     getTasksInRange(start, end),
+    getBlockedPeriodsInRange(start, end),
   ]);
 
   // Split this-month jobs for the side list
@@ -98,13 +102,20 @@ export default async function CalendarPage({
           <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
         </div>
         <div className="flex items-center gap-2">
+          <BlockOutButton />
           <NewTaskButton />
           <StartJobButton label="New Booking" />
         </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">
-        <MonthCalendar year={year} month={month} jobs={jobs} tasks={tasks} />
+        <MonthCalendar
+          year={year}
+          month={month}
+          jobs={jobs}
+          tasks={tasks}
+          blockedPeriods={blockedPeriods}
+        />
 
         <aside className="space-y-6">
           {/* Month stats */}
@@ -171,8 +182,15 @@ export default async function CalendarPage({
                 <span className="h-3 w-3 rounded bg-purple-100 ring-1 ring-purple-200" />
                 <span className="text-gray-600">Pending task</span>
               </div>
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded bg-rose-100 ring-1 ring-rose-200" />
+                <span className="text-gray-600">Blocked / day off</span>
+              </div>
             </div>
           </div>
+
+          {/* Blocked days management */}
+          <BlockedDaysList />
 
           {/* Upcoming list */}
           <div className="rounded-xl bg-white p-5 shadow-sm">

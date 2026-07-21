@@ -5,13 +5,14 @@ import { formatAddress } from "@/lib/utils/format-address";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { CalendarTaskChip } from "@/components/calendar/calendar-task-chip";
 import type { JobWithContext } from "@/lib/data/jobs";
-import type { JobStatus, Task } from "@/types/database";
+import type { JobStatus, Task, BlockedPeriod } from "@/types/database";
 
 interface MonthCalendarProps {
   year: number;
   month: number; // 0-11
   jobs: JobWithContext[];
   tasks: Task[];
+  blockedPeriods: BlockedPeriod[];
 }
 
 function toKey(d: Date): string {
@@ -28,7 +29,13 @@ function formatMonthLabel(year: number, month: number): string {
   });
 }
 
-export function MonthCalendar({ year, month, jobs, tasks }: MonthCalendarProps) {
+export function MonthCalendar({
+  year,
+  month,
+  jobs,
+  tasks,
+  blockedPeriods,
+}: MonthCalendarProps) {
   // Group jobs + tasks by date key for O(1) lookup during grid render.
   const jobsByDate = new Map<string, JobWithContext[]>();
   for (const job of jobs) {
@@ -151,6 +158,14 @@ export function MonthCalendar({ year, month, jobs, tasks }: MonthCalendarProps) 
           const dayJobs = jobsByDate.get(key) ?? [];
           const dayTasks = tasksByDate.get(key) ?? [];
           const totalItems = dayJobs.length + dayTasks.length;
+          // Block-out periods covering this day (inclusive range). Small set,
+          // so a per-cell filter is cheaper than a map. A rose band spans the
+          // range: rounded ends on the true start/end days, bleeding into the
+          // neighbour cell's padding in between so it reads as one banner.
+          const dayBlocks = blockedPeriods.filter(
+            (bp) => bp.start_date <= key && key <= bp.end_date
+          );
+          const isWeekStart = idx % 7 === 0;
 
           return (
             <div
@@ -161,6 +176,29 @@ export function MonthCalendar({ year, month, jobs, tasks }: MonthCalendarProps) 
                 idx >= cells.length - 7 ? "border-b-0" : ""
               }`}
             >
+              {dayBlocks.length > 0 && (
+                <div className="mb-1 space-y-0.5">
+                  {dayBlocks.map((bp) => {
+                    const isStart = key === bp.start_date;
+                    const isEnd = key === bp.end_date;
+                    // Re-show the label at the start of each week so a block
+                    // spanning weeks stays labelled on every row.
+                    const showLabel = isStart || isWeekStart;
+                    return (
+                      <div
+                        key={bp.id}
+                        title={bp.title}
+                        aria-label={`Blocked: ${bp.title}`}
+                        className={`truncate bg-rose-100 px-1.5 py-0.5 text-[11px] font-medium text-rose-800 ${
+                          isStart ? "rounded-l" : "-ml-1.5"
+                        } ${isEnd ? "rounded-r" : "-mr-1.5"}`}
+                      >
+                        {showLabel ? `🚫 ${bp.title}` : " "}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span
                   className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${

@@ -25,6 +25,7 @@ import {
   pullJobsSince,
   pullAgreementsSince,
   pullTasksSince,
+  pullBlockedPeriodsSince,
 } from "@/lib/data/sync-pulls";
 import type {
   Customer,
@@ -32,6 +33,7 @@ import type {
   Job,
   Agreement,
   Task,
+  BlockedPeriod,
 } from "@/types/database";
 
 export async function pullCustomersAction(
@@ -67,4 +69,11 @@ export async function pullTasksAction(
 ): Promise<Task[]> {
   await requireUser();
   return pullTasksSince(since);
+}
+
+export async function pullBlockedPeriodsAction(
+  since: string | null
+): Promise<BlockedPeriod[]> {
+  await requireUser();
+  return pullBlockedPeriodsSince(since);
 }

@@ -37,13 +37,21 @@
 
 import { db } from "@/lib/db";
 import type { Table } from "dexie";
-import type { Customer, Site, Job, Agreement, Task } from "@/types/database";
+import type {
+  Customer,
+  Site,
+  Job,
+  Agreement,
+  Task,
+  BlockedPeriod,
+} from "@/types/database";
 import {
   pullCustomersAction,
   pullSitesAction,
   pullJobsAction,
   pullAgreementsAction,
   pullTasksAction,
+  pullBlockedPeriodsAction,
 } from "@/app/(app)/sync/pull-actions";
 import { classifyError, type SyncResultClass } from "@/lib/sync/http-classify";
 
@@ -55,6 +63,7 @@ export const CURSOR_KEYS = {
   jobs: "cursor.jobs",
   agreements: "cursor.agreements",
   tasks: "cursor.tasks",
+  blocked_periods: "cursor.blocked_periods",
 } as const;
 
 export interface PullEntityResult {
@@ -240,7 +249,7 @@ export type PullProgress = (
 ) => void;
 
 /**
- * Pull all 5 entities sequentially. Sequential (not Promise.all) because:
+ * Pull all syncable entities sequentially. Sequential (not Promise.all) because:
  *   - The cursor reads/writes against sync_meta are quick but a
  *     parallel storm against the dev server isn't worth it.
  *   - Auth-expired on one entity should halt the rest — easier to
@@ -295,6 +304,13 @@ export async function pullAll(onProgress?: PullProgress): Promise<PullResult> {
         s: string | null
       ) => Promise<SyncableRow[]>,
     },
+    {
+      name: "blocked_periods",
+      table: db.blocked_periods as unknown as Table<SyncableRow, string>,
+      fetch: pullBlockedPeriodsAction as unknown as (
+        s: string | null
+      ) => Promise<SyncableRow[]>,
+    },
   ];
 
   for (const e of entities) {
@@ -318,4 +334,4 @@ export async function pullAll(onProgress?: PullProgress): Promise<PullResult> {
 }
 
 // Re-export the entity types so the engine can use them.
-export type { Customer, Site, Job, Agreement, Task };
+export type { Customer, Site, Job, Agreement, Task, BlockedPeriod };

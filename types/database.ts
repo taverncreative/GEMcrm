@@ -293,6 +293,31 @@ export interface Task {
   site_id: string | null;
 }
 
+/**
+ * A personal "block-out" period — the owner marking himself unavailable
+ * for a single day or a range of consecutive days, with a free-text
+ * reason as the title (migration 046). Standalone: no FK to any other
+ * entity. Syncable (Dexie mirror + outbox + sync pull), so the offline
+ * booking warning (Slice 2) can read it locally.
+ */
+export interface BlockedPeriod {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  /** See `Customer.deleted_at`. */
+  deleted_at: string | null;
+  /** Inclusive range start (YYYY-MM-DD). */
+  start_date: string;
+  /** Inclusive range end. Equals `start_date` for a single-day block. */
+  end_date: string;
+  /** Free-text reason, shown as the calendar band label. */
+  title: string;
+  /** Audit only (single-tenant; not an access gate). Server-stamped on
+   *  insert (DEFAULT auth.uid()); null on the offline optimistic row until
+   *  the next pull fills it. */
+  created_by: string | null;
+}
+
 export interface Report {
   id: string;
   job_id: string;

@@ -48,8 +48,14 @@
 
 import { db } from "@/lib/db";
 
-/** Mutable entity kinds — must match the 5 syncable Dexie tables. */
-export type EntityType = "customer" | "site" | "job" | "agreement" | "task";
+/** Mutable entity kinds — must match the syncable Dexie tables. */
+export type EntityType =
+  | "customer"
+  | "site"
+  | "job"
+  | "agreement"
+  | "task"
+  | "blocked_period";
 
 export interface EnqueueInput {
   /** Server-action export name, e.g. "createCustomerAction". */
@@ -189,5 +195,6 @@ export async function revertLocalCreate(entry: {
     await db.jobs.delete(id);
     await db.agreements.delete(id);
     await db.tasks.delete(id);
+    await db.blocked_periods.delete(id);
   }
 }

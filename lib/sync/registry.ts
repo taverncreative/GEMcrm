@@ -45,6 +45,10 @@ import {
 } from "@/app/(app)/customers/actions";
 import { completeServiceSheetAction } from "@/app/(app)/jobs/[id]/complete/actions";
 import { createQuickBookingAction } from "@/app/(app)/bookings/actions";
+import {
+  saveBlockedPeriodAction,
+  deleteBlockedPeriodAction,
+} from "@/app/(app)/blocked-periods/actions";
 import type { ActionState } from "@/types/actions";
 
 /** Fresh initial state to satisfy the React `useActionState` calling
@@ -170,6 +174,21 @@ export const REGISTRY: Record<string, RegistryEntry> = {
   updateAgreementStatusAction: {
     kind: "form",
     invoke: (fd) => updateAgreementStatusAction(INITIAL_FORM_STATE, fd),
+  },
+
+  // ─── blocked_period ─────────────────────────────────────────
+  // Create/edit upsert (migration 046). Replayed from the id-enriched args
+  // the wrapper persisted, so the server row matches the locally-created
+  // one. Idempotent via saveBlockedPeriod's upsert-on-id.
+  saveBlockedPeriodAction: {
+    kind: "form",
+    invoke: (fd) => saveBlockedPeriodAction(INITIAL_FORM_STATE, fd),
+  },
+  // Soft-delete via the SECURITY DEFINER RPC. Direct-call (id only);
+  // idempotent (the RPC no-ops once deleted_at is set).
+  deleteBlockedPeriodAction: {
+    kind: "direct",
+    invoke: (...args) => deleteBlockedPeriodAction(args[0] as string),
   },
 };
 

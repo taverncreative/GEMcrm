@@ -1089,3 +1089,98 @@ $$;
 revoke all on function public.soft_delete_quote(uuid) from public;
 revoke all on function public.soft_delete_quote(uuid) from anon;
 grant execute on function public.soft_delete_quote(uuid) to authenticated;
+
+-- ============================================================
+-- 046: blocked_periods — personal unavailability / "block-out days".
+-- Mirror of migration 046_blocked_periods.sql. Standalone (no FKs),
+-- SYNCABLE (Dexie mirror + outbox + sync pull) so Slice 2's booking
+-- warning can read it offline. See the migration for the full rationale.
+-- Appended at the very end for append-simplicity (the global anon revoke
+-- at "039" above already ran; this block re-asserts its own).
+-- ============================================================
+create table if not exists blocked_periods (
+  id          uuid primary key default gen_random_uuid(),
+  start_date  date not null,
+  end_date    date not null,
+  title       text not null,
+  created_by  uuid default auth.uid(),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  deleted_at  timestamptz,
+  constraint blocked_periods_date_order check (end_date >= start_date)
+);
+
+drop trigger if exists trg_blocked_periods_updated_at on blocked_periods;
+create trigger trg_blocked_periods_updated_at
+  before update on blocked_periods
+  for each row execute function set_updated_at();
+
+create index if not exists idx_blocked_periods_range
+  on blocked_periods (start_date, end_date);
+create index if not exists idx_blocked_periods_live
+  on blocked_periods (id) where deleted_at is null;
+
+alter table blocked_periods enable row level security;
+
+drop policy if exists "Authenticated users can read non-deleted" on blocked_periods;
+create policy "Authenticated users can read non-deleted" on blocked_periods
+  for select to authenticated using (deleted_at is null);
+
+drop policy if exists "Authenticated users can insert" on blocked_periods;
+create policy "Authenticated users can insert" on blocked_periods
+  for insert to authenticated with check (true);
+
+drop policy if exists "Authenticated users can update" on blocked_periods;
+create policy "Authenticated users can update" on blocked_periods
+  for update to authenticated using (true) with check (true);
+
+drop policy if exists "Authenticated users can delete (hard)" on blocked_periods;
+create policy "Authenticated users can delete (hard)" on blocked_periods
+  for delete to authenticated using (true);
+
+revoke all on public.blocked_periods from anon;
+revoke delete, truncate on public.blocked_periods from authenticated;
+
+create or replace function public.sync_pull_blocked_periods(since timestamptz)
+returns setof public.blocked_periods
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'sync_pull_blocked_periods: not authenticated';
+  end if;
+  return query
+    select *
+      from public.blocked_periods
+     where since is null or updated_at > since
+     order by updated_at asc;
+end;
+$$;
+
+revoke execute on function public.sync_pull_blocked_periods(timestamptz) from public;
+revoke execute on function public.sync_pull_blocked_periods(timestamptz) from anon;
+grant execute on function public.sync_pull_blocked_periods(timestamptz) to authenticated;
+
+create or replace function public.soft_delete_blocked_period(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'soft_delete_blocked_period: not authenticated';
+  end if;
+
+  update public.blocked_periods
+     set deleted_at = now()
+   where id = p_id
+     and deleted_at is null;
+end;
+$$;
+
+revoke all on function public.soft_delete_blocked_period(uuid) from public;
+revoke all on function public.soft_delete_blocked_period(uuid) from anon;
+grant execute on function public.soft_delete_blocked_period(uuid) to authenticated;
