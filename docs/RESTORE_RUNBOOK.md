@@ -112,7 +112,7 @@ signed agreements, invoices, site photos, and signatures**.
   paused and call the developer with the exact error text.
 - App still broken after a successful restore → the problem may not have been
   the database. Call the developer.
-- **Developer contact:** _(fill in name + number/email here)_.
+- **Developer contact:** John Lally, 07522388055, hello@businesssortedkent.co.uk.
 
 ---
 

@@ -36,38 +36,6 @@ export async function completeTaskAction(
   return { success: true, errors: {}, message: "Task completed" };
 }
 
-export async function bulkCompleteTasksAction(
-  _prev: ActionState,
-  formData: FormData
-): Promise<ActionState> {
-  await requireUser();
-  const raw = formData.get("task_ids") as string;
-  if (!raw) {
-    return { success: false, errors: {}, message: "No tasks provided" };
-  }
-
-  let taskIds: string[];
-  try {
-    taskIds = JSON.parse(raw);
-  } catch {
-    return { success: false, errors: {}, message: "Invalid task data" };
-  }
-
-  try {
-    await Promise.all(taskIds.map((id) => completeTask(id)));
-  } catch (err) {
-    return {
-      success: false,
-      errors: {},
-      message: err instanceof Error ? err.message : "Failed to complete tasks",
-    };
-  }
-
-  // No revalidatePath — the BulkCompleteButton runs a scoped router.refresh()
-  // after this resolves, re-fetching only the dashboard. See completeTaskAction.
-  return { success: true, errors: {}, message: "All tasks completed" };
-}
-
 export async function finishDayAction(
   _prev: ActionState,
   _formData: FormData

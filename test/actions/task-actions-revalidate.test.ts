@@ -3,7 +3,7 @@
  * revalidatePath. Their consumers are SERVER-RENDERED (dashboard tiles +
  * calendar), so — unlike Slice 1's Dexie-live removals — the completion /
  * creation is surfaced by a SCOPED router.refresh() in the client callers
- * (CompleteTaskButton, BulkCompleteButton, CalendarTaskChip, NewTaskModal).
+ * (CompleteTaskButton, CalendarTaskChip, NewTaskModal).
  * A revalidatePath here would purge the whole client router cache and
  * stampede a re-prefetch of every link on the page. These pin that the
  * server side no longer revalidates, plus the basic success behaviour.
@@ -35,10 +35,7 @@ vi.mock("@/lib/auth/require-user", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { revalidatePath } from "next/cache";
-import {
-  completeTaskAction,
-  bulkCompleteTasksAction,
-} from "@/app/(app)/dashboard/actions";
+import { completeTaskAction } from "@/app/(app)/dashboard/actions";
 import { createTaskAction } from "@/app/(app)/tasks/actions";
 
 const initial = { success: false, errors: {}, message: null };
@@ -71,31 +68,6 @@ describe("completeTaskAction", () => {
     const res = await completeTaskAction(initial, fd({}));
     expect(res.success).toBe(false);
     expect(completeTaskMock).not.toHaveBeenCalled();
-    expect(revalidatePath).not.toHaveBeenCalled();
-  });
-});
-
-describe("bulkCompleteTasksAction", () => {
-  it("completes every task and reports success", async () => {
-    const res = await bulkCompleteTasksAction(
-      initial,
-      fd({ task_ids: JSON.stringify(["a", "b", "c"]) })
-    );
-    expect(completeTaskMock).toHaveBeenCalledTimes(3);
-    expect(res.success).toBe(true);
-  });
-
-  it("does NOT call revalidatePath", async () => {
-    await bulkCompleteTasksAction(
-      initial,
-      fd({ task_ids: JSON.stringify(["a", "b"]) })
-    );
-    expect(revalidatePath).not.toHaveBeenCalled();
-  });
-
-  it("rejects invalid task data", async () => {
-    const res = await bulkCompleteTasksAction(initial, fd({ task_ids: "not-json" }));
-    expect(res.success).toBe(false);
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
