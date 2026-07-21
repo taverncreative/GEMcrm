@@ -230,3 +230,52 @@ export async function findBlockedPeriodsForDateLocal(
     )
     .map((b) => ({ id: b.id, reason: b.title }));
 }
+
+/** A live, actionable job that falls inside a block-out range — a row in the
+ *  "resolve jobs when blocking" list. Carries the full Job (for the reschedule
+ *  handoff) plus a resolved customer name (for display). */
+export interface JobInRange {
+  job: Job;
+  customerName: string;
+}
+
+/**
+ * Live jobs whose date falls inside [startDate, endDate] (inclusive) — the
+ * offline-first input to the resolve-jobs list on the block-out modal.
+ *
+ * Reads Dexie (db.jobs via the job_date index), so it works online AND
+ * offline like the other booking lookups. Keeps only jobs that are
+ * meaningfully actionable when blocking a day: not archived, not soft-deleted,
+ * and status `scheduled` or `in_progress`. A `completed` job can't be moved
+ * (rescheduleJob refuses it) and a `draft` has no confirmed date, so both are
+ * excluded. Each is resolved to a customer name for the list; the full Job
+ * rides along for the reschedule handoff. Blank/invalid range → [].
+ *
+ * Sorted soonest-first for a sensible list order. The window is a single
+ * operator's diary, so the per-row name resolution is cheap.
+ */
+export async function findJobsInRangeLocal(
+  startDate: string,
+  endDate: string
+): Promise<JobInRange[]> {
+  if (!startDate || !endDate || endDate < startDate) return [];
+
+  const inRange = await db.jobs
+    .where("job_date")
+    .between(startDate, endDate, true, true)
+    .toArray();
+
+  const live = inRange.filter(
+    (j) =>
+      !j.is_archived &&
+      !j.deleted_at &&
+      (j.job_status === "scheduled" || j.job_status === "in_progress")
+  );
+
+  const out: JobInRange[] = [];
+  for (const j of live) {
+    out.push({ job: j, customerName: await resolveCustomerName(j.site_id) });
+  }
+  out.sort((a, b) => a.job.job_date.localeCompare(b.job.job_date));
+  return out;
+}
