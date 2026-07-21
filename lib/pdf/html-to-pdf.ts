@@ -29,7 +29,7 @@ const SIDE_MARGIN_MM = 22;
  * reserves vertical space for it and flowing content stops right above it,
  * never overlapping. Sized to fit the band's two text lines + padding.
  */
-const FOOTER_BAND_MM = 14;
+const FOOTER_BAND_MM = 12;
 
 async function launchBrowser() {
   if (IS_SERVERLESS) {

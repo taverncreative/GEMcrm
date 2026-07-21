@@ -34,6 +34,12 @@ const nextConfig: NextConfig = {
       "./node_modules/@sparticuz/chromium/bin/**/*",
       "./lib/pdf/fonts/**/*",
       "./public/logo/gem-services-logo.png",
+      // Montserrat static TTFs (Regular + Bold), traced to /var/task/fonts so
+      // @sparticuz/chromium's fontconfig registers "Montserrat" as a SYSTEM font
+      // — the ONLY way the footerTemplate context can use it (it ignores
+      // @font-face). fontconfig scans /var/task/fonts by default (per the
+      // package README). Referenced by family name in renderDocumentFooter.
+      "./fonts/**/*",
     ],
   },
   images: {

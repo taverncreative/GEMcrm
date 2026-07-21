@@ -39,6 +39,15 @@ describe("renderDocumentFooter", () => {
     expect(html).toContain("&#8226;");
     expect(html).not.toContain("&#9670;");
   });
+
+  it("prefers Montserrat (system font on serverless) with a safe sans fallback", () => {
+    // 'Montserrat' resolves to the TTFs bundled at /var/task/fonts via
+    // fontconfig; it MUST come first, with Open Sans / generic sans behind it so
+    // the footer is never blank if the font isn't found.
+    expect(html).toMatch(/font-family:\s*'Montserrat'/);
+    expect(html.toLowerCase()).toContain("open sans");
+    expect(html).toContain("sans-serif");
+  });
 });
 
 describe("footer content matches the branding constants", () => {
