@@ -137,6 +137,63 @@ describe("BlockOutModal — save sequencing", () => {
     );
   });
 
+  it("a NORMAL job cancels with no extra confirm", async () => {
+    const user = userEvent.setup();
+    render(<BlockOutModal onClose={vi.fn()} />);
+    await setRange("2026-07-27", "2026-07-31");
+    await screen.findByText("2 jobs scheduled during this period");
+
+    // job-plain (non-contract) is the first row. Its Cancel marks straight
+    // away — no confirmation prompt appears.
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    await user.click(cancelButtons[0]);
+
+    expect(screen.queryByText(/scheduled contract visit/i)).toBeNull();
+    // Immediately marked for cancel (the row's Keep de-selects).
+    expect(
+      screen.getByRole("button", { name: "Cancel", pressed: true })
+    ).toBeInTheDocument();
+  });
+
+  it("a CONTRACT visit requires confirmation before it is marked for cancel", async () => {
+    const user = userEvent.setup();
+    render(<BlockOutModal onClose={vi.fn()} />);
+    await setRange("2026-07-27", "2026-07-31");
+    await screen.findByText("2 jobs scheduled during this period");
+    await user.type(screen.getByLabelText("Reason"), "Benidorm holiday");
+
+    // job-contract is the second row (sorted by date: 29th then 30th).
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    await user.click(cancelButtons[1]);
+
+    // Not marked yet — a confirmation prompt appears instead.
+    expect(
+      await screen.findByText(/scheduled contract visit for/i)
+    ).toBeInTheDocument();
+
+    // Saving now must NOT delete it (only confirmed cancels apply).
+    await user.click(screen.getByRole("button", { name: "Block out anyway" }));
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("confirming the contract-visit cancel then saving soft-deletes it", async () => {
+    const user = userEvent.setup();
+    render(<BlockOutModal onClose={vi.fn()} />);
+    await setRange("2026-07-27", "2026-07-31");
+    await screen.findByText("2 jobs scheduled during this period");
+    await user.type(screen.getByLabelText("Reason"), "Benidorm holiday");
+
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    await user.click(cancelButtons[1]);
+    await user.click(await screen.findByRole("button", { name: "Cancel visit" }));
+
+    await user.click(screen.getByRole("button", { name: "Block out anyway" }));
+
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
+    expect(deleteMock).toHaveBeenCalledWith("job-contract");
+  });
+
   it("still saves the block when a cancel fails, and surfaces the failure", async () => {
     deleteMock.mockResolvedValue({ success: false, message: "nope" });
     const user = userEvent.setup();

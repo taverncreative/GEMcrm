@@ -154,6 +154,11 @@ export function BlockOutModal({ onClose, editing = null }: BlockOutModalProps) {
   const [cancelledIds, setCancelledIds] = useState<Set<string>>(new Set());
   // When set, the reschedule modal is open for this job (the MOVE handoff).
   const [reschedulingJob, setReschedulingJob] = useState<Job | null>(null);
+  // The contract visit whose CANCEL is awaiting confirmation (guards against
+  // an accidental cancel of an agreement-scheduled visit).
+  const [confirmingCancelId, setConfirmingCancelId] = useState<string | null>(
+    null
+  );
   // Non-blocking: cancels that couldn't apply (offline). Block still saved.
   const [jobActionError, setJobActionError] = useState<string | null>(null);
 
@@ -164,6 +169,13 @@ export function BlockOutModal({ onClose, editing = null }: BlockOutModalProps) {
       else next.delete(jobId);
       return next;
     });
+  }
+
+  // Contract visits require a confirmation before being marked for cancel;
+  // ordinary jobs mark straight away.
+  function requestCancel(job: Job) {
+    if (job.agreement_id) setConfirmingCancelId(job.id);
+    else toggleCancel(job.id, true);
   }
 
   // Online success → the block row is on the server; refresh so the calendar
@@ -398,39 +410,71 @@ export function BlockOutModal({ onClose, editing = null }: BlockOutModalProps) {
                             )}
                           </p>
                         </div>
-                        <div className="mt-2 flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => toggleCancel(job.id, false)}
-                            aria-pressed={!isCancelled}
-                            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                              !isCancelled
-                                ? "bg-brand text-white"
-                                : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                            }`}
-                          >
-                            Keep
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setReschedulingJob(job)}
-                            className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                          >
-                            Move
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleCancel(job.id, true)}
-                            aria-pressed={isCancelled}
-                            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                              isCancelled
-                                ? "bg-red-600 text-white"
-                                : "border border-gray-200 bg-white text-rose-700 hover:bg-rose-50"
-                            }`}
-                          >
-                            Cancel
-                          </button>
-                        </div>
+                        {confirmingCancelId === job.id ? (
+                          // Contract-visit cancel confirmation. Marking a
+                          // contract visit for cancel is gated here so an
+                          // agreement-scheduled visit isn't dropped by mistake.
+                          <div className="mt-2 rounded-md border border-rose-200 bg-rose-50 p-2">
+                            <p className="text-xs text-rose-800">
+                              This is a scheduled contract visit for{" "}
+                              <span className="font-medium">{customerName}</span>
+                              . Cancel it anyway?
+                            </p>
+                            <div className="mt-1.5 flex gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  toggleCancel(job.id, true);
+                                  setConfirmingCancelId(null);
+                                }}
+                                className="rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700"
+                              >
+                                Cancel visit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingCancelId(null)}
+                                className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                              >
+                                Keep it
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-2 flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => toggleCancel(job.id, false)}
+                              aria-pressed={!isCancelled}
+                              className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                                !isCancelled
+                                  ? "bg-brand text-white"
+                                  : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                              }`}
+                            >
+                              Keep
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReschedulingJob(job)}
+                              className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                            >
+                              Move
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => requestCancel(job)}
+                              aria-pressed={isCancelled}
+                              className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                                isCancelled
+                                  ? "bg-red-600 text-white"
+                                  : "border border-gray-200 bg-white text-rose-700 hover:bg-rose-50"
+                              }`}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </li>
                     );
                   })}
