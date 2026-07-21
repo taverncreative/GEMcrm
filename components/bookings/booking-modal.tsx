@@ -9,7 +9,9 @@ import {
   getSitesForCustomerLocal,
   findClashingJobLocal,
   findOverlappingBookingsLocal,
+  findBlockedPeriodsForDateLocal,
   type BookingClash,
+  type BlockedDayHit,
 } from "@/lib/db/lookups";
 import { CALL_TYPES } from "@/lib/validation/booking";
 import { CALL_TYPE_LABELS, COMMON_PESTS } from "@/lib/constants/job-labels";
@@ -459,6 +461,14 @@ export function BookingModal({
   // the submit. null = no warning currently shown.
   const [clashWarning, setClashWarning] = useState<BookingClash[] | null>(null);
 
+  // Non-blocking "you've marked yourself off that day" advisory (Slice 2).
+  // Recomputed by the same debounced effect from the Dexie blocked_periods
+  // mirror — date-scoped (fires with or without a time). Display only; never
+  // gates the submit. null = no block-out on the selected date.
+  const [blockedWarning, setBlockedWarning] = useState<BlockedDayHit[] | null>(
+    null
+  );
+
   const customerInputRef = useRef<HTMLInputElement>(null);
   const customerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOpenRef = useRef(false);
@@ -567,6 +577,7 @@ export function BookingModal({
     setOtherPest("");
     setClientErrors({});
     setClashWarning(null);
+    setBlockedWarning(null);
     setNewSiteLine1("");
     setNewSiteLine2("");
     setNewSiteTown("");
@@ -653,6 +664,14 @@ export function BookingModal({
     if (!open || isSheet) return;
     let cancelled = false;
     const timer = setTimeout(() => {
+      // Block-out advisory (Slice 2) is date-scoped, not time-scoped — a day
+      // off applies whether or not an arrival window is set, so it runs
+      // regardless of jobTime and before the clash guard's early return.
+      void findBlockedPeriodsForDateLocal(jobDate).then((hits) => {
+        if (cancelled) return;
+        setBlockedWarning(hits.length > 0 ? hits : null);
+      });
+
       if (!jobTime) {
         setClashWarning(null);
         return;
@@ -918,6 +937,34 @@ export function BookingModal({
               the operator save anyway (the submit button becomes "Save
               anyway"). Mirrors the amber warn-and-proceed delete pattern.
               Suppressed for a service sheet (no scheduling to clash with). */}
+          {/* Block-out day advisory (Slice 2). Non-blocking, date-scoped:
+              Nate marked himself off this day (Slice 1). Same amber warn-and-
+              proceed styling as the clash banner below; when BOTH hit they
+              stack cleanly (block-out first — a whole-day concern — then the
+              time clash). Suppressed for a service sheet (documents a past
+              visit). Reads the Dexie blocked_periods mirror, so it works
+              offline exactly like the clash advisory. */}
+          {!isSheet && blockedWarning && blockedWarning.length > 0 && (
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <p className="font-medium">
+                You’ve marked yourself off that day
+                {blockedWarning.length === 1
+                  ? `: ${blockedWarning[0].reason}`
+                  : ":"}
+              </p>
+              {blockedWarning.length > 1 && (
+                <ul className="list-disc space-y-0.5 pl-5">
+                  {blockedWarning.map((b) => (
+                    <li key={b.id}>{b.reason}</li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-xs text-amber-700">
+                You can still book it — tap “Save anyway” to go ahead.
+              </p>
+            </div>
+          )}
+
           {!isSheet && clashWarning && clashWarning.length > 0 && (
             <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               <p className="font-medium">
@@ -1472,7 +1519,7 @@ export function BookingModal({
                 ? "Saving…"
                 : isSheet
                   ? "Start sheet"
-                  : clashWarning
+                  : clashWarning || blockedWarning
                     ? "Save anyway"
                     : "Add Booking"}
             </button>

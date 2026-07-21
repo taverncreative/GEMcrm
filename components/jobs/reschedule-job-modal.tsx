@@ -7,7 +7,9 @@ import { db } from "@/lib/db";
 import {
   findClashingJobLocal,
   findOverlappingBookingsLocal,
+  findBlockedPeriodsForDateLocal,
   type BookingClash,
+  type BlockedDayHit,
 } from "@/lib/db/lookups";
 import { TimeWindowPicker, type TimeWindow } from "@/components/ui/time-window-picker";
 import { todayUk } from "@/lib/utils/today-uk";
@@ -91,6 +93,12 @@ export function RescheduleJobModal({
     end: toHhMm(job.job_time_end),
   });
   const [clashWarning, setClashWarning] = useState<BookingClash[] | null>(null);
+  // Non-blocking block-out advisory (Slice 2) — reschedule moves a job to a
+  // date that may fall on a day Nate marked himself off. Date-scoped, reads
+  // the Dexie mirror, offline-safe. Display only.
+  const [blockedWarning, setBlockedWarning] = useState<BlockedDayHit[] | null>(
+    null
+  );
   const [clientError, setClientError] = useState<string | null>(null);
 
   const [state, action, isPending] = useLocalFirstAction(
@@ -114,6 +122,13 @@ export function RescheduleJobModal({
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
+      // Block-out advisory is date-scoped — runs regardless of the time
+      // window, before the clash guard's untimed early return.
+      void findBlockedPeriodsForDateLocal(jobDate).then((hits) => {
+        if (cancelled) return;
+        setBlockedWarning(hits.length > 0 ? hits : null);
+      });
+
       if (!window.start) {
         setClashWarning(null);
         return;
@@ -221,6 +236,29 @@ export function RescheduleJobModal({
               />
             </div>
           </div>
+
+          {/* Block-out advisory (Slice 2) — same amber styling as the clash
+              banner; stacks above it when both hit. Non-blocking. */}
+          {blockedWarning && blockedWarning.length > 0 && (
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <p className="font-medium">
+                You’ve marked yourself off that day
+                {blockedWarning.length === 1
+                  ? `: ${blockedWarning[0].reason}`
+                  : ":"}
+              </p>
+              {blockedWarning.length > 1 && (
+                <ul className="list-disc space-y-0.5 pl-5">
+                  {blockedWarning.map((b) => (
+                    <li key={b.id}>{b.reason}</li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-xs text-amber-700">
+                You can still save — this is just a heads up.
+              </p>
+            </div>
+          )}
 
           {clashWarning && clashWarning.length > 0 && (
             <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">

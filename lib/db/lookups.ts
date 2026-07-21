@@ -194,3 +194,39 @@ export async function findOverlappingBookingsLocal(
   }
   return out;
 }
+
+/** A block-out period (Slice 1) covering the candidate's date — the input to
+ *  the non-blocking "you've marked yourself off" advisory (Slice 2). `reason`
+ *  is the block's free-text title. */
+export interface BlockedDayHit {
+  id: string;
+  reason: string;
+}
+
+/**
+ * Block-out periods that cover a given `job_date` — the offline-first input
+ * to the non-blocking booking advisory (Slice 2).
+ *
+ * Reads the Dexie `blocked_periods` mirror (populated by the sync pull, Slice
+ * 1), so it works online AND offline exactly like findOverlappingBookingsLocal
+ * — no server round-trip. Inclusive range: start_date <= job_date <= end_date
+ * covers a single-day block (start == end) and a multi-day range alike.
+ * Soft-deleted rows are excluded (mirrors the SELECT RLS). Blank date → [] (no
+ * advisory).
+ *
+ * Returns EVERY covering block: Slice 1 permits overlapping block-outs, so the
+ * banner can list each reason. The mirror is a single operator's handful of
+ * rows, so the full scan + filter is trivial (same rationale as the customer/
+ * site local pickers above).
+ */
+export async function findBlockedPeriodsForDateLocal(
+  jobDate: string
+): Promise<BlockedDayHit[]> {
+  if (!jobDate) return [];
+  const all = await db.blocked_periods.toArray();
+  return all
+    .filter(
+      (b) => !b.deleted_at && b.start_date <= jobDate && jobDate <= b.end_date
+    )
+    .map((b) => ({ id: b.id, reason: b.title }));
+}
