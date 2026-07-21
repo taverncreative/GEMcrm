@@ -38,11 +38,10 @@ export const BUSINESS = {
 /**
  * Contact + legal line shown in the green PDF document footer.
  *
- * The footer is rendered as a pre-baked IMAGE (scripts/generate-footer-band.ts)
- * so the band pins to the bottom of every page via Puppeteer's footerTemplate
- * with exact Montserrat + #9AC44B. THIS is the single source of truth — after
- * editing here, regenerate the asset:  npx tsx scripts/generate-footer-band.ts
- * (the diamond ◆ separates the contact items on line 1).
+ * THIS is the single source of truth. renderDocumentFooter() (lib/pdf/templates/
+ * partials.ts) renders these values directly as the per-page footer band (text +
+ * CSS, #9AC44B), so editing here updates every document with no build step. The
+ * diamond ◆ separates the contact items on line 1.
  */
 export const FOOTER_CONTACT = {
   phone: "07400 372 204",

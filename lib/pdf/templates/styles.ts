@@ -297,10 +297,10 @@ export const PDF_STYLES = `
   .doc-meta-row:last-child { margin-bottom: 0; }
 
   /* The branded green contact band is NOT in this document's flow — it's a
-     per-page running footer drawn by Puppeteer's footerTemplate as a baked
-     image (htmlToPdf), so it pins to the bottom of every page including a
-     partial last page. Its height is reserved as the bottom page margin, so
-     flowing content never overlaps it. */
+     per-page running footer (text + CSS) drawn by Puppeteer's footerTemplate
+     (htmlToPdf / renderDocumentFooter), so it pins to the bottom of every page
+     including a partial last page. Its height is reserved as the bottom page
+     margin, so flowing content never overlaps it. */
 
   @media print {
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

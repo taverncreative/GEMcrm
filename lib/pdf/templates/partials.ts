@@ -1,5 +1,5 @@
 import { LOGO_DATA_URI } from "@/lib/pdf/assets";
-import { FOOTER_BAND_DATA_URI } from "@/lib/pdf/footer-band";
+import { FOOTER_CONTACT } from "@/lib/constants/branding";
 
 /**
  * Shared, branded document partials (Track: document rebrand, Pass 1+2).
@@ -11,14 +11,13 @@ import { FOOTER_BAND_DATA_URI } from "@/lib/pdf/footer-band";
  *   - renderDocHeader — the reconstructed lockup (gem-mark logo +
  *     Montserrat-800 "GEM SERVICES" wordmark + tagline), a per-document
  *     type label, a right-aligned meta block, and the brand-rule underline.
+ *   - renderDocumentFooter — the green contact + legal band, rendered as
+ *     Puppeteer's footerTemplate so it pins to the bottom of every page (see
+ *     the function's own note for why it is text + CSS, not an image).
  *
- * The branded green contact footer is no longer a markup partial — it's a
- * baked image drawn by Puppeteer's footerTemplate (see htmlToPdf and
- * scripts/generate-footer-band.ts) so it pins to the bottom of every page.
- *
- * Styling lives in PDF_STYLES (lib/pdf/templates/styles.ts) under the
- * `.doc-header*` classes. The service report uses the header partial now;
- * the invoice + agreement move onto it in the next pass.
+ * Header styling lives in PDF_STYLES (lib/pdf/templates/styles.ts) under the
+ * `.doc-header*` classes; the footer is fully self-styled (it renders in a
+ * separate context that does not see PDF_STYLES).
  */
 
 function escape(val: string | null | undefined): string {
@@ -67,31 +66,40 @@ export function renderDocHeader(opts: {
 /**
  * The shared branded document FOOTER — the green contact + legal band shown on
  * EVERY page of EVERY generated PDF (quote, service sheet, agreement signed +
- * review, invoice). This is the single source of the footer markup: htmlToPdf
- * passes it as Puppeteer's `footerTemplate`, the only mechanism that pins a
- * footer to the bottom of every page including a partial last page in this
- * Chromium (a body `position:fixed` footer paints nothing; a table-footer-group
- * floats up on a short final page).
+ * review, invoice). Single source of the footer markup; htmlToPdf passes it as
+ * Puppeteer's `footerTemplate` (displayHeaderFooter), the print mechanism that
+ * repeats a footer on every page including a partial last page.
  *
- * The band is a pre-baked IMAGE (lib/pdf/footer-band.ts) rather than markup text
- * because the footerTemplate renders in a separate context where `@font-face`
- * does not load — the image bakes in the exact Montserrat + #9AC44B. Its TEXT
- * (phone / email / web + "trading name … Company number") is sourced from
- * FOOTER_CONTACT in lib/constants/branding.ts; after editing that, regenerate
- * the asset with `npx tsx scripts/generate-footer-band.ts`.
+ * WHY text + CSS, not the old baked IMAGE: header/footer templates render in a
+ * separate print context, and in HEADLESS Chromium that context does not paint
+ * IMAGES (data-URI or remote) — so the image band showed on local (full
+ * puppeteer) but was MISSING on prod (@sparticuz/chromium on Vercel). Text and
+ * inline CSS (incl. background-color) DO render there on both, so the band is
+ * now live text. Bonus: it reads straight from FOOTER_CONTACT (no baked asset to
+ * regenerate). Tradeoff: that context also can't load @font-face, so the footer
+ * uses a system sans-serif rather than Montserrat — an acceptable, reliable
+ * swap for a contact strip.
  *
- * translateY drops the band past Chromium's fixed ~5.3mm footer gap so it bleeds
- * flush to the bottom edge; width:100% bleeds L/R; line-height:0 kills the
- * inline-image gap.
+ * Full-bleed: the footer region spans the FULL page width (it is not inset by
+ * the content margins), so width:100% reaches both edges. The green background
+ * fills it; margin.bottom on page.pdf reserves its height so content never
+ * overlaps. print-color-adjust:exact forces the green to print.
  */
-const FOOTER_BAND_SHIFT_PX = 24;
-
 export function renderDocumentFooter(): string {
+  const diamond = "&nbsp;&#9670;&nbsp;";
+  const contactLine = [
+    escape(FOOTER_CONTACT.phone),
+    escape(FOOTER_CONTACT.email),
+    escape(FOOTER_CONTACT.website),
+  ].join(diamond);
   return (
-    `<div style="margin:0;padding:0;width:100%;line-height:0;` +
-    `transform:translateY(${FOOTER_BAND_SHIFT_PX}px);">` +
-    `<img src="${FOOTER_BAND_DATA_URI}" ` +
-    `style="display:block;width:100%;height:auto;margin:0;padding:0;border:0;" />` +
-    `</div>`
+    `<div style="width:100%;margin:0;padding:0;` +
+    `font-family:Arial,Helvetica,sans-serif;` +
+    `-webkit-print-color-adjust:exact;print-color-adjust:exact;">` +
+    `<div style="width:100%;box-sizing:border-box;background:#9AC44B;color:#ffffff;` +
+    `padding:7px 22px 8px;text-align:center;line-height:1.35;">` +
+    `<div style="font-size:8px;font-weight:700;letter-spacing:0.4px;">${contactLine}</div>` +
+    `<div style="font-size:6px;margin-top:1px;opacity:0.92;">${escape(FOOTER_CONTACT.legal)}</div>` +
+    `</div></div>`
   );
 }

@@ -5,8 +5,8 @@
  *     sequence trigger (the insert payload carries no quote_number key);
  *   - a standalone prospect (blank customer_id) creates a quote with a NULL
  *     customer_id and the denormalised name;
- *   - the PDF is NOT generated in create (that is lazy, on first download) — the
- *     action just inserts and redirects, so create stays fast;
+ *   - the PDF is NOT rendered inline in create — it is deferred to after() so
+ *     create stays fast; the scheduled job renders/caches the new quote's PDF;
  *   - VAT on vs off both flow through correctly.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -21,6 +21,10 @@ const renderPdfMock = vi.fn(async (_id: string) => ({
   buffer: Buffer.from("PDF"),
 }));
 const redirectMock = vi.fn((_url: string) => undefined);
+// after() schedules the PDF pre-warm post-response; capture the callback so we
+// can assert it was scheduled (and, when we choose, run it) — but it never runs
+// inline, which is what keeps create fast.
+const afterMock = vi.fn((_cb: () => unknown) => undefined);
 
 vi.mock("@/lib/auth/require-user", () => ({
   requireUser: vi.fn(async () => ({ id: "op-1" })),
@@ -33,6 +37,9 @@ vi.mock("@/lib/services/quote-pdf", () => ({
 }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => redirectMock(url),
+}));
+vi.mock("next/server", () => ({
+  after: (cb: () => unknown) => afterMock(cb),
 }));
 
 import { createQuoteAction } from "@/app/(app)/quotes/actions";
@@ -54,6 +61,7 @@ beforeEach(() => {
   createQuoteMock.mockClear();
   renderPdfMock.mockClear();
   redirectMock.mockClear();
+  afterMock.mockClear();
 });
 
 describe("createQuoteAction — existing customer, VAT off", () => {
@@ -93,8 +101,14 @@ describe("createQuoteAction — existing customer, VAT off", () => {
     expect(arg.customer_name).toBe("Acme Ltd");
     expect(arg.created_by).toBe("op-1");
 
-    // Create must NOT render a PDF (that is lazy on first download).
+    // Create must NOT render the PDF inline — it is deferred to after() so the
+    // response is fast. The pre-warm is scheduled, and running it renders/caches
+    // the just-created quote's PDF.
     expect(renderPdfMock).not.toHaveBeenCalled();
+    expect(afterMock).toHaveBeenCalledTimes(1);
+    await afterMock.mock.calls[0][0]();
+    expect(renderPdfMock).toHaveBeenCalledWith("quote-123");
+
     expect(redirectMock).toHaveBeenCalledWith("/quotes/quote-123");
   });
 });

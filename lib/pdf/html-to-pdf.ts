@@ -15,35 +15,21 @@
  * a `Buffer` in both environments.
  */
 
-import { FOOTER_BAND_ASPECT } from "@/lib/pdf/footer-band";
 import { renderDocumentFooter } from "@/lib/pdf/templates/partials";
 import { inlineStorageImages } from "@/lib/pdf/inline-storage-images";
 
 const IS_SERVERLESS = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 
-/** A4 page width in mm — the footer band is drawn at full page width. */
-const A4_WIDTH_MM = 210;
+/** Content insets applied by page.pdf on every page. */
+const TOP_MARGIN_MM = 20;
+const SIDE_MARGIN_MM = 22;
 /**
- * Display height of the full-width footer band, in mm. The band image spans
- * the whole page width, so its rendered height is width × aspect. This value
- * is ALSO the bottom page margin: setting the two equal makes the band fill
- * the bottom margin exactly, so it bleeds to the bottom + L + R edges with no
- * inset and flowing content stops right above it (never overlaps).
+ * Bottom page margin reserved for the branded footer band. The footer is a
+ * per-page running footer (displayHeaderFooter + footerTemplate), so this
+ * reserves vertical space for it and flowing content stops right above it,
+ * never overlapping. Sized to fit the band's two text lines + padding.
  */
-const FOOTER_BAND_MM = A4_WIDTH_MM * FOOTER_BAND_ASPECT;
-
-/**
- * Chromium anchors footerTemplate at a FIXED spot with a hard ~5.3mm (20px @
- * 96dpi) gap below it — `margin.bottom` reserves content space but does NOT
- * move the footer. We push the band down past that gap so it overshoots the
- * page edge and is clipped flush (no white sliver). 24px > the ~20px gap, so
- * the bottom always clips while only the band's solid-green bottom padding is
- * trimmed (text untouched); it also keeps the band top below where content
- * stops, so the two never overlap. Measured (rasterise + PIL): band bottom
- * flush, no overlap, on full AND partial pages.
- */
-// The per-page branded footer is the shared renderDocumentFooter() partial
-// (lib/pdf/templates/partials.ts) — the single source across every PDF.
+const FOOTER_BAND_MM = 14;
 
 async function launchBrowser() {
   if (IS_SERVERLESS) {
@@ -96,19 +82,20 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
-      // The branded contact band is a per-page running footer (footerTemplate),
-      // so it pins to the bottom of every page incl. a partial last page. An
-      // empty header keeps the top clean. The band image fills the full page
-      // width and its height equals margin.bottom, so it bleeds to the bottom +
-      // L + R edges. Content keeps its normal 20mm top / 22mm L+R insets.
+      // Branded band as a per-page running footer (footerTemplate), so it pins
+      // to the bottom of every page incl. a partial last page. It is text + CSS
+      // (not an image) because headless Chromium does not paint images in the
+      // footer context — that was the prod "missing footer" bug. The footer
+      // region spans the full page width, so the band bleeds L/R; margin.bottom
+      // reserves its height so content never overlaps. Empty header, clean top.
       displayHeaderFooter: true,
       headerTemplate: "<span></span>",
       footerTemplate: renderDocumentFooter(),
       margin: {
-        top: "20mm",
-        right: "22mm",
+        top: `${TOP_MARGIN_MM}mm`,
+        right: `${SIDE_MARGIN_MM}mm`,
         bottom: `${FOOTER_BAND_MM}mm`,
-        left: "22mm",
+        left: `${SIDE_MARGIN_MM}mm`,
       },
     });
     return Buffer.from(pdf);

@@ -1,10 +1,12 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { QuoteInputSchema } from "@/lib/validation/quote";
 import { computeQuoteTotals } from "@/lib/quotes/money";
 import { createQuote } from "@/lib/data/quotes";
+import { renderAndStoreQuotePdf } from "@/lib/services/quote-pdf";
 import { ROUTES } from "@/lib/constants/routes";
 import type { ActionState } from "@/types/actions";
 
@@ -17,10 +19,11 @@ function emptyToNull(value: string | undefined | null): string | null {
  * Create a quote (Slice 1). Online-only, mirrors the agreement-create posture:
  * requireUser -> Zod validate -> direct insert (no Dexie/outbox). The DB
  * trigger assigns the Q-YYYY-NNN number; totals are RE-COMPUTED server-side
- * from the line items (client math is never trusted). The PDF is NOT generated
- * here — that would block the response on a slow Puppeteer render; it is built
- * lazily on first download via /api/pdf/quote/[id], so create returns as soon
- * as the row is saved (quote_pdf_url stays null until then). On success it
+ * from the line items (client math is never trusted). The PDF is NOT rendered
+ * inline — that would block the response on a slow Puppeteer render; instead
+ * after() pre-warms it in the background once the response is sent, and the
+ * on-demand /api/pdf/quote/[id] route regenerates on first hit if the pre-warm
+ * hasn't landed. So create returns as soon as the row is saved. On success it
  * redirects to the new quote's detail page (a forward navigation, so the
  * /quotes list and Documents refetch fresh — no revalidatePath, no stampede).
  */
@@ -96,8 +99,20 @@ export async function createQuoteAction(
       created_by: user.id,
     });
     quoteId = quote.id;
-    // No PDF render here — it is generated lazily on first download
-    // (/api/pdf/quote/[id]) so create stays fast.
+    // Create stays fast: the PDF is NOT rendered inline. after() runs the
+    // render AFTER the response is sent, so the row saves and redirects
+    // immediately while the PDF pre-warms in the background — by the time the
+    // user clicks Download it is usually already cached. Best-effort: a failure
+    // just leaves quote_pdf_url null, and the on-demand /api/pdf/quote/[id]
+    // route regenerates on first hit, so the download can never be lost.
+    const idForWarm = quoteId;
+    after(async () => {
+      try {
+        await renderAndStoreQuotePdf(idForWarm);
+      } catch (err) {
+        console.error("[createQuoteAction] PDF pre-warm:", err);
+      }
+    });
   } catch (err) {
     return {
       success: false,
