@@ -86,12 +86,15 @@ export function renderDocHeader(opts: {
  * overlaps. print-color-adjust:exact forces the green to print.
  */
 export function renderDocumentFooter(): string {
-  const diamond = "&nbsp;&#9670;&nbsp;";
+  // Bullet (&#8226;), not a diamond (&#9670;): the diamond glyph is absent from
+  // the serverless Linux fallback font, so it rendered as a blank gap on prod;
+  // the bullet is near-universal across fonts.
+  const separator = "&nbsp;&#8226;&nbsp;";
   const contactLine = [
     escape(FOOTER_CONTACT.phone),
     escape(FOOTER_CONTACT.email),
     escape(FOOTER_CONTACT.website),
-  ].join(diamond);
+  ].join(separator);
   return (
     `<div style="width:100%;margin:0;padding:0;` +
     `font-family:Arial,Helvetica,sans-serif;` +

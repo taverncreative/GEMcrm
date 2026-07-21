@@ -32,6 +32,13 @@ describe("renderDocumentFooter", () => {
     expect(html).toContain(FOOTER_CONTACT.website);
     expect(html).toContain(FOOTER_CONTACT.legal);
   });
+
+  it("separates the contact items with a bullet, not a diamond", () => {
+    // The diamond glyph (&#9670;) is missing from the serverless Linux fallback
+    // font and rendered as a blank gap on prod; the bullet (&#8226;) is present.
+    expect(html).toContain("&#8226;");
+    expect(html).not.toContain("&#9670;");
+  });
 });
 
 describe("footer content matches the branding constants", () => {

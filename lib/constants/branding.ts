@@ -40,8 +40,8 @@ export const BUSINESS = {
  *
  * THIS is the single source of truth. renderDocumentFooter() (lib/pdf/templates/
  * partials.ts) renders these values directly as the per-page footer band (text +
- * CSS, #9AC44B), so editing here updates every document with no build step. The
- * diamond ◆ separates the contact items on line 1.
+ * CSS, #9AC44B), so editing here updates every document with no build step. A
+ * bullet separates the contact items on line 1.
  */
 export const FOOTER_CONTACT = {
   phone: "07400 372 204",

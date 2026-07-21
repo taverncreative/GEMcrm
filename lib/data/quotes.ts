@@ -62,6 +62,25 @@ export async function createQuote(input: CreateQuoteInput): Promise<Quote> {
   return data as Quote;
 }
 
+/**
+ * Soft-delete a quote.
+ *
+ * Goes through the soft_delete_quote SECURITY DEFINER RPC (migration 045), the
+ * same pattern as soft_delete_agreement (043) / soft_delete_job (038): the RLS
+ * SELECT policy is `deleted_at IS NULL`, so a plain self-hiding update is
+ * rejected with 42501 — the RPC is the narrowest bypass. Its `deleted_at is
+ * null` predicate makes a replayed delete a no-op.
+ */
+export async function softDeleteQuote(id: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("soft_delete_quote", { p_id: id });
+
+  if (error) {
+    console.error("[softDeleteQuote]", error.code, error.message);
+    throw new Error(`Failed to delete quote: ${error.message}`);
+  }
+}
+
 /** Store the generated PDF URL on a quote. */
 export async function setQuotePdfUrl(
   quoteId: string,

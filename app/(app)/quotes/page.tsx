@@ -3,6 +3,7 @@ import { getAllQuotes } from "@/lib/data/quotes";
 import { formatQuoteCurrency } from "@/lib/quotes/money";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { ROUTES } from "@/lib/constants/routes";
+import { DeleteQuoteButton } from "@/components/quotes/delete-quote-button";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,9 @@ export default async function QuotesPage() {
                 <th className="px-4 py-3 text-right">Total</th>
                 <th className="px-4 py-3">Valid until</th>
                 <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3 text-right">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -75,6 +79,12 @@ export default async function QuotesPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-600">{formatDate(q.valid_until)}</td>
                     <td className="px-4 py-3 text-gray-600">{formatDate(q.created_at)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <DeleteQuoteButton
+                        quoteId={q.id}
+                        label={q.quote_number ?? q.id.slice(0, 8)}
+                      />
+                    </td>
                   </tr>
                 );
               })}

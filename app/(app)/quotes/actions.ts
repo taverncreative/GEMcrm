@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { QuoteInputSchema } from "@/lib/validation/quote";
 import { computeQuoteTotals } from "@/lib/quotes/money";
-import { createQuote } from "@/lib/data/quotes";
+import { createQuote, softDeleteQuote } from "@/lib/data/quotes";
 import { renderAndStoreQuotePdf } from "@/lib/services/quote-pdf";
 import { ROUTES } from "@/lib/constants/routes";
 import type { ActionState } from "@/types/actions";
@@ -123,4 +123,28 @@ export async function createQuoteAction(
 
   // Forward navigation refetches the list + Documents fresh (no revalidatePath).
   redirect(ROUTES.quoteDetail(quoteId));
+}
+
+/**
+ * Delete a quote (soft-delete via the soft_delete_quote RPC). Online-only and
+ * requireUser-gated, mirroring the agreement discard action. No revalidatePath:
+ * the caller does a scoped router.refresh() on success, so the list refetches
+ * without purging the whole client router cache (avoids the prefetch stampede).
+ */
+export async function deleteQuoteAction(
+  quoteId: string
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!quoteId) return { success: false, message: "Missing quote ID" };
+
+  try {
+    await softDeleteQuote(quoteId);
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to delete quote",
+    };
+  }
+
+  return { success: true };
 }
