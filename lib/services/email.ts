@@ -358,6 +358,61 @@ export async function sendAgreementReview(
   });
 }
 
+// ── Library Document Email ─────────────────────────────────
+
+/**
+ * Email a static site-folder library document as an attachment. Reuses the
+ * generic primitives — `downloadReportPdf` (which downloads ANY object in the
+ * reports bucket, not just report PDFs) and `sendEmail`'s multi-recipient +
+ * attachment support — rather than the report-specific senders above.
+ *
+ * Attachment-only by design: a library email exists to deliver the file, so
+ * if the download fails there is no useful link-only fallback and we return
+ * an error (unlike the report senders, which degrade to link-only). The
+ * `filename` extension drives the MIME type Resend infers, so pass the
+ * document's real name (e.g. "Method Statement.docx").
+ */
+export async function sendLibraryDocument(
+  recipients: string[],
+  storagePath: string,
+  fileName: string,
+  label: string
+): Promise<SendEmailResult> {
+  if (recipients.length === 0) {
+    return { success: false, error: "Add at least one recipient" };
+  }
+  const file = await downloadReportPdf(storagePath);
+  if (!file) {
+    return { success: false, error: "Could not load the document to attach" };
+  }
+  return sendEmail({
+    to: recipients,
+    subject: `${BUSINESS.name} – ${label}`,
+    html: libraryDocumentHtml(label),
+    attachments: [{ filename: fileName, content: file }],
+  });
+}
+
+function libraryDocumentHtml(label: string): string {
+  const safeLabel = escapeHtml(label);
+  return emailWrapper(`
+    <p style="font-size:15px;color:#1f2937;margin:0 0 16px;">Hello,</p>
+    <p style="font-size:14px;color:#374151;line-height:1.6;margin:0 0 16px;">
+      Please find the following document attached to this email:
+    </p>
+    <p style="font-size:15px;color:#1f2937;font-weight:600;margin:0 0 24px;">
+      ${safeLabel}
+    </p>
+    <p style="font-size:14px;color:#374151;line-height:1.6;margin:0 0 0;">
+      If you have any questions, please get in touch.
+    </p>
+    <p style="font-size:14px;color:#6b7280;margin:16px 0 0;">
+      Kind regards,<br />
+      <strong style="color:#1f2937;">${escapeHtml(BUSINESS.name)}</strong>
+    </p>
+  `);
+}
+
 // ── HTML Templates ─────────────────────────────────────────
 
 function emailWrapper(content: string): string {

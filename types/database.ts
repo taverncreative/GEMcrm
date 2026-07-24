@@ -379,3 +379,50 @@ export interface Report {
   report_type: string;
   pdf_url: string | null;
 }
+
+/**
+ * A static document in the site-folder print library (migration 048). The
+ * file itself lives in the private `reports` bucket at `file_path`
+ * (library/<id>/<file_name>); this row is the browsable record. Online-only,
+ * NOT syncable. `deleted_at` is a plain soft-delete filtered in the query
+ * layer (no self-hiding SELECT policy, so no RPC needed).
+ */
+export interface LibraryDocument {
+  id: string;
+  label: string;
+  category: string | null;
+  file_path: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+/** One line of a confirmed print order — a snapshot mirroring Spotlight's
+ *  item shape exactly (reference = the source document id, stable across
+ *  renames; name = its label at confirm time; quantity). */
+export interface PrintOrderItem {
+  reference: string;
+  name: string;
+  quantity: number;
+}
+
+/**
+ * A confirmed print basket (migration 048). `id` is the client-generated
+ * order id that doubles as Spotlight's idempotency key. `delivered` /
+ * `delivery_reason` record the outcome of the fire-and-forget POST, updated
+ * after the response is sent.
+ */
+export interface PrintOrder {
+  id: string;
+  submitter: string | null;
+  note: string | null;
+  item_count: number;
+  items: PrintOrderItem[];
+  delivered: boolean;
+  delivery_reason: string | null;
+  created_at: string;
+}

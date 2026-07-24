@@ -9,6 +9,7 @@ import { SessionExpiredBanner } from "@/components/sync/session-expired-banner";
 import { StuckSyncAlert } from "@/components/sync/stuck-sync-alert";
 import { SyncBoot } from "@/components/sync/sync-boot";
 import { DocReadyProvider } from "@/components/documents/doc-ready-provider";
+import { BasketProvider } from "@/components/library/basket-context";
 
 const SIDEBAR_KEY = "gemcrm-sidebar-collapsed";
 
@@ -43,7 +44,10 @@ export function AppShell({
   return (
     // DocReadyProvider (Pass 2): mounts the document-completeness prompt once
     // here so any document action under the shell can `await` readiness.
+    // BasketProvider: the print-basket lives above the router outlet so it
+    // survives navigation between the library and any other page.
     <DocReadyProvider>
+    <BasketProvider>
     <div className="flex h-full">
       {/* SyncBoot is invisible when idle — only paints the initial
           sync overlay when a full pull is in progress. Mounted here
@@ -88,6 +92,7 @@ export function AppShell({
       {/* Mobile bottom tab bar — self-hides at md:. */}
       <BottomNav />
     </div>
+    </BasketProvider>
     </DocReadyProvider>
   );
 }

@@ -11,6 +11,7 @@ export const ROUTES = {
   QUOTES_NEW: "/quotes/new",
   CALENDAR: "/calendar",
   REPORTS: "/reports",
+  LIBRARY: "/library",
   SETTINGS: "/settings",
   AUTH_CALLBACK: "/auth/callback",
 

@@ -41,6 +41,9 @@ const NAV_SECTIONS = [
       // Documentation rolls up the stored PDFs (invoices, service sheets,
       // signed agreements). Agreement management lives under Operations.
       { label: "Documentation", href: ROUTES.REPORTS, icon: "reports" },
+      // Site folders: the print library of static documents John uploads,
+      // distinct from Documentation's generated PDFs.
+      { label: "Site folders", href: ROUTES.LIBRARY, icon: "library" },
       { label: "Settings", href: ROUTES.SETTINGS, icon: "settings" },
     ],
   },
@@ -89,6 +92,12 @@ function NavIcon({ icon }: { icon: string }) {
       return (
         <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m-6 0V6a2.25 2.25 0 0 1 2.25-2.25h1.5A2.25 2.25 0 0 1 15 6v2.25m-6 0h6m-6 4.5h6m-6 3h3.75" />
+        </svg>
+      );
+    case "library":
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" />
         </svg>
       );
     case "settings":
