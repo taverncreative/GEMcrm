@@ -6,6 +6,7 @@ import { CustomerSchema } from "@/lib/validation/customer";
 import {
   createCustomer,
   updateCustomer,
+  propagateAddressToLoneBareSite,
   setGoogleReviewReceived,
   updateCustomerType,
   updateCustomerEmail,
@@ -20,7 +21,7 @@ import { ROUTES } from "@/lib/constants/routes";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
 import type { CustomerDetail, DeleteImpact } from "@/lib/data/customers";
-import type { Customer, CustomerType } from "@/types/database";
+import type { Customer, CustomerType, Site } from "@/types/database";
 
 export async function createCustomerAction(
   _prev: ActionState,
@@ -170,7 +171,7 @@ export async function createCustomerAction(
 export async function updateCustomerAction(
   customerId: string,
   formData: FormData
-): Promise<ActionState & { customer?: Customer }> {
+): Promise<ActionState & { customer?: Customer; site?: Site }> {
   await requireUser();
   if (!customerId) {
     return { success: false, errors: {}, message: "Missing customer id" };
@@ -221,10 +222,26 @@ export async function updateCustomerAction(
     };
   }
 
+  // "One address by default": if the customer now has an address and their
+  // ONLY site is bare, copy it onto that site so the service-sheet gate (and
+  // the server completion guard) — both of which read the SITE row — are
+  // satisfied without asking for the same address a second time. Best-effort:
+  // the customer is already saved, so a propagation failure never fails the
+  // save; the operator can still use the gate's "Add site address" button.
+  let site: Site | undefined;
+  try {
+    site = (await propagateAddressToLoneBareSite(customerId, customer)) ?? undefined;
+  } catch (err) {
+    console.error(
+      "[updateCustomerAction] address propagation to lone bare site failed:",
+      err
+    );
+  }
+
   revalidatePath(ROUTES.CUSTOMERS);
   revalidatePath(ROUTES.customerDetail(customerId));
   revalidatePath(ROUTES.DASHBOARD);
-  return { success: true, errors: {}, message: null, customer };
+  return { success: true, errors: {}, message: null, customer, ...(site ? { site } : {}) };
 }
 
 // ─── Side-panel data fetch ───────────────────────────────────────────────

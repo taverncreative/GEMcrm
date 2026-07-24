@@ -73,6 +73,13 @@ export function EditCustomerForm({
     if (result.success && result.customer) {
       // Refresh the local cache so the change is visible at once.
       await db.customers.put(result.customer);
+      // If the save propagated the address onto the customer's lone bare site
+      // (server-side), mirror that site into Dexie too — same mechanism that
+      // clears the email gap: the service-sheet gate reads the site from Dexie,
+      // so this makes the "add a site address" ask disappear on return.
+      if (result.site) {
+        await db.sites.put(result.site);
+      }
       router.push(dest);
       return;
     }

@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { todayUk } from "@/lib/utils/today-uk";
 import { newId } from "@/lib/utils/id";
+import { getSitesByCustomer, updateSite } from "@/lib/data/sites";
+import { siteHasUsableAddress } from "@/lib/documents/resolve-sheet-address";
 import type {
   Customer,
   CustomerType,
@@ -354,6 +356,61 @@ export async function updateCustomer(
   }
 
   return data;
+}
+
+/**
+ * "One address by default": when a customer's address is saved and they have
+ * EXACTLY ONE site which is BARE (no usable address), copy the customer's
+ * address onto that site — so entering the address once satisfies BOTH the
+ * customer record and their single site. This is the loop the service-sheet
+ * gate closes: the gate + the server completion guard both read the SITE row
+ * (siteHasUsableAddress), so a bare quick-add site was otherwise asked for a
+ * second time even after the customer address was entered.
+ *
+ * GUARDS (never clobber a real site address):
+ *   (c) the customer must NOW have a usable address (line1 + town);
+ *   (a) the customer must have EXACTLY ONE non-deleted site;
+ *   (b) that site must FAIL siteHasUsableAddress (it's bare).
+ * A customer with 2+ sites, or whose single site already carries an address,
+ * is left completely untouched — additional/different sites stay opt-in.
+ *
+ * Does NOT weaken the site-address invariant: it satisfies it legitimately by
+ * putting the operator-entered address on the site row. Returns the updated
+ * site (so the caller can mirror it into Dexie and clear the client gate on
+ * return), or null when no propagation happened.
+ *
+ * ONLINE-ONLY: rides the customer-edit save, which is itself online-only, so
+ * no outbox / site-replay path is needed.
+ */
+export async function propagateAddressToLoneBareSite(
+  customerId: string,
+  customer: Pick<
+    Customer,
+    "address_line_1" | "address_line_2" | "town" | "county" | "postcode"
+  >
+): Promise<Site | null> {
+  // (c) The customer must now have a usable address to copy.
+  if (!siteHasUsableAddress(customer)) return null;
+
+  const sites = await getSitesByCustomer(customerId); // non-deleted (RLS)
+  // (a) Only ever act on a customer with a single site.
+  if (sites.length !== 1) return null;
+
+  const site = sites[0];
+  // (b) Only ever fill a BARE site — never overwrite a real site address.
+  if (siteHasUsableAddress(site)) return null;
+
+  // Copy the customer's address onto the site (overwrites the "—" county
+  // placeholder a bare quick-add site carries). updateSite normalises blanks
+  // to null, so a null customer county lands as null (line1 + town are what
+  // the invariant needs).
+  return updateSite(site.id, {
+    address_line_1: customer.address_line_1 ?? "",
+    address_line_2: customer.address_line_2 ?? "",
+    town: customer.town ?? "",
+    county: customer.county ?? "",
+    postcode: customer.postcode ?? "",
+  });
 }
 
 /**
