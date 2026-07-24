@@ -55,7 +55,8 @@ export type EntityType =
   | "job"
   | "agreement"
   | "task"
-  | "blocked_period";
+  | "blocked_period"
+  | "product";
 
 export interface EnqueueInput {
   /** Server-action export name, e.g. "createCustomerAction". */
@@ -196,5 +197,6 @@ export async function revertLocalCreate(entry: {
     await db.agreements.delete(id);
     await db.tasks.delete(id);
     await db.blocked_periods.delete(id);
+    await db.products.delete(id);
   }
 }

@@ -72,7 +72,6 @@ async function fillWithOtherPest(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/^Findings/i), "Some findings");
   await user.type(screen.getByLabelText(/^Recommendations/i), "Some recs");
   await user.click(screen.getByRole("button", { name: "Rodenticide Used" }));
-  await user.type(screen.getByLabelText(/^Pesticides Used/i), "Product X");
   await user.type(
     screen.getByLabelText(/Risk Assessment Comments/i),
     "No special hazards"
@@ -173,7 +172,6 @@ describe("ServiceSheetForm — Other treatment method", () => {
     await user.click(screen.getByRole("button", { name: "Mice" }));
     await user.type(screen.getByLabelText(/^Findings/i), "F");
     await user.type(screen.getByLabelText(/^Recommendations/i), "R");
-    await user.type(screen.getByLabelText(/^Pesticides Used/i), "P");
     await user.type(
       screen.getByLabelText(/Risk Assessment Comments/i),
       "None"
@@ -230,7 +228,6 @@ describe("ServiceSheetForm — Other pest round-trip", () => {
     await user.type(screen.getByLabelText(/^Findings/i), "F");
     await user.type(screen.getByLabelText(/^Recommendations/i), "R");
     await user.click(screen.getByRole("button", { name: "Rodenticide Used" }));
-    await user.type(screen.getByLabelText(/^Pesticides Used/i), "P");
     await user.type(
       screen.getByLabelText(/Risk Assessment Comments/i),
       "None"

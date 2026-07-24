@@ -52,6 +52,7 @@ import type {
   Agreement,
   Task,
   BlockedPeriod,
+  Product,
 } from "@/types/database";
 import type { ServiceSheetDraft } from "@/lib/db/drafts";
 
@@ -177,6 +178,7 @@ class GemCrmDb extends Dexie {
   agreements!: EntityTable<Agreement, "id">;
   tasks!: EntityTable<Task, "id">;
   blocked_periods!: EntityTable<BlockedPeriod, "id">;
+  products!: EntityTable<Product, "id">;
   outbox!: EntityTable<OutboxEntry, "id">;
   photos_pending!: EntityTable<PendingPhoto, "id">;
   sync_meta!: EntityTable<SyncMetaEntry, "key">;
@@ -304,6 +306,19 @@ class GemCrmDb extends Dexie {
     // "hide soft-deleted" local filter.
     this.version(5).stores({
       blocked_periods: "id, start_date, end_date, deleted_at",
+    });
+
+    // ─── v6: products ─────────────────────────────────────────────
+    //
+    // Products reference table (SQL migration 047). Syncable: the sync pull
+    // mirrors server rows here so the service-sheet type-ahead works offline,
+    // and an offline "add new brand" writes here first (outbox create).
+    //
+    // Fresh store → version bump required, no upgrade callback (same as v5).
+    // Index `brand_name`/`chemical_name` for the local type-ahead filter,
+    // `deleted_at` for the "hide soft-deleted/retired" local filter.
+    this.version(6).stores({
+      products: "id, brand_name, chemical_name, deleted_at",
     });
   }
 }

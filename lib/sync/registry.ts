@@ -49,6 +49,7 @@ import {
   saveBlockedPeriodAction,
   deleteBlockedPeriodAction,
 } from "@/app/(app)/blocked-periods/actions";
+import { saveProductAction } from "@/app/(app)/products/actions";
 import type { ActionState } from "@/types/actions";
 
 /** Fresh initial state to satisfy the React `useActionState` calling
@@ -189,6 +190,15 @@ export const REGISTRY: Record<string, RegistryEntry> = {
   deleteBlockedPeriodAction: {
     kind: "direct",
     invoke: (...args) => deleteBlockedPeriodAction(args[0] as string),
+  },
+
+  // ─── product ────────────────────────────────────────────────
+  // Create a new brand (or fill a missing chemical) from the service sheet.
+  // Replayed from the id-enriched args; idempotent via saveProduct's
+  // upsert-on-id.
+  saveProductAction: {
+    kind: "form",
+    invoke: (fd) => saveProductAction(INITIAL_FORM_STATE, fd),
   },
 };
 

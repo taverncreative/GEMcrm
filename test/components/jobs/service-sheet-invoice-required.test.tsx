@@ -71,7 +71,6 @@ async function fillAllSteps(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/^Findings/i), "Droppings");
   await user.type(screen.getByLabelText(/^Recommendations/i), "Bait");
   await user.click(screen.getByRole("button", { name: "Rodenticide Used" }));
-  await user.type(screen.getByLabelText(/^Pesticides Used/i), "Bromadiolone");
   await user.type(
     screen.getByLabelText(/Risk Assessment Comments/i),
     "No special hazards"

@@ -66,10 +66,12 @@ import { isServiceSheetFilled } from "@/lib/validation/service-sheet";
 import { generateReportAction } from "@/app/(app)/jobs/[id]/report/actions";
 import { INITIAL_ACTION_STATE } from "@/types/actions";
 
+// Migration 047: products/pesticides are NO LONGER required — a survey visit
+// with zero products is a valid completed sheet. isServiceSheetFilled + the DB
+// constraint + ServiceSheetSchema all dropped that field together.
 const FILLED = {
   findings: "Evidence of rodent activity in loft",
   recommendations: "Proof external entry points",
-  pesticides_used: "None",
   risk_level: "low",
   risk_comments: "No access risks",
   pest_species: ["Rat"],
@@ -79,7 +81,6 @@ const FILLED = {
 const UNFILLED = {
   findings: null,
   recommendations: null,
-  pesticides_used: null,
   risk_level: null,
   risk_comments: null,
   pest_species: [] as string[],
@@ -114,15 +115,17 @@ describe("isServiceSheetFilled", () => {
     expect(isServiceSheetFilled({ ...FILLED, recommendations: null })).toBe(
       false
     );
-    expect(isServiceSheetFilled({ ...FILLED, pesticides_used: null })).toBe(
-      false
-    );
     expect(isServiceSheetFilled({ ...FILLED, risk_level: null })).toBe(false);
     expect(isServiceSheetFilled({ ...FILLED, risk_comments: null })).toBe(
       false
     );
     expect(isServiceSheetFilled({ ...FILLED, pest_species: [] })).toBe(false);
     expect(isServiceSheetFilled({ ...FILLED, method_used: [] })).toBe(false);
+  });
+
+  it("stays filled with NO products (a valid survey/inspection visit)", () => {
+    // FILLED carries no products at all — migration 047 makes that valid.
+    expect(isServiceSheetFilled(FILLED)).toBe(true);
   });
 });
 

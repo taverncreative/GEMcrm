@@ -38,6 +38,19 @@ function parseJsonArray(raw: string | null): string[] {
   }
 }
 
+// Structured "Products Used" rows arrive as a JSON string of objects (the form
+// serialises its React rows). Parse to a raw array and let ProductUsedSchema
+// (inside ServiceSheetSchema) validate/coerce each row's shape.
+function parseJsonObjectArray(raw: string | null): unknown[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 // Result of the save-draft step — note we return pdfUrl so the form can
 // pop the approval modal with a live preview.
 export interface SaveServiceSheetResult extends ActionState {
@@ -118,7 +131,9 @@ export async function completeServiceSheetAction(
     recommendations: str("recommendations"),
     report_notes: str("report_notes"),
     method_used: methodUsed,
-    pesticides_used: str("pesticides_used"),
+    products_used: parseJsonObjectArray(
+      formData.get("products_used") as string | null
+    ),
     risk_level: str("risk_level"),
     risk_comments: str("risk_comments"),
     photo_data_urls: photoDataUrls,

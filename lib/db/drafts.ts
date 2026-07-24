@@ -30,6 +30,7 @@
  */
 
 import { db } from "@/lib/db";
+import type { ProductUsed } from "@/types/database";
 
 export interface ServiceSheetDraft {
   /** Primary key — one draft per job. */
@@ -56,7 +57,14 @@ export interface ServiceSheetDraft {
   other_method?: string;
   findings: string;
   recommendations: string;
-  pesticides_used: string;
+  /** LEGACY free-text products field (migration 001). Kept optional so old
+   *  drafts load cleanly; the form no longer writes it — new drafts use
+   *  `products_used`. */
+  pesticides_used?: string;
+  /** Structured "Products Used" rows (migration 047). Optional so drafts
+   *  written before it load cleanly (readers use `?? []`). Not indexed → no
+   *  Dexie version bump. */
+  products_used?: ProductUsed[];
   report_notes: string;
   risk_level: string;
   risk_comments: string;

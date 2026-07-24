@@ -46,6 +46,7 @@ import {
   RISK_LEVEL_LABELS,
 } from "@/lib/constants/job-labels";
 import { ROUTES } from "@/lib/constants/routes";
+import { renderProductsForOperator } from "@/lib/products/render";
 import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import {
   resolveSheetAddress,
@@ -279,7 +280,14 @@ export function ServiceSheetViewOnly({
             <PillList items={job.method_used ?? []} />
           </div>
         </div>
-        <Field label="Pesticides used" value={job.pesticides_used} />
+        {/* Operator view → brand + qty (with legacy free-text fallback). */}
+        <Field
+          label="Products used"
+          value={
+            renderProductsForOperator(job.products_used, job.pesticides_used) ||
+            null
+          }
+        />
         <Field label="Internal notes" value={job.report_notes} />
       </Section>
 

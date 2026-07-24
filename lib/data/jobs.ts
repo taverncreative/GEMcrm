@@ -741,7 +741,11 @@ async function writeServiceSheet(
       recommendations: emptyToNull(input.recommendations),
       treatment: input.method_used.join(", "),
       method_used: input.method_used,
-      pesticides_used: emptyToNull(input.pesticides_used),
+      // Structured products (migration 047). Replaces the free-text
+      // pesticides_used, which is now legacy/read-only — we no longer write it,
+      // so old sheets keep their original free text and new sheets carry only
+      // structured rows (empty [] is valid — a survey visit).
+      products_used: input.products_used,
       risk_level: input.risk_level,
       risk_comments: emptyToNull(input.risk_comments),
       report_notes: emptyToNull(input.report_notes),

@@ -45,6 +45,7 @@ import { NeedsInvoiceToggle } from "@/components/jobs/needs-invoice-toggle";
 import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { SmartBackButton } from "@/components/smart-back-button";
+import { renderProductsForOperator } from "@/lib/products/render";
 import type { Job, Report } from "@/types/database";
 
 // ─── Section primitives (unchanged from RSC version) ────────────────
@@ -172,9 +173,15 @@ function TreatmentSection({ job }: { job: Job }) {
       ) : (
         <p className="text-sm text-gray-400">No treatment recorded.</p>
       )}
-      {job.pesticides_used && (
+      {renderProductsForOperator(job.products_used, job.pesticides_used) && (
         <dl className="mt-4">
-          <DetailField label="Pesticides Used" value={job.pesticides_used} />
+          <DetailField
+            label="Products Used"
+            value={renderProductsForOperator(
+              job.products_used,
+              job.pesticides_used
+            )}
+          />
         </dl>
       )}
     </SectionCard>
@@ -247,9 +254,15 @@ function TreatmentMethodsSection({ job }: { job: Job }) {
           </span>
         ))}
       </div>
-      {job.pesticides_used && (
+      {renderProductsForOperator(job.products_used, job.pesticides_used) && (
         <dl className="mt-4">
-          <DetailField label="Pesticides Used" value={job.pesticides_used} />
+          <DetailField
+            label="Products Used"
+            value={renderProductsForOperator(
+              job.products_used,
+              job.pesticides_used
+            )}
+          />
         </dl>
       )}
     </SectionCard>

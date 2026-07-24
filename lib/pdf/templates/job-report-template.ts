@@ -1,5 +1,6 @@
 import type { Job, Site, Customer } from "@/types/database";
 import { formatCallType, RISK_LEVEL_LABELS } from "@/lib/constants/job-labels";
+import { productsForCustomer } from "@/lib/products/render";
 import { PDF_STYLES } from "./styles";
 import { renderDocHeader } from "./partials";
 
@@ -62,6 +63,24 @@ export function renderJobReportHtml({
   const addr = [site.address_line_1, site.address_line_2, site.town, site.county, site.postcode]
     .filter(Boolean)
     .join(", ");
+
+  // CUSTOMER-FACING products (migration 047): chemical name + quantity ONLY —
+  // NEVER the brand. This goes through productsForCustomer (the enforcement
+  // point). New sheets have structured `products_used`; old sheets fall back to
+  // the legacy free-text `pesticides_used` (rendered verbatim, as it always
+  // has). Zero products (survey visit) → nothing to show.
+  const customerProducts = productsForCustomer(job.products_used);
+  const legacyProducts = (job.pesticides_used ?? "").trim();
+  const productsValueHtml =
+    customerProducts.length > 0
+      ? customerProducts
+          .map((l) =>
+            escape(l.quantity ? `${l.name} — ${l.quantity}` : l.name)
+          )
+          .join("<br>")
+      : legacyProducts
+        ? escape(legacyProducts)
+        : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -176,7 +195,7 @@ export function renderJobReportHtml({
        in the in-app job view; it just must never reach the customer doc. -->
 
   <!-- Treatment -->
-  ${job.method_used?.length > 0 || job.pesticides_used ? `
+  ${job.method_used?.length > 0 || productsValueHtml ? `
   <div class="section avoid-break">
     <div class="section-title">Treatment</div>
     <div class="section-card">
@@ -187,10 +206,10 @@ export function renderJobReportHtml({
           ${job.method_used.map((m) => `<span class="tag">${escape(m)}</span>`).join("")}
         </div>
       </div>` : ""}
-      ${job.pesticides_used ? `
+      ${productsValueHtml ? `
       <div class="field">
-        <div class="field-label">Pesticides Used</div>
-        <div class="field-value">${escape(job.pesticides_used)}</div>
+        <div class="field-label">Products Used</div>
+        <div class="field-value">${productsValueHtml}</div>
       </div>` : ""}
     </div>
   </div>` : ""}

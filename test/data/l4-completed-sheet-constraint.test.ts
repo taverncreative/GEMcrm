@@ -29,12 +29,15 @@ const nonEmptyTrim = (s: unknown) =>
   typeof s === "string" && s.trim() !== "";
 const nonEmptyRaw = (s: unknown) => typeof s === "string" && s !== "";
 
+// Migration 047 DROPPED the products/pesticides requirement — zero products
+// is a valid completed sheet (survey visits). This encoding must stay in
+// lockstep with the DB CHECK (jobs_completed_requires_filled_sheet) and
+// isServiceSheetFilled: none of the three references products/pesticides.
 function sqlCheck(r: Row): boolean {
   if (r.job_status !== "completed") return true; // vacuous for non-completed
   return (
     nonEmptyTrim(r.findings) &&
     nonEmptyTrim(r.recommendations) &&
-    nonEmptyTrim(r.pesticides_used) &&
     nonEmptyRaw(r.risk_level) &&
     nonEmptyTrim(r.risk_comments) &&
     Array.isArray(r.pest_species) &&
@@ -106,7 +109,14 @@ const validInput = ServiceSheetSchema.parse({
   findings: "Activity at bait point 3",
   recommendations: "Re-bait and proof the gap under the door",
   method_used: ["Rodenticide Used"],
-  pesticides_used: "Brodifacoum blocks",
+  products_used: [
+    {
+      product_id: null,
+      brand_name: "Brodikill",
+      chemical_name: "brodifacoum 0.0029% grain",
+      quantity: "2 blocks",
+    },
+  ],
   risk_level: "low",
   risk_comments: "No access risks identified",
   technician_signature: "sig-already-uploaded-url", // not data: -> no upload
@@ -119,7 +129,6 @@ function filledRow(status: string): Row {
     job_status: status,
     findings: "f",
     recommendations: "r",
-    pesticides_used: "p",
     risk_level: "low",
     risk_comments: "rc",
     pest_species: ["Rats"],
@@ -132,7 +141,6 @@ function emptyRow(status: string): Row {
     job_status: status,
     findings: null,
     recommendations: null,
-    pesticides_used: null,
     risk_level: null,
     risk_comments: null,
     pest_species: [],
@@ -149,7 +157,6 @@ describe("L4 CHECK predicate parity with isServiceSheetFilled", () => {
   const FIELDS: Array<keyof ReturnType<typeof filledRow>> = [
     "findings",
     "recommendations",
-    "pesticides_used",
     "risk_level",
     "risk_comments",
     "pest_species",
@@ -160,7 +167,7 @@ describe("L4 CHECK predicate parity with isServiceSheetFilled", () => {
     expect(sqlCheck(filledRow("completed"))).toBe(true);
   });
 
-  it("completed + any single field missing → rejected (all 7)", () => {
+  it("completed + any single field missing → rejected (all 6)", () => {
     for (const f of FIELDS) {
       const r = filledRow("completed");
       r[f] = f === "pest_species" || f === "method_used" ? [] : "";

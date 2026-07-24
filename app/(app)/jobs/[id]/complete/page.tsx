@@ -331,7 +331,7 @@ export default function CompleteServiceSheetPage() {
           defaultRiskLevel={job.risk_level ?? "low"}
           defaultFindings={job.findings ?? ""}
           defaultRecommendations={job.recommendations ?? ""}
-          defaultPesticides={job.pesticides_used ?? ""}
+          defaultProducts={job.products_used ?? []}
           defaultReportNotes={job.report_notes ?? ""}
           defaultRiskComments={job.risk_comments ?? ""}
           customerName={customer?.name}

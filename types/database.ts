@@ -96,7 +96,17 @@ export interface Job {
   findings: string | null;
   recommendations: string | null;
   treatment: string | null;
+  /** LEGACY free-text products/quantities (migration 001). Kept for old
+   *  completed sheets — new sheets leave this null and use `products_used`
+   *  instead. Never require it (survey visits carry no products). Rows synced
+   *  before 047 lack `products_used` entirely, so readers branch on it. */
   pesticides_used: string | null;
+  /** Structured "Products Used" rows (migration 047), snapshotted at fill
+   *  time so a completed sheet's customer-facing chemical names are frozen.
+   *  Empty [] for old sheets and for survey visits (zero products is valid).
+   *  Optional on the TYPE: rows synced into Dexie before 047 lack the column
+   *  (`undefined`) until re-pulled — readers use `?? []`. */
+  products_used?: ProductUsed[];
   risk_level: RiskLevel | null;
   risk_comments: string | null;
   technician_signature_url: string | null;
@@ -316,6 +326,49 @@ export interface BlockedPeriod {
    *  insert (DEFAULT auth.uid()); null on the offline optimistic row until
    *  the next pull fills it. */
   created_by: string | null;
+}
+
+/**
+ * A product Nate can pick on the service sheet (migration 047). Seeded from
+ * "products for CRM app.xlsx"; self-maintaining (new brands are added from the
+ * fill form). Syncable (Dexie mirror + outbox create) for the offline
+ * type-ahead.
+ *
+ * `brand_name` is OPERATOR-FACING (his picker); `chemical_name` is
+ * CUSTOMER-FACING and is the ONLY name a customer may ever see. `chemical_name`
+ * is nullable: an on-site add where Nate can't supply it yet saves the brand
+ * and the picker re-prompts next time (self-heal). A customer-facing render
+ * must NEVER fall back to `brand_name`.
+ */
+export interface Product {
+  id: string;
+  brand_name: string;
+  chemical_name: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+/**
+ * One row of the structured "Products Used" list on a job
+ * (`jobs.products_used`, migration 047). SNAPSHOT of the product at fill time
+ * (brand + chemical frozen) plus a free-text quantity, so a completed sheet
+ * never changes if the products table is later edited.
+ */
+export interface ProductUsed {
+  /** The source product's id. May be null transiently for a just-typed
+   *  product whose outbox create hasn't synced (the snapshot below still
+   *  renders correctly regardless). */
+  product_id: string | null;
+  /** Operator-facing snapshot. NEVER shown to a customer. */
+  brand_name: string;
+  /** Customer-facing snapshot. Null = chemical not supplied yet → the
+   *  customer render shows a neutral fallback, never the brand. */
+  chemical_name: string | null;
+  /** Completely free text — grams, blocks, ml, "2 sachets", anything. Never
+   *  parsed or unit-validated. */
+  quantity: string;
 }
 
 export interface Report {

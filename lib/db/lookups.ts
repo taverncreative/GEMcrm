@@ -4,7 +4,7 @@ import {
   findClashingBookings,
   type BookingTimes,
 } from "@/lib/scheduling/overlap";
-import type { Customer, Job, Site } from "@/types/database";
+import type { Customer, Job, Site, Product } from "@/types/database";
 
 /**
  * Local (Dexie) lookups for the booking / invoice customer + site
@@ -278,4 +278,51 @@ export async function findJobsInRangeLocal(
   }
   out.sort((a, b) => a.job.job_date.localeCompare(b.job.job_date));
   return out;
+}
+
+/**
+ * Products matching a type-ahead query — the offline-first input to the
+ * service-sheet "Products Used" picker. Reads the Dexie `products` mirror
+ * (populated by the sync pull), so it works online AND offline like
+ * searchCustomersLocal.
+ *
+ * Filters (case-insensitive substring) on BRAND name — the operator picker
+ * value — and also on chemical name so a product is findable either way.
+ * Excludes soft-deleted (retired) products. Empty query → the whole live list
+ * (so tapping the field shows everything). Brand-ordered. The mirror is a
+ * small reference table, so the full toArray + filter is trivial.
+ */
+export async function searchProductsLocal(
+  query: string,
+  limit: number = 20
+): Promise<Product[]> {
+  const all = await db.products.toArray();
+  const q = query.trim().toLowerCase();
+  const matched = all.filter((p) => {
+    if (p.deleted_at) return false;
+    if (!q) return true;
+    const brand = (p.brand_name ?? "").toLowerCase();
+    const chemical = (p.chemical_name ?? "").toLowerCase();
+    return brand.includes(q) || chemical.includes(q);
+  });
+  matched.sort((a, b) =>
+    (a.brand_name ?? "").localeCompare(b.brand_name ?? "")
+  );
+  return matched.slice(0, limit);
+}
+
+/**
+ * The live product whose brand exactly matches (case-insensitive) a typed
+ * value — used to decide whether a typed brand is "unlisted" (→ offer to add
+ * it) or already known. Returns undefined if none.
+ */
+export async function findProductByBrandLocal(
+  brand: string
+): Promise<Product | undefined> {
+  const b = brand.trim().toLowerCase();
+  if (!b) return undefined;
+  const all = await db.products.toArray();
+  return all.find(
+    (p) => !p.deleted_at && (p.brand_name ?? "").trim().toLowerCase() === b
+  );
 }

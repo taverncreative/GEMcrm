@@ -37,6 +37,7 @@ import type {
   Agreement,
   Task,
   BlockedPeriod,
+  Product,
 } from "@/types/database";
 
 /**
@@ -92,4 +93,10 @@ export async function pullBlockedPeriodsSince(
   since: string | null
 ): Promise<BlockedPeriod[]> {
   return pullEntity<BlockedPeriod>("sync_pull_blocked_periods", since);
+}
+
+export async function pullProductsSince(
+  since: string | null
+): Promise<Product[]> {
+  return pullEntity<Product>("sync_pull_products", since);
 }

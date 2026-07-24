@@ -92,7 +92,14 @@ describe("ServiceSheetForm — draft restoration", () => {
       selected_methods: ["Rodenticide Used"],
       findings: "DRAFT FINDINGS",
       recommendations: "DRAFT RECOMMENDATIONS",
-      pesticides_used: "DRAFT PESTICIDES",
+      products_used: [
+        {
+          product_id: null,
+          brand_name: "DRAFT BRAND",
+          chemical_name: "draft chem",
+          quantity: "5g",
+        },
+      ],
       report_notes: "DRAFT NOTES",
       risk_level: "high",
       risk_comments: "DRAFT RISK",
@@ -111,7 +118,6 @@ describe("ServiceSheetForm — draft restoration", () => {
         defaultCallType=""
         defaultFindings="FROM-DEFAULTS"
         defaultRecommendations="FROM-DEFAULTS"
-        defaultPesticides="FROM-DEFAULTS"
         defaultReportNotes="FROM-DEFAULTS"
         defaultRiskLevel="low"
       />
@@ -129,9 +135,14 @@ describe("ServiceSheetForm — draft restoration", () => {
     expect(
       (screen.getByLabelText(/^Recommendations/i) as HTMLTextAreaElement).value
     ).toBe("DRAFT RECOMMENDATIONS");
+    // Products Used (migration 047) restores from the draft — the row's brand
+    // type-ahead shows the saved brand, the quantity its free text.
     expect(
-      (screen.getByLabelText(/^Pesticides Used/i) as HTMLTextAreaElement).value
-    ).toBe("DRAFT PESTICIDES");
+      (screen.getByLabelText("Product") as HTMLInputElement).value
+    ).toBe("DRAFT BRAND");
+    expect(
+      (screen.getByLabelText("Quantity") as HTMLInputElement).value
+    ).toBe("5g");
     expect(
       (screen.getByLabelText(/Risk Assessment Comments/i) as HTMLTextAreaElement)
         .value
@@ -165,7 +176,6 @@ describe("ServiceSheetForm — draft restoration", () => {
         jobId="test-job-id"
         defaultFindings="DEFAULT FINDINGS"
         defaultRecommendations="DEFAULT RECOMMENDATIONS"
-        defaultPesticides="DEFAULT PESTICIDES"
         defaultReportNotes="DEFAULT NOTES"
         defaultRiskLevel="low"
       />
@@ -179,9 +189,8 @@ describe("ServiceSheetForm — draft restoration", () => {
     expect(
       (screen.getByLabelText(/^Recommendations/i) as HTMLTextAreaElement).value
     ).toBe("DEFAULT RECOMMENDATIONS");
-    expect(
-      (screen.getByLabelText(/^Pesticides Used/i) as HTMLTextAreaElement).value
-    ).toBe("DEFAULT PESTICIDES");
+    // No draft and no default products → the empty-state hint shows.
+    expect(screen.getByText(/No products added/i)).toBeInTheDocument();
 
     // Customer Present unselected
     const yesRadio = document.querySelector<HTMLInputElement>(

@@ -44,6 +44,7 @@ import type {
   Agreement,
   Task,
   BlockedPeriod,
+  Product,
 } from "@/types/database";
 import {
   pullCustomersAction,
@@ -52,6 +53,7 @@ import {
   pullAgreementsAction,
   pullTasksAction,
   pullBlockedPeriodsAction,
+  pullProductsAction,
 } from "@/app/(app)/sync/pull-actions";
 import { classifyError, type SyncResultClass } from "@/lib/sync/http-classify";
 
@@ -64,6 +66,7 @@ export const CURSOR_KEYS = {
   agreements: "cursor.agreements",
   tasks: "cursor.tasks",
   blocked_periods: "cursor.blocked_periods",
+  products: "cursor.products",
 } as const;
 
 export interface PullEntityResult {
@@ -311,6 +314,13 @@ export async function pullAll(onProgress?: PullProgress): Promise<PullResult> {
         s: string | null
       ) => Promise<SyncableRow[]>,
     },
+    {
+      name: "products",
+      table: db.products as unknown as Table<SyncableRow, string>,
+      fetch: pullProductsAction as unknown as (
+        s: string | null
+      ) => Promise<SyncableRow[]>,
+    },
   ];
 
   for (const e of entities) {
@@ -334,4 +344,4 @@ export async function pullAll(onProgress?: PullProgress): Promise<PullResult> {
 }
 
 // Re-export the entity types so the engine can use them.
-export type { Customer, Site, Job, Agreement, Task, BlockedPeriod };
+export type { Customer, Site, Job, Agreement, Task, BlockedPeriod, Product };

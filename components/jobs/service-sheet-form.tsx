@@ -20,6 +20,9 @@ import {
 } from "@/lib/constants/job-labels";
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { PhotoUpload } from "@/components/ui/photo-upload";
+import { ProductsUsedField } from "@/components/jobs/products-used-field";
+import { productsForOperator } from "@/lib/products/render";
+import type { ProductUsed } from "@/types/database";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { OTHER_PILL, encodeOther, splitOther } from "@/lib/utils/other-describe";
 import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
@@ -59,6 +62,17 @@ function buildRawSheetInput(formData: FormData) {
       return [];
     }
   }
+  // Structured "Products Used" rows serialised as a JSON array of objects.
+  // ProductUsedSchema (inside ServiceSheetSchema) validates each row's shape.
+  function parseObjectArray(raw: string | null): unknown[] {
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
   return {
     job_id: (formData.get("job_id") as string) ?? "",
     call_type: (formData.get("call_type") as string) ?? "",
@@ -69,7 +83,9 @@ function buildRawSheetInput(formData: FormData) {
     recommendations: (formData.get("recommendations") as string) ?? "",
     report_notes: (formData.get("report_notes") as string) ?? "",
     method_used: parseJsonArray(formData.get("method_used") as string | null),
-    pesticides_used: (formData.get("pesticides_used") as string) ?? "",
+    products_used: parseObjectArray(
+      formData.get("products_used") as string | null
+    ),
     risk_level: (formData.get("risk_level") as string) ?? "",
     risk_comments: (formData.get("risk_comments") as string) ?? "",
     photo_data_urls: parseJsonArray(
@@ -150,7 +166,9 @@ export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
       recommendations: input.recommendations || null,
       treatment: input.method_used.join(", ") || null,
       method_used: input.method_used,
-      pesticides_used: input.pesticides_used || null,
+      // Structured products (migration 047). pesticides_used is legacy/read-only
+      // now — not written, so an amended old sheet keeps its original free text.
+      products_used: input.products_used,
       risk_level: input.risk_level,
       risk_comments: input.risk_comments || null,
       report_notes: input.report_notes || null,
@@ -209,7 +227,7 @@ function getErrorStep(errors: Record<string, string>): number | null {
     errors.findings ||
     errors.recommendations ||
     errors.method_used ||
-    errors.pesticides_used ||
+    errors.products_used ||
     errors.pest_species ||
     errors.other_pest ||
     errors.other_method
@@ -229,7 +247,9 @@ interface ServiceSheetFormProps {
   defaultRiskLevel?: string;
   defaultFindings?: string;
   defaultRecommendations?: string;
-  defaultPesticides?: string;
+  /** Structured products already on the job (migration 047). Empty for old
+   *  sheets and survey visits. */
+  defaultProducts?: ProductUsed[];
   defaultReportNotes?: string;
   defaultRiskComments?: string;
   /** Pre-filled customer context shown in the header strip. */
@@ -300,7 +320,7 @@ function ServiceSheetFormBody({
   defaultRiskLevel = "low",
   defaultFindings = "",
   defaultRecommendations = "",
-  defaultPesticides = "",
+  defaultProducts = [],
   defaultReportNotes = "",
   defaultRiskComments = "",
   customerName,
@@ -356,8 +376,10 @@ function ServiceSheetFormBody({
   const [recommendations, setRecommendations] = useState(
     draft?.recommendations ?? defaultRecommendations
   );
-  const [pesticidesUsed, setPesticidesUsed] = useState(
-    draft?.pesticides_used ?? defaultPesticides
+  // Structured "Products Used" rows (migration 047). Prefer the draft, else the
+  // job's saved rows (empty for old sheets / survey visits).
+  const [products, setProducts] = useState<ProductUsed[]>(
+    draft?.products_used ?? defaultProducts
   );
   const [reportNotes, setReportNotes] = useState(
     draft?.report_notes ?? defaultReportNotes
@@ -655,7 +677,7 @@ function ServiceSheetFormBody({
         otherMethod !== "" ||
         findings !== "" ||
         recommendations !== "" ||
-        pesticidesUsed !== "" ||
+        products.length > 0 ||
         reportNotes !== "" ||
         riskComments !== "" ||
         clientName !== "" ||
@@ -678,7 +700,7 @@ function ServiceSheetFormBody({
         other_method: otherMethod,
         findings,
         recommendations,
-        pesticides_used: pesticidesUsed,
+        products_used: products,
         report_notes: reportNotes,
         risk_level: riskLevel,
         risk_comments: riskComments,
@@ -706,7 +728,7 @@ function ServiceSheetFormBody({
     otherMethod,
     findings,
     recommendations,
-    pesticidesUsed,
+    products,
     reportNotes,
     riskLevel,
     riskComments,
@@ -1108,22 +1130,17 @@ function ServiceSheetFormBody({
         </div>
 
         <div>
-          <label htmlFor="pesticides_used" className={labelClass}>
-            Pesticides Used <span className="text-red-500">*</span>
-          </label>
-          <textarea
-            id="pesticides_used"
-            name="pesticides_used"
-            rows={2}
-            required
-            value={pesticidesUsed}
-            onChange={(e) => setPesticidesUsed(e.target.value)}
-            placeholder="Products and quantities used"
-            className={inputClass}
+          <label className={labelClass}>Products Used</label>
+          {/* Serialised for the FormData submit; parsed back by
+              buildRawSheetInput / the server action. */}
+          <input
+            type="hidden"
+            name="products_used"
+            value={JSON.stringify(products)}
           />
-          {errors.pesticides_used && (
-            <p className="mt-1 text-sm text-red-500">{errors.pesticides_used}</p>
-          )}
+          <div className="mt-1">
+            <ProductsUsedField products={products} onChange={setProducts} />
+          </div>
         </div>
 
         <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-4">
@@ -1463,7 +1480,13 @@ function ServiceSheetFormBody({
               <ReviewRow label="Methods">
                 {encodeOther(selectedMethods, otherMethod).join(", ")}
               </ReviewRow>
-              <ReviewRow label="Pesticides">{pesticidesUsed}</ReviewRow>
+              <ReviewRow label="Products">
+                {products.length > 0
+                  ? productsForOperator(products)
+                      .map((l) => (l.quantity ? `${l.brand} — ${l.quantity}` : l.brand))
+                      .join(", ")
+                  : "None"}
+              </ReviewRow>
               <ReviewRow label="Risk">
                 {`${RISK_LEVEL_LABELS[riskLevel as keyof typeof RISK_LEVEL_LABELS] ?? riskLevel} — ${riskComments}`}
               </ReviewRow>

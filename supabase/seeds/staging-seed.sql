@@ -141,6 +141,26 @@ insert into tasks (
   )
 on conflict (id) do nothing;
 
+-- ─── Products (migration 047) ───────────────────────────────
+-- REAL reference data (not synthetic) — the seed lives in setup.sql / the
+-- 047 migration too, but the rebuild truncates all public tables AFTER
+-- setup.sql, so it must be re-seeded here to survive a local rebuild. Same
+-- fixed UUIDs as the migration; idempotent.
+insert into products (id, brand_name, chemical_name) values
+  ('39ca1c16-5efa-5117-972d-28b1af77afc0', 'Selontra', 'cholecalciferol 0.075% 20g block'),
+  ('c2a8101c-af58-5765-88ee-0289fd68aa4c', 'Harmonix', 'cholecalciferol 0.075% 20g sachet'),
+  ('8f84d904-ec2a-5f66-946f-e587b5096528', 'Talon Soft', 'brodifacoum 0.0025% paste'),
+  ('f1026359-a301-5d00-ac59-976f8c9e4bec', 'Difen', 'difenacoum 0.005% grain'),
+  ('a736e6a3-e022-532a-92c9-755c438c5e1d', 'Brodikill', 'brodifacoum 0.0029% grain'),
+  ('b166651b-6790-58c4-bd5e-343c1c692dfb', 'Solo Blox', 'brodifacoum 0.005% 20g block'),
+  ('67b49a64-25ba-5c1f-8d9d-a16af4d89503', 'Rodilon soft', 'difethialone 0.0025% 10g sachets'),
+  ('a8549ba8-fa07-5530-af4e-15fc34340a54', 'Vulcan Dust', 'permethrin 0.5% dust'),
+  ('74f0d3d9-63d2-5357-8c72-c4bec2d5813c', 'Digrain wasp and hornet destroyer', 'permethrin 0.25%, tetramethrin 0.24%'),
+  ('ebb95b72-f0eb-5ac4-9f84-3dfaac398e51', 'Vazor wasp nest destroyer', 'trans phenothrin 0.1%, tetramethrin 0.3%'),
+  ('8789925b-e706-53a5-a5ea-7f88654c5c2e', 'Cimetrol Super ew', 'cypermethrin 25%, tetramethrin 10%, piperonyl butoxide 20%, pyriproxyfen 1% (IGR)'),
+  ('a6a9e353-049a-5c38-84bd-a749ba1c4aed', 'Phobi caps', 'cypermethrin 9.2%, prallethrin 0.46%')
+on conflict (id) do nothing;
+
 commit;
 
 -- ─── Verification (run after the inserts) ───────────────────

@@ -96,10 +96,8 @@ async function fillAllSteps(user: ReturnType<typeof userEvent.setup>) {
     "Place bait stations"
   );
   await user.click(screen.getByRole("button", { name: "Rodenticide Used" }));
-  await user.type(
-    screen.getByLabelText(/^Pesticides Used/i),
-    "Bromadiolone 0.005%"
-  );
+  // Products Used is OPTIONAL now (migration 047 — zero products is a valid
+  // survey/inspection visit), so the happy path adds none.
 
   await user.type(
     screen.getByLabelText(/Risk Assessment Comments/i),
@@ -244,13 +242,10 @@ describe("ServiceSheetForm — Customer Present", () => {
     const user = userEvent.setup();
     render(<ServiceSheetForm jobId="test-job-id" />);
 
-    // Fill everything EXCEPT pesticides_used, then select Yes + name.
+    // Fill everything EXCEPT Findings (a still-required field — products are
+    // optional now), then select Yes + name.
     await user.click(await screen.findByText("Routine"));
     await user.click(screen.getByRole("button", { name: "Mice" }));
-    await user.type(
-      screen.getByLabelText(/^Findings/i),
-      "Mice droppings in kitchen"
-    );
     await user.type(
       screen.getByLabelText(/^Recommendations/i),
       "Place bait stations"
@@ -273,7 +268,7 @@ describe("ServiceSheetForm — Customer Present", () => {
     // Client-side validation blocks the review — no modal, no server.
     await waitFor(() => {
       expect(
-        screen.getByText(/Pesticides used is required/i)
+        screen.getByText(/Findings are required/i)
       ).toBeInTheDocument();
     });
     expect(
@@ -308,11 +303,8 @@ describe("ServiceSheetForm — client-side validation", () => {
       "Place bait stations"
     );
     await user.click(screen.getByRole("button", { name: "Rodenticide Used" }));
-    // DON'T fill pesticides_used
-    await user.type(
-      screen.getByLabelText(/Risk Assessment Comments/i),
-      "Standard rodent treatment"
-    );
+    // DON'T fill Risk Assessment Comments — a still-required field (products
+    // are optional now), so it's the validation-bounce trigger.
     await user.click(screen.getByRole("button", { name: "5" }));
     await user.click(screen.getByTestId("sigpad-tech"));
 
@@ -322,7 +314,7 @@ describe("ServiceSheetForm — client-side validation", () => {
     // failing step; the typed fields keep their values.
     await waitFor(() => {
       expect(
-        screen.getByText(/Pesticides used is required/i)
+        screen.getByText(/Risk assessment comments are required/i)
       ).toBeInTheDocument();
     });
     expect(completeFn).not.toHaveBeenCalled();
