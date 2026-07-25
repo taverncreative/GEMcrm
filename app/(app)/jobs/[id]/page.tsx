@@ -40,6 +40,10 @@ import { ReportActions } from "@/components/jobs/report-actions";
 import { isServiceSheetFilled } from "@/lib/validation/service-sheet";
 import { JobStatusActions } from "@/components/jobs/job-status-actions";
 import { DeleteJobConfirm } from "@/components/jobs/delete-job-confirm";
+import {
+  FollowingUpOnPanel,
+  FollowUpScheduledNote,
+} from "@/components/jobs/follow-up-context";
 import { RescheduleJobModal } from "@/components/jobs/reschedule-job-modal";
 import { NeedsInvoiceToggle } from "@/components/jobs/needs-invoice-toggle";
 import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
@@ -383,6 +387,38 @@ export default function JobDetailPage() {
     [site?.customer_id]
   );
 
+  // Parent visit — the job this one follows up on. `parent_job_id` is
+  // set server-side when a completed sheet books a follow-up; a manual
+  // "Follow Up" booking has none, and then this stays null and the panel
+  // never renders. Primary-key get, so no Dexie index is involved.
+  const parentJob = useLiveQuery(
+    async () => {
+      if (!job?.parent_job_id) return null;
+      const p = await db.jobs.get(job.parent_job_id);
+      return p && !p.deleted_at ? p : null;
+    },
+    [job?.parent_job_id]
+  );
+
+  // Reverse link — follow-ups booked off THIS visit. Found through the
+  // `site_id` index (a follow-up is always booked on its parent's site,
+  // see approveServiceSheetAction) and filtered in JS: `parent_job_id`
+  // is not a Dexie index and adding one would cost a schema version bump
+  // for a one-line note. Draft jobs have no site_id → nothing to look up.
+  const followUps = useLiveQuery(
+    async () => {
+      if (!job?.id || !job.site_id) return [];
+      const siblings = await db.jobs
+        .where("site_id")
+        .equals(job.site_id)
+        .toArray();
+      return siblings
+        .filter((j) => j.parent_job_id === job.id && !j.deleted_at)
+        .sort((a, b) => a.job_date.localeCompare(b.job_date));
+    },
+    [job?.id, job?.site_id]
+  );
+
   // Report — server-only, not in Dexie. Fetch once per online mount.
   const [report, setReport] = useState<Report | null>(null);
   const [reportLoaded, setReportLoaded] = useState(false);
@@ -504,6 +540,23 @@ export default function JobDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Context BEFORE the work: on a follow-up, what the previous visit
+          found sits above the sheet sections (and above the fold on a
+          phone), so it's read before "Fill Service Sheet" is tapped. */}
+      {parentJob && (
+        <div className="mt-6">
+          <FollowingUpOnPanel
+            parent={parentJob}
+            customerName={customer?.name}
+          />
+        </div>
+      )}
+      {followUps && followUps.length > 0 && (
+        <div className="mt-6">
+          <FollowUpScheduledNote followUps={followUps} />
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="space-y-6">
