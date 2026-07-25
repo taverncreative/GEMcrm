@@ -56,10 +56,20 @@ const ITEMS = [
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
+/** Spotlight's documented ACK: JSON `{ok:true, id, duplicate}`. */
+function ackResponse(): Response {
+  return new Response(JSON.stringify({ ok: true, id: "sp_1", duplicate: false }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 beforeEach(() => {
   process.env.SPOTLIGHT_PRINT_ORDER_URL = "https://spotlight.test/api/inbound/print-order";
   process.env.SPOTLIGHT_INGEST_TOKEN = "tok_abc";
-  fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  // The documented ACK. A bare `{ok:true}` (or any 2xx without the shape) is
+  // NOT delivery any more — see the 200-with-HTML case below.
+  fetchMock = vi.fn(async () => ackResponse());
   vi.stubGlobal("fetch", fetchMock);
   createPrintOrderMock.mockClear();
   markDeliveredMock.mockClear();
@@ -139,10 +149,60 @@ describe("THE FENCE — Spotlight can never fail the confirm", () => {
     expect((markDeliveredMock.mock.calls[0] as unknown[])[1]).toBe(false);
   });
 
-  it("records delivered=true on a 200", async () => {
+  it("records delivered=true on a proper {ok:true,id} ACK", async () => {
     await submitPrintOrderAction({ orderId: ORDER_ID, items: ITEMS });
     await runAfter();
     expect((markDeliveredMock.mock.calls[0] as unknown[])[1]).toBe(true);
+  });
+});
+
+describe("THE INCIDENT — 200 with an HTML 404 page is NOT delivery", () => {
+  /**
+   * Spotlight prod returns HTTP 200 with a Next 404 HTML page for paths that
+   * don't exist, and /api/inbound/print-order was never built. Before this
+   * check, res.ok was true and EVERY order was recorded delivered=true while
+   * nothing arrived. The order row must now carry the truth instead.
+   */
+  it("records delivered=false with a reason naming the content type", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        "<!DOCTYPE html><html><body><h1>404</h1><p>This page could not be found.</p></body></html>",
+        { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } }
+      )
+    );
+
+    const res = await submitPrintOrderAction({ orderId: ORDER_ID, items: ITEMS });
+    // The confirm still succeeds — the fence is unchanged.
+    expect(res.success).toBe(true);
+    await runAfter();
+
+    const [id, delivered, reason] = markDeliveredMock.mock.calls[0] as unknown as [
+      string,
+      boolean,
+      string,
+    ];
+    expect(id).toBe(ORDER_ID);
+    expect(delivered).toBe(false);
+    expect(reason).toContain("unexpected response type");
+    expect(reason).toContain("text/html");
+  });
+
+  it("records delivered=false when the JSON lacks ok/id", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ queued: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    await submitPrintOrderAction({ orderId: ORDER_ID, items: ITEMS });
+    await runAfter();
+    const [, delivered, reason] = markDeliveredMock.mock.calls[0] as unknown as [
+      string,
+      boolean,
+      string,
+    ];
+    expect(delivered).toBe(false);
+    expect(reason).toContain("unexpected response shape");
   });
 });
 

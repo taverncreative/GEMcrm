@@ -6,7 +6,8 @@
  * BEST EFFORT, AND NEVER THROWS. By the time this runs, Nate's submit is
  * already complete: the feature_requests row is written and the email has
  * gone, and both remain the record of the request. So every failure path —
- * unset env, non-2xx, timeout, unreachable host, malformed response — is
+ * unset env, non-2xx, timeout, unreachable host, malformed response, and a
+ * 2xx that isn't the documented ACK (see {@link readSpotlightAck}) — is
  * swallowed here and logged server-side only, returning a result object
  * rather than raising.
  *
@@ -59,6 +60,65 @@ export interface SpotlightResult {
 }
 
 /**
+ * A 2xx IS NOT DELIVERY. Read this before loosening anything below.
+ *
+ * Spotlight's production deploy answers unmatched paths with HTTP **200**
+ * carrying a Next.js 404 HTML page, not a 404 status. Their
+ * /api/inbound/print-order was never actually built — so every print order
+ * we sent hit a page that rendered "not found" and returned 200, `res.ok`
+ * was true, and we recorded delivered=true for orders that reached nobody.
+ * Nothing in our code misbehaved; it trusted a bare status code.
+ *
+ * So delivery is now defined by the ACK, not the status: the response must
+ * be JSON and must carry the documented shape `{ ok: true, id, duplicate }`.
+ * Anything else — HTML, empty body, JSON without ok/id, ok:false — is a
+ * FAILURE with a reason that says what actually came back, so the truth
+ * lands in print_orders.delivery_reason instead of a false positive.
+ *
+ * `duplicate` is not required: it is Spotlight's idempotency flag and is
+ * absent on a first send. `id` and `ok:true` are the proof of ingest.
+ */
+async function readSpotlightAck(res: Response): Promise<SpotlightResult> {
+  if (!res.ok) {
+    return { delivered: false, reason: `HTTP ${res.status}` };
+  }
+
+  // The incident signature: 200 + text/html. Name the type in the reason so
+  // the next occurrence is diagnosable from the row alone.
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return {
+      delivered: false,
+      reason: `unexpected response type: ${contentType || "none"}`,
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await res.json();
+  } catch {
+    return { delivered: false, reason: "unexpected response shape (not JSON)" };
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    return { delivered: false, reason: "unexpected response shape (not an object)" };
+  }
+
+  const ack = parsed as { ok?: unknown; id?: unknown };
+  if (ack.ok !== true) {
+    return { delivered: false, reason: "unexpected response shape (ok not true)" };
+  }
+  const hasId =
+    (typeof ack.id === "string" && ack.id.trim().length > 0) ||
+    typeof ack.id === "number";
+  if (!hasId) {
+    return { delivered: false, reason: "unexpected response shape (missing id)" };
+  }
+
+  return { delivered: true };
+}
+
+/**
  * POST a feature request to Spotlight. Resolves `{ delivered: false }`
  * rather than throwing on ANY failure.
  */
@@ -95,13 +155,13 @@ export async function sendFeedbackToSpotlight(
       cache: "no-store",
     });
 
-    if (!res.ok) {
+    const ack = await readSpotlightAck(res);
+    if (!ack.delivered) {
       console.error(
-        `[spotlight] ingest HTTP ${res.status} for request ${input.request_id}`
+        `[spotlight] ingest not delivered for request ${input.request_id}: ${ack.reason}`
       );
-      return { delivered: false, reason: `HTTP ${res.status}` };
     }
-    return { delivered: true };
+    return ack;
   } catch (err) {
     // Covers the abort (timeout), DNS/connection failures, and anything
     // else fetch can raise. Logged, never surfaced.
@@ -197,13 +257,13 @@ export async function sendPrintOrderToSpotlight(
       cache: "no-store",
     });
 
-    if (!res.ok) {
+    const ack = await readSpotlightAck(res);
+    if (!ack.delivered) {
       console.error(
-        `[spotlight] print order HTTP ${res.status} for order ${input.order_id}`
+        `[spotlight] print order not delivered for order ${input.order_id}: ${ack.reason}`
       );
-      return { delivered: false, reason: `HTTP ${res.status}` };
     }
-    return { delivered: true };
+    return ack;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.error(

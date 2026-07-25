@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { useBasket } from "@/components/library/basket-context";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { proxyAssetUrl } from "@/lib/storage/asset-url";
-import { prettyType } from "@/lib/library/file-types";
+import { isPreviewable, prettyType } from "@/lib/library/file-types";
 import { parseAndValidateRecipients } from "@/lib/validation/recipients";
 import { clampQuantity } from "@/lib/validation/print-order";
 import {
   emailLibraryDocumentAction,
+  requestDocumentEditAction,
   softDeleteLibraryDocumentAction,
 } from "@/app/(app)/library/actions";
 import type { LibraryDocument } from "@/types/database";
@@ -28,9 +29,38 @@ export function LibraryDocumentRow({ doc }: { doc: LibraryDocument }) {
   const [emailResult, setEmailResult] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editNote, setEditNote] = useState("");
+  const [requestingEdit, setRequestingEdit] = useState(false);
+  const [editResult, setEditResult] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
-  const downloadUrl = `${proxyAssetUrl(doc.file_path)}?download=1`;
+  // proxyAssetUrl only returns null for an empty stored value; a library row
+  // always has a file_path, so fall back to the raw path rather than widening
+  // every consumer to string | null.
+  const inlineUrl = proxyAssetUrl(doc.file_path) ?? doc.file_path;
+  const downloadUrl = `${inlineUrl}?download=1`;
+  // Inline disposition is the proxy's default (no ?download=1), so a PDF or
+  // image opens in the browser's own viewer. Word/Excel can't render inline,
+  // so Quick view points at the download for those instead of us building a
+  // viewer for two file types.
+  const canPreview = isPreviewable(doc.file_name);
+  const quickViewUrl = canPreview ? inlineUrl : downloadUrl;
   const basketQty = basket.quantityOf(doc.id);
+
+  async function requestEdit() {
+    setEditError(null);
+    setRequestingEdit(true);
+    const res = await requestDocumentEditAction(doc.id, editNote);
+    setRequestingEdit(false);
+    if (res.success) {
+      setEditNote("");
+      setEditOpen(false);
+      setEditResult(`Edit request sent for “${doc.label}”.`);
+    } else {
+      setEditError(res.message ?? "Could not send the request. Try again.");
+    }
+  }
 
   async function sendEmail() {
     setEmailError(null);
@@ -86,6 +116,25 @@ export function LibraryDocumentRow({ doc }: { doc: LibraryDocument }) {
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <a
+          href={quickViewUrl}
+          {...(canPreview
+            ? { target: "_blank", rel: "noopener noreferrer" }
+            : { download: doc.file_name })}
+          title={
+            canPreview
+              ? "Open this document in a new tab"
+              : `${prettyType(doc.file_name)} files can't preview in the browser. This downloads a copy.`
+          }
+          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+          </svg>
+          Quick view
+        </a>
+
+        <a
           href={downloadUrl}
           download={doc.file_name}
           className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
@@ -111,6 +160,21 @@ export function LibraryDocumentRow({ doc }: { doc: LibraryDocument }) {
           Email
         </button>
 
+        <button
+          type="button"
+          onClick={() => {
+            setEditOpen((v) => !v);
+            setEditResult(null);
+            setEditError(null);
+          }}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
+          </svg>
+          Request edit
+        </button>
+
         <div className="ml-auto flex items-center gap-2">
           <label className="sr-only" htmlFor={`qty-${doc.id}`}>
             Quantity
@@ -126,7 +190,14 @@ export function LibraryDocumentRow({ doc }: { doc: LibraryDocument }) {
           />
           <button
             type="button"
-            onClick={() => basket.add(doc.id, doc.label, qty)}
+            onClick={() => {
+              basket.add(doc.id, doc.label, qty);
+              // Back to 1 once it's in the basket. The typed number lingering
+              // in the box after an add (and after the order was confirmed and
+              // the basket emptied) is what made it read like nothing had
+              // happened; "In basket" below is the single source of truth now.
+              setQty(1);
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark"
           >
             Add to basket
@@ -142,6 +213,67 @@ export function LibraryDocumentRow({ doc }: { doc: LibraryDocument }) {
 
       {emailResult && (
         <p className="mt-2 text-xs font-medium text-green-600">{emailResult}</p>
+      )}
+
+      {/* Same confirmation standard as the print-order success state: an
+          unmissable block that stays put, not a fading inline note. */}
+      {editResult && (
+        <div className="mt-2 flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+          <svg className="mt-0.5 h-4 w-4 shrink-0 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+          </svg>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-green-800">{editResult}</p>
+            <p className="mt-0.5 text-xs text-green-700">
+              John gets the document name and its ID, so he knows exactly
+              which one you mean.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setEditResult(null)}
+            className="ml-auto shrink-0 text-xs font-medium text-green-700 hover:underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {editOpen && (
+        <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+          <label htmlFor={`edit-${doc.id}`} className="mb-1 block text-xs font-medium text-gray-600">
+            What needs changing? (optional)
+          </label>
+          <textarea
+            id={`edit-${doc.id}`}
+            rows={3}
+            value={editNote}
+            onChange={(e) => setEditNote(e.target.value)}
+            placeholder="e.g. the phone number on page 2 is out of date"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+          />
+          <p className="mt-1 text-xs text-gray-400">
+            Sends “{doc.label}” and its document ID to John.
+          </p>
+          {editError && <p className="mt-1 text-xs text-red-600">{editError}</p>}
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setEditOpen(false)}
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={requestEdit}
+              disabled={requestingEdit || !online}
+              className="rounded-lg bg-brand px-4 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {requestingEdit ? "Sending…" : "Send request"}
+            </button>
+          </div>
+        </div>
       )}
 
       {emailOpen && (

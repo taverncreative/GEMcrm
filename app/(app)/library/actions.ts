@@ -10,8 +10,12 @@ import {
   createPrintOrder,
   markPrintOrderDelivered,
 } from "@/lib/data/print-orders";
-import { sendLibraryDocument } from "@/lib/services/email";
-import { sendPrintOrderToSpotlight } from "@/lib/services/spotlight";
+import { createFeatureRequest } from "@/lib/data/feature-requests";
+import { sendEmail, sendLibraryDocument } from "@/lib/services/email";
+import {
+  sendFeedbackToSpotlight,
+  sendPrintOrderToSpotlight,
+} from "@/lib/services/spotlight";
 import { validateRecipients } from "@/lib/validation/recipients";
 import { PrintOrderSchema } from "@/lib/validation/print-order";
 import { BUSINESS } from "@/lib/constants/branding";
@@ -68,6 +72,77 @@ export async function emailLibraryDocumentAction(
     return { success: false, message: "Email failed to send. Try again." };
   }
   return { success: true, emailedTo: validated.emails.join(", ") };
+}
+
+/**
+ * Ask John to change a library document ("Request edit").
+ *
+ * Rides the FEEDBACK plumbing, not a new contract: feature_requests row →
+ * developer inbox email → fire-and-forget Spotlight POST via
+ * sendFeedbackToSpotlight. That endpoint is the one we know exists and
+ * answers with a real ACK; /api/inbound/print-order was never built, which
+ * is exactly why nothing new gets invented here.
+ *
+ * The message carries the document's LABEL and its stable ID, so John can
+ * identify the document even after a rename and even if the request arrives
+ * out of context. The row id is Spotlight's idempotency key, as with any
+ * other feature request.
+ */
+export async function requestDocumentEditAction(
+  documentId: string,
+  note?: string
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!documentId) return { success: false, message: "Missing document id" };
+
+  const doc = await getLibraryDocumentById(documentId);
+  if (!doc) return { success: false, message: "Document not found" };
+
+  const trimmedNote = (note ?? "").trim();
+  const message = [
+    `Edit requested for site-folder document "${doc.label}".`,
+    `Document ID: ${doc.id}`,
+    `File: ${doc.file_name}`,
+    ...(trimmedNote ? ["", `What needs changing: ${trimmedNote}`] : []),
+  ].join("\n");
+
+  let requestId: string;
+  try {
+    // The row is the local record AND the idempotency key.
+    const created = await createFeatureRequest({
+      request_type: "change",
+      message,
+    });
+    requestId = created.id;
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to log the request",
+    };
+  }
+
+  // Backstop inbox copy — the thing that would have caught the print-order
+  // endpoint being missing, so it is not optional here.
+  await sendEmail({
+    to: BUSINESS.supportEmail,
+    subject: `[${BUSINESS.name} CRM] edit request: ${doc.label}`,
+    text: message,
+  });
+
+  after(async () => {
+    try {
+      await sendFeedbackToSpotlight({
+        message,
+        request_id: requestId,
+        type: "change",
+        client_name: BUSINESS.signoffName,
+      });
+    } catch (spotlightErr) {
+      console.error("[requestDocumentEditAction] spotlight:", spotlightErr);
+    }
+  });
+
+  return { success: true, message: "Edit request sent." };
 }
 
 /**

@@ -85,7 +85,15 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   process.env.SPOTLIGHT_INGEST_URL = "https://spotlight.test/api/inbound/feedback";
   process.env.SPOTLIGHT_INGEST_TOKEN = "tok_abc";
-  fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  // Spotlight's documented ACK. Delivery is judged on this shape, not on the
+  // status line — see test/services/spotlight-ack.test.ts.
+  fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ ok: true, id: "sp_1", duplicate: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+  );
   vi.stubGlobal("fetch", fetchMock);
   createFeatureRequestMock.mockClear();
   sendEmailMock.mockClear();

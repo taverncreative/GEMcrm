@@ -69,6 +69,28 @@ export function sanitizeFileName(name: string): string {
   return cleaned.length > 0 ? cleaned : "document";
 }
 
+/**
+ * Can a browser render this inline, so "Quick view" can open the storage
+ * proxy's inline-disposition URL in a tab? PDFs and images only.
+ *
+ * Word/Excel deliberately return false: browsers download them rather than
+ * display them, and standing up a viewer for two file types nobody previews
+ * on site is not worth it. The UI falls back to a download for those.
+ */
+export function isPreviewable(fileName: string): boolean {
+  switch (extensionOf(fileName)) {
+    case "pdf":
+    case "png":
+    case "jpg":
+    case "jpeg":
+    case "webp":
+    case "gif":
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** Short human label for a document's kind, for the list UI. */
 export function prettyType(fileName: string): string {
   const ext = extensionOf(fileName);
