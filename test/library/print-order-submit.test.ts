@@ -122,6 +122,16 @@ describe("payload maps to Spotlight's contract", () => {
     expect("source" in body).toBe(false);
     expect("source_app" in body).toBe(false);
   });
+
+  it("sends client_slug so the order links to GEM's client record", async () => {
+    // Without it Spotlight's intake can't link the order and it lands
+    // unassigned for hand-triage. The token identifies the app, not the
+    // client — so this is required alongside the absent source_app above.
+    await submitPrintOrderAction({ orderId: ORDER_ID, items: ITEMS });
+    await runAfter();
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.client_slug).toBe("gem-services");
+  });
 });
 
 describe("THE FENCE — Spotlight can never fail the confirm", () => {

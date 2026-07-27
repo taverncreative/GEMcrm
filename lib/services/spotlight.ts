@@ -24,6 +24,8 @@
  * `source_app` is deliberately NOT sent: Spotlight derives it from the
  * token, so the token IS the app identity. Don't add it.
  *
+ * `client_slug` IS sent, and is a different thing — see {@link CLIENT_SLUG}.
+ *
  * Env:
  *   SPOTLIGHT_INGEST_URL       — e.g. https://…/api/inbound/feedback
  *   SPOTLIGHT_PRINT_ORDER_URL  — e.g. https://…/api/inbound/print-order
@@ -38,6 +40,22 @@ const TIMEOUT_MS = 5000;
 /** Spotlight rejects bodies over 16KB (413). We guard before sending so an
  *  over-large basket fails locally with a clear reason rather than a 413. */
 const MAX_BODY_BYTES = 16 * 1024;
+
+/**
+ * GEM's client record in Spotlight. Spotlight's intake function uses this to
+ * LINK the request to a client; without it every request we send arrives
+ * unassigned and has to be hand-assigned on their side.
+ *
+ * Not a contradiction of the no-`source_app` rule above: the token says which
+ * *app* sent the request, this says which *client* it belongs to. The token
+ * evidently does not imply the second — that's the bug this fixes.
+ *
+ * Hardcoded, not an env var, on purpose: it is a fixed property of who we
+ * are, like the endpoints' shape, and it must not be able to differ between
+ * environments — a staging deploy filing requests under a wrong-or-absent
+ * client is exactly the failure being fixed. Sent on BOTH payloads.
+ */
+const CLIENT_SLUG = "gem-services";
 
 export interface SpotlightFeedbackInput {
   /** The request body Nate typed. Required by Spotlight. */
@@ -147,6 +165,7 @@ export async function sendFeedbackToSpotlight(
       body: JSON.stringify({
         message: input.message,
         request_id: input.request_id,
+        client_slug: CLIENT_SLUG,
         ...(input.type ? { type: input.type } : {}),
         ...(input.client_name ? { client_name: input.client_name } : {}),
         ...(input.link ? { link: input.link } : {}),
@@ -226,6 +245,7 @@ export async function sendPrintOrderToSpotlight(
   // Build the body first so we can enforce Spotlight's 16KB cap locally.
   const body = JSON.stringify({
     order_id: input.order_id,
+    client_slug: CLIENT_SLUG,
     items: input.items.map((it) => ({
       name: it.name,
       quantity: it.quantity,

@@ -170,6 +170,18 @@ describe("the POST fires with the right body + auth (in after())", () => {
     );
     expect("source_app" in body).toBe(false);
   });
+
+  it("DOES send client_slug — the token does not identify the client", async () => {
+    // The other half of the line above: app identity comes from the token,
+    // client identity does not. Omitting this is what made every request
+    // arrive unassigned in Spotlight.
+    await submitFeatureRequestAction(initial, formData());
+    await runAfter();
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string
+    );
+    expect(body.client_slug).toBe("gem-services");
+  });
 });
 
 describe("THE FENCE — Spotlight can never fail Nate's submit", () => {
