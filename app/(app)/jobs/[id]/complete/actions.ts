@@ -136,6 +136,8 @@ export async function completeServiceSheetAction(
     ),
     risk_level: str("risk_level"),
     risk_comments: str("risk_comments"),
+    era_required: str("era_required"),
+    environmental_comments: str("environmental_comments"),
     photo_data_urls: photoDataUrls,
     technician_signature: str("technician_signature"),
     client_present: str("client_present"),

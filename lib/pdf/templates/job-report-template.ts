@@ -230,6 +230,11 @@ export function renderJobReportHtml({
         <div class="field-label">Risk Assessment Comments</div>
         <div class="field-value">${escape(job.risk_comments)}</div>
       </div>` : ""}
+      ${job.environmental_comments ? `
+      <div class="field">
+        <div class="field-label">Environmental Risk Assessment</div>
+        <div class="field-value">${escape(job.environmental_comments)}</div>
+      </div>` : ""}
     </div>
   </div>` : ""}
 

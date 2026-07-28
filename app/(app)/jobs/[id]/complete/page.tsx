@@ -334,6 +334,7 @@ export default function CompleteServiceSheetPage() {
           defaultProducts={job.products_used ?? []}
           defaultReportNotes={job.report_notes ?? ""}
           defaultRiskComments={job.risk_comments ?? ""}
+          defaultEnvironmentalComments={job.environmental_comments ?? ""}
           customerName={customer?.name}
           customerCompany={customer?.company_name ?? null}
           customerEmail={customer?.email ?? null}

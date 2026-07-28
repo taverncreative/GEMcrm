@@ -68,6 +68,17 @@ export interface ServiceSheetDraft {
   report_notes: string;
   risk_level: string;
   risk_comments: string;
+  /** "Environmental risk assessment" tick. THE ONLY PLACE this boolean is
+   *  persisted — there is no era_required column; on the job row, presence of
+   *  environmental_comments is the flag. Kept here so a mid-fill reload
+   *  restores the expanded section, not just the text. Optional so drafts
+   *  written before this field existed load cleanly. Not indexed → no Dexie
+   *  version bump. */
+  era_required?: boolean;
+  /** ERA free text, persisted while filling → jobs.environmental_comments at
+   *  submit (cleared to null when the tick is off). Optional for the same
+   *  reason as era_required. */
+  environmental_comments?: string;
   client_name: string;
   tech_sig: string;
   client_sig: string;

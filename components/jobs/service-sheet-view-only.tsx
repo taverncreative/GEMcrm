@@ -295,6 +295,16 @@ export function ServiceSheetViewOnly({
       <Section title="Risk">
         <Field label="Risk level" value={riskLevelLabel} />
         <Field label="Risk comments" value={job.risk_comments} />
+        {/* ERA: explicitly guarded rather than passed straight to Field,
+            which renders a placeholder for empty values — an unguarded Field
+            would put a blank ERA row on every sheet, and almost no sheet has
+            one. Absent entirely when there is no assessment. */}
+        {job.environmental_comments && (
+          <Field
+            label="Environmental risk assessment"
+            value={job.environmental_comments}
+          />
+        )}
       </Section>
 
       {/* ── Photos ── */}

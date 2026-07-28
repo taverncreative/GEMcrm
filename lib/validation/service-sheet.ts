@@ -74,6 +74,20 @@ export const ServiceSheetSchema = z.object({
   risk_level: z.enum(RISK_LEVELS, { message: "Select a risk level" }),
   risk_comments: z.string().min(1, "Risk assessment comments are required"),
 
+  /** "Environmental risk assessment" tick. Transient FILLING state only —
+   *  there is no era_required column. Presence of environmental_comments IS
+   *  the flag on the row (see the note there), so this rides the form purely
+   *  to drive the required-when-ticked rule below and the null-on-storage
+   *  clear. Coerced + defaulted like client_present, so an unticked box
+   *  (absent key) is a clean false. */
+  era_required: z.coerce.boolean().default(false),
+  /** ERA free text → jobs.environmental_comments. OPTIONAL: most jobs need no
+   *  ERA (it applies when toxic bait is used outdoors), so it is absent from
+   *  isServiceSheetFilled and from the DB completion CHECK, and can never
+   *  block a completion. Required ONLY when era_required is ticked, enforced
+   *  in the superRefine below — the call_type_other_desc pattern exactly. */
+  environmental_comments: optionalString,
+
   photo_data_urls: z.array(z.string()).default([]),
 
   technician_signature: z
@@ -93,6 +107,17 @@ export const ServiceSheetSchema = z.object({
       code: z.ZodIssueCode.custom,
       message: "Describe the other call type",
       path: ["call_type_other_desc"],
+    });
+  }
+  // Required-when-ticked, same shape as the "Other" gates above. Ticking the
+  // box and leaving it empty means the tick says nothing, so it blocks. The
+  // message carries the escape hatch: unticking is always a valid way out,
+  // because the ERA itself is optional.
+  if (val.era_required && !val.environmental_comments.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Describe the environmental risk, or untick the box",
+      path: ["environmental_comments"],
     });
   }
 });
@@ -117,6 +142,11 @@ export { RISK_LEVELS, CALL_TYPES };
  * completion failures. Migration 047 DROPPED the products/pesticides
  * requirement (zero products is a valid survey visit), so this NO LONGER
  * checks pesticides_used or products_used. Change all three together.
+ *
+ * environmental_comments (the ERA box) is deliberately NOT here: it applies
+ * to a minority of jobs (toxic bait used outdoors) and must never block a
+ * completion. It is absent from the DB CHECK for the same reason, so all
+ * three stay in agreement.
  */
 export function isServiceSheetFilled(job: {
   findings: string | null;

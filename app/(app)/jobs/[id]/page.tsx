@@ -210,6 +210,12 @@ function RiskSection({ job }: { job: Job }) {
           {job.risk_comments && (
             <DetailField label="Risk Assessment Comments" value={job.risk_comments} />
           )}
+          {job.environmental_comments && (
+            <DetailField
+              label="Environmental Risk Assessment"
+              value={job.environmental_comments}
+            />
+          )}
         </dl>
       ) : (
         <p className="text-sm text-gray-400">No risk assessment.</p>

@@ -25,6 +25,7 @@ import { productsForOperator } from "@/lib/products/render";
 import type { ProductUsed } from "@/types/database";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { OTHER_PILL, encodeOther, splitOther } from "@/lib/utils/other-describe";
+import { environmentalCommentsForStorage } from "@/lib/utils/environmental-comments";
 import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
 import { isPhotoClientId, photoPublicUrl } from "@/lib/photos/path";
@@ -88,6 +89,9 @@ function buildRawSheetInput(formData: FormData) {
     ),
     risk_level: (formData.get("risk_level") as string) ?? "",
     risk_comments: (formData.get("risk_comments") as string) ?? "",
+    era_required: (formData.get("era_required") as string) ?? "",
+    environmental_comments:
+      (formData.get("environmental_comments") as string) ?? "",
     photo_data_urls: parseJsonArray(
       formData.get("photo_data_urls") as string | null
     ),
@@ -171,6 +175,13 @@ export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
       products_used: input.products_used,
       risk_level: input.risk_level,
       risk_comments: input.risk_comments || null,
+      // ERA (jobs.environmental_comments). Shares the server's storage helper
+      // so the optimistic row and the replayed write cannot disagree about
+      // what an unticked sheet stores.
+      environmental_comments: environmentalCommentsForStorage(
+        input.era_required,
+        input.environmental_comments
+      ),
       report_notes: input.report_notes || null,
       photo_urls: localPhotoUrls,
       client_present: input.client_present,
@@ -233,7 +244,8 @@ function getErrorStep(errors: Record<string, string>): number | null {
     errors.other_method
   )
     return 2;
-  if (errors.risk_level || errors.risk_comments) return 3;
+  if (errors.risk_level || errors.risk_comments || errors.environmental_comments)
+    return 3;
   if (errors.technician_signature) return 5;
   return null;
 }
@@ -252,6 +264,10 @@ interface ServiceSheetFormProps {
   defaultProducts?: ProductUsed[];
   defaultReportNotes?: string;
   defaultRiskComments?: string;
+  /** Existing ERA text on the job (jobs.environmental_comments). Non-empty
+   *  on an amend of a sheet that already carries one, which is what makes the
+   *  tick default to on so the ERA shows expanded rather than looking lost. */
+  defaultEnvironmentalComments?: string;
   /** Pre-filled customer context shown in the header strip. */
   customerName?: string;
   customerCompany?: string | null;
@@ -323,6 +339,7 @@ function ServiceSheetFormBody({
   defaultProducts = [],
   defaultReportNotes = "",
   defaultRiskComments = "",
+  defaultEnvironmentalComments = "",
   customerName,
   customerCompany,
   customerEmail,
@@ -387,6 +404,20 @@ function ServiceSheetFormBody({
   const [riskLevel, setRiskLevel] = useState(draft?.risk_level ?? defaultRiskLevel);
   const [riskComments, setRiskComments] = useState(
     draft?.risk_comments ?? defaultRiskComments
+  );
+  // ── Environmental Risk Assessment (ERA) ──
+  // Optional section, collapsed by default: it applies only when toxic bait
+  // is used outdoors, which is a minority of jobs. The text lives in
+  // jobs.environmental_comments; there is no era_required column, so this
+  // tick is transient filling state persisted only in the draft.
+  //
+  // Default ON when the job already carries ERA text (an amend), so an
+  // existing assessment shows expanded instead of appearing to have vanished.
+  const [eraRequired, setEraRequired] = useState(
+    draft?.era_required ?? defaultEnvironmentalComments.trim().length > 0
+  );
+  const [environmentalComments, setEnvironmentalComments] = useState(
+    draft?.environmental_comments ?? defaultEnvironmentalComments
   );
   const [clientName, setClientName] = useState(draft?.client_name ?? "");
   const [techSig, setTechSig] = useState(draft?.tech_sig ?? "");
@@ -537,6 +568,13 @@ function ServiceSheetFormBody({
     }
     if (callType === "other" && !otherCallDesc.trim()) {
       validationErrors.call_type_other_desc = "Describe the other call type";
+    }
+    // Ticked the ERA box but wrote nothing: the tick means nothing, so block.
+    // The message names the escape hatch because the ERA is optional — this
+    // must never become a dead end on a job that doesn't need one.
+    if (eraRequired && !environmentalComments.trim()) {
+      validationErrors.environmental_comments =
+        "Describe the environmental risk, or untick the box";
     }
     if (Object.keys(validationErrors).length > 0) {
       setClientErrors(validationErrors);
@@ -704,6 +742,10 @@ function ServiceSheetFormBody({
         report_notes: reportNotes,
         risk_level: riskLevel,
         risk_comments: riskComments,
+        // Both ERA fields persist, including the tick — a mid-fill reload has
+        // to bring the section back EXPANDED, not just retain the text.
+        era_required: eraRequired,
+        environmental_comments: environmentalComments,
         client_name: clientName,
         tech_sig: techSig,
         client_sig: clientSig,
@@ -732,6 +774,8 @@ function ServiceSheetFormBody({
     reportNotes,
     riskLevel,
     riskComments,
+    eraRequired,
+    environmentalComments,
     clientName,
     techSig,
     clientSig,
@@ -802,6 +846,20 @@ function ServiceSheetFormBody({
         type="hidden"
         name="method_used"
         value={JSON.stringify(encodeOther(selectedMethods, otherMethod))}
+      />
+      {/* ERA rides as hidden inputs, like call_type_other_desc: the visible
+          textarea is unmounted when the tick is off, and the value is blanked
+          here too, so an accidental untick sends nothing while the typed text
+          survives in React state (re-ticking restores it). */}
+      <input
+        type="hidden"
+        name="era_required"
+        value={eraRequired ? "true" : ""}
+      />
+      <input
+        type="hidden"
+        name="environmental_comments"
+        value={eraRequired ? environmentalComments : ""}
       />
       <input type="hidden" name="photo_data_urls" value={JSON.stringify(photoDataUrls)} />
       <input type="hidden" name="technician_signature" value={techSig} />
@@ -1220,6 +1278,57 @@ function ServiceSheetFormBody({
           />
           {errors.risk_comments && (
             <p className="mt-1 text-sm text-red-500">{errors.risk_comments}</p>
+          )}
+        </div>
+
+        {/* ── Environmental Risk Assessment ──
+            Optional and collapsed by default: only relevant when toxic bait
+            is used outdoors. Stored in jobs.environmental_comments, which IS
+            the ERA column (migration 007's unused field, adopted here rather
+            than adding a duplicate). Presence of that text is the flag on the
+            row; this tick is filling state only.
+
+            The textarea deliberately carries NO `required` attribute: a
+            required control inside a collapsed reveal is the shape that has
+            produced undispatchable submits here before. The rule lives in Zod
+            (superRefine) plus the handleReview guard instead. */}
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={eraRequired}
+              onChange={(e) => setEraRequired(e.target.checked)}
+              className="mt-0.5 h-5 w-5 rounded border-gray-300 text-brand-darker focus:ring-brand"
+            />
+            <div className="flex-1">
+              <span className="block text-sm font-medium text-gray-900">
+                Environmental risk assessment
+              </span>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Only needed when toxic bait is used outside.
+              </p>
+            </div>
+          </label>
+          {eraRequired && (
+            <div className="mt-4">
+              <label htmlFor="environmental_comments_input" className={labelClass}>
+                Environmental risk assessment{" "}
+                <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                id="environmental_comments_input"
+                rows={4}
+                value={environmentalComments}
+                onChange={(e) => setEnvironmentalComments(e.target.value)}
+                className={inputClass}
+                placeholder="Describe the environmental risks and the controls in place, e.g. bait secured in tamper-resistant stations, non-target species considered"
+              />
+              {errors.environmental_comments && (
+                <p className="mt-1 text-sm text-red-500">
+                  {errors.environmental_comments}
+                </p>
+              )}
+            </div>
           )}
         </div>
 

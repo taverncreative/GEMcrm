@@ -12,6 +12,7 @@ import {
 } from "@/lib/photos/path";
 import { generateJobReference } from "@/lib/data/job-references";
 import { callTypeOtherDescForStorage } from "@/lib/utils/call-type-other";
+import { environmentalCommentsForStorage } from "@/lib/utils/environmental-comments";
 
 function emptyToNull(value: string | undefined): string | null {
   return value && value.trim() !== "" ? value.trim() : null;
@@ -748,6 +749,12 @@ async function writeServiceSheet(
       products_used: input.products_used,
       risk_level: input.risk_level,
       risk_comments: emptyToNull(input.risk_comments),
+      // ERA free text. Null unless the operator ticked the box, so abandoned
+      // text never reaches the row (and so never reaches a customer PDF).
+      environmental_comments: environmentalCommentsForStorage(
+        input.era_required,
+        input.environmental_comments
+      ),
       report_notes: emptyToNull(input.report_notes),
       photo_urls: photoUrls,
       client_present: input.client_present,

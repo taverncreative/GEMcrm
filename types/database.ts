@@ -113,8 +113,24 @@ export interface Job {
   client_signature_url: string | null;
   job_status: JobStatus;
   agreement_id: string | null;
+  /** UNUSED. Added by migration 007 alongside environmental_comments and
+   *  never wired to anything (0 rows populated in production). Left in place
+   *  rather than dropped; do not build on it without reviving it properly. */
   environmental_risk: string | null;
+  /** THIS COLUMN IS THE ENVIRONMENTAL RISK ASSESSMENT (ERA) BOX on the
+   *  service sheet — the free-text box the operator fills when toxic bait is
+   *  used outdoors. The column itself dates from migration 007, where it was
+   *  added speculatively and left unused (0 rows populated); the ERA feature
+   *  adopted it rather than adding a duplicate era_comments column, so NO
+   *  migration was needed. The name already describes the feature.
+   *
+   *  PRESENCE IS THE FLAG: there is no era_required boolean anywhere in the
+   *  schema. Non-empty means an ERA applies and every surface renders it;
+   *  NULL means none applies and every surface omits the section entirely
+   *  (PDF, job detail, view-only sheet). The operator's tick is transient
+   *  filling state and lives only in the Dexie service-sheet draft. */
   environmental_comments: string | null;
+  /** UNUSED. Migration 007, same story as environmental_risk. */
   protected_species_present: boolean;
   method_used: string[];
   photo_urls: string[];
