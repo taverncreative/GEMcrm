@@ -98,6 +98,31 @@ export async function setQuotePdfUrl(
   }
 }
 
+/**
+ * Mark a quote as sent (status 'draft' → 'sent', migration 045's CHECK).
+ *
+ * Called only after an email has ACTUALLY gone out, from emailDocumentAction,
+ * so every entry point marks it and a failed send never does. There is no
+ * sent_at column by design — the list needs "has this gone out yet", not a
+ * timeline, and adding a timestamp would mean a migration.
+ *
+ * Idempotent: re-sending an already-sent quote rewrites the same value.
+ * Not self-hiding (deleted_at is untouched), so a plain update is fine here —
+ * unlike a soft delete, which needs the SECURITY DEFINER RPC.
+ */
+export async function markQuoteSent(id: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quotes")
+    .update({ status: "sent" })
+    .eq("id", id);
+
+  if (error) {
+    console.error("[markQuoteSent]", error.code, error.message);
+    throw new Error(`Failed to mark quote sent: ${error.message}`);
+  }
+}
+
 /** A single quote by id (RLS filters soft-deleted rows). */
 export async function getQuoteById(id: string): Promise<Quote | null> {
   const supabase = await createClient();

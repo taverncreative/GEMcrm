@@ -11,10 +11,8 @@ import {
   generateInvoicePdfAction,
 } from "@/app/(app)/invoices/actions";
 import { getCustomerDetailAction } from "@/app/(app)/customers/actions";
-import { emailDocumentAction } from "@/app/(app)/reports/actions";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
-import { useIsOnline } from "@/lib/hooks/use-is-online";
-import { parseAndValidateRecipients } from "@/lib/validation/recipients";
+import { EmailDocumentButton } from "@/components/documents/email-document-button";
 import type { DocumentItem } from "@/lib/data/documents";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import {
@@ -138,198 +136,16 @@ function RowActions({ item }: { item: DocumentItem }) {
       ) : (
         <span className="text-xs text-gray-300">No PDF</span>
       )}
-      <EmailDocumentButton item={item} />
-    </>
-  );
-}
-
-/**
- * Email one stored document to whoever needs it after the fact — Nate's own
- * suggestion, and the answer to "the customer got it, nobody else did".
- *
- * Sits next to Open on every kind. The compose step is a dialog rather than an
- * inline panel because the desktop actions live in a narrow right-aligned
- * table cell, and the success state is a full dialog too — the same standard
- * as the print-basket confirmation, so a send can't be mistaken for nothing
- * having happened. Online-only, like the sibling pay/chase/generate actions.
- */
-function EmailDocumentButton({ item }: { item: DocumentItem }) {
-  const online = useIsOnline();
-  const [open, setOpen] = useState(false);
-  const [recipients, setRecipients] = useState("");
-  const [prefilled, setPrefilled] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState<{ to: string; label: string } | null>(null);
-
-  function openComposer() {
-    setError(null);
-    setOpen(true);
-    // Pre-fill the customer's own address on first open — the common case is
-    // "send it to them again". The row only carries {id, name}, so the email
-    // needs a fetch; a failure just leaves the box empty.
-    if (!prefilled && item.customer) {
-      setPrefilled(true);
-      void getCustomerDetailAction(item.customer.id).then((detail) => {
-        const email = detail?.customer?.email;
-        if (email) setRecipients((current) => (current ? current : email));
-      });
-    }
-  }
-
-  async function send() {
-    setError(null);
-    const parsed = parseAndValidateRecipients(recipients);
-    if (!parsed.ok) {
-      setError(parsed.error);
-      return;
-    }
-    setSending(true);
-    const res = await emailDocumentAction(item.kind, item.docId, parsed.emails);
-    setSending(false);
-    if (res.success) {
-      setOpen(false);
-      setRecipients("");
-      setPrefilled(false);
-      setSent({
-        to: res.emailedTo ?? parsed.emails.join(", "),
-        label: res.label ?? item.title,
-      });
-    } else {
-      setError(res.message ?? "Failed to send.");
-    }
-  }
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={openComposer}
-        disabled={!online}
-        title={online ? "Email this document" : "Online required"}
-        className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-      >
-        <svg
-          className="h-3.5 w-3.5"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={1.75}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"
-          />
-        </svg>
-        Email
-      </button>
-
-      {/* Compose */}
-      {open && (
-        <div
-          className="fixed inset-0 z-[70]"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Email ${item.title}`}
-        >
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl bg-white p-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] text-left shadow-xl sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:w-[28rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl">
-            <h2 className="text-base font-semibold text-gray-900">
-              Email this document
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">{item.title}</p>
-            <label
-              htmlFor={`doc-to-${item.id}`}
-              className="mt-4 mb-1 block text-xs font-medium text-gray-600"
-            >
-              Send to
-            </label>
-            <input
-              id={`doc-to-${item.id}`}
-              type="text"
-              value={recipients}
-              onChange={(e) => setRecipients(e.target.value)}
-              placeholder="name@example.com, second@example.com"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              Separate multiple emails with commas. They all go on one email,
-              with the document attached.
-            </p>
-            {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={send}
-                disabled={sending || !online}
-                className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {sending ? "Sending…" : "Send"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Success — the print-basket standard: a panel that stays put until
-          it's dismissed, not a note that can be scrolled past. */}
-      {sent && (
-        <div
-          className="fixed inset-0 z-[70]"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Document sent"
-        >
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setSent(null)}
-            aria-hidden="true"
-          />
-          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl bg-white p-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] text-center shadow-xl sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:w-[28rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
-              <svg
-                className="h-7 w-7 text-green-600"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="m4.5 12.75 6 6 9-13.5"
-                />
-              </svg>
-            </div>
-            <h2 className="mt-4 text-lg font-semibold text-gray-900">
-              Document sent
-            </h2>
-            <p className="mt-1 text-sm text-gray-600">
-              <span className="font-medium text-gray-900">{sent.label}</span> was
-              emailed to {sent.to}, with the PDF attached.
-            </p>
-            <button
-              type="button"
-              onClick={() => setSent(null)}
-              className="mt-5 w-full rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      )}
+      <EmailDocumentButton
+        kind={item.kind}
+        docId={item.docId}
+        title={item.title}
+        // Quotes carry their own bill-to address (resolved server-side, quote
+        // first then the linked customer), which is the only prefill a
+        // prospect quote can have — it has no customer row to fall back to.
+        prefillEmail={item.recipientEmail}
+        customerId={item.customer?.id ?? null}
+      />
     </>
   );
 }

@@ -4,6 +4,7 @@ import { formatQuoteCurrency } from "@/lib/quotes/money";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import { ROUTES } from "@/lib/constants/routes";
 import { DeleteQuoteButton } from "@/components/quotes/delete-quote-button";
+import { QuoteStatusBadge } from "@/components/quotes/quote-status-badge";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,7 @@ export default async function QuotesPage() {
             <thead>
               <tr className="border-b border-gray-100 text-left text-xs uppercase tracking-wider text-gray-400">
                 <th className="px-4 py-3">Number</th>
+                <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Customer</th>
                 <th className="px-4 py-3 text-right">Total</th>
                 <th className="px-4 py-3">Valid until</th>
@@ -72,6 +74,9 @@ export default async function QuotesPage() {
                       >
                         {q.quote_number ?? q.id.slice(0, 8)}
                       </Link>
+                    </td>
+                    <td className="px-4 py-3">
+                      <QuoteStatusBadge status={q.status} />
                     </td>
                     <td className="px-4 py-3 text-gray-800">{who}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-gray-800">

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { quoteRecipientEmail } from "@/lib/quotes/recipient";
 
 export type DocumentKind = "invoice" | "service_sheet" | "agreement" | "quote";
 
@@ -22,6 +23,12 @@ export interface DocumentItem {
   /** Quote only: the denormalised bill-to name, so a prospect quote (no
    *  linked customer row) still shows who it is for on the row. */
   partyName?: string | null;
+  /** Default address for the Email action, resolved server-side. Set for
+   *  quotes (their own bill-to address, else the linked customer's) — the
+   *  only prefill a PROSPECT quote can have, since it has no customer row to
+   *  look up. Other kinds leave it undefined and fall back to fetching the
+   *  linked customer client-side. */
+  recipientEmail?: string | null;
   /** Subtitle for the document, e.g. amount for an invoice. */
   subtitle?: string;
   /** Service-sheet only: site address one-liner (line 1 + town/postcode),
@@ -101,7 +108,10 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
   // real document from the moment it is created, so drafts are included.
   const { data: quotes } = await supabase
     .from("quotes")
-    .select("id, quote_number, total, quote_pdf_url, created_at, customer_name, customer:customers(id, name, company_name)")
+    // `email` on the join is the fallback for the Email action's prefill; it
+    // is read for recipientEmail below and deliberately not surfaced on the
+    // row's `customer` object, which stays {id, name, company_name}.
+    .select("id, quote_number, total, quote_pdf_url, created_at, customer_name, customer_email, customer:customers(id, name, company_name, email)")
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -222,10 +232,25 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
   }
 
   for (const q of quotes ?? []) {
-    const cust = one(
-      (q as unknown as { customer: Joined<{ id: string; name: string; company_name: string | null }> })
-        .customer
+    const custRow = one(
+      (q as unknown as {
+        customer: Joined<{
+          id: string;
+          name: string;
+          company_name: string | null;
+          email: string | null;
+        }>;
+      }).customer
     );
+    // Keep the row's customer object to the shape every other kind uses; the
+    // joined email is only for the prefill resolved just below.
+    const cust = custRow
+      ? {
+          id: custRow.id,
+          name: custRow.name,
+          company_name: custRow.company_name,
+        }
+      : null;
     const partyName = (q as unknown as { customer_name: string }).customer_name;
     items.push({
       id: `quote-${q.id}`,
@@ -235,6 +260,10 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
       reference: q.quote_number ?? null,
       customer: cust,
       partyName,
+      recipientEmail: quoteRecipientEmail(
+        (q as unknown as { customer_email: string | null }).customer_email,
+        custRow?.email
+      ),
       // PDF is generated lazily; link at the on-demand route, not the (possibly
       // still-null) stored URL, so Open always works.
       url: (q as unknown as { quote_pdf_url: string | null }).quote_pdf_url ?? "",

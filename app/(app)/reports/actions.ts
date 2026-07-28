@@ -8,6 +8,7 @@ import {
 } from "@/lib/data/documents";
 import { downloadReportPdf, sendDocumentAttachment } from "@/lib/services/email";
 import { renderAndStoreQuotePdf } from "@/lib/services/quote-pdf";
+import { markQuoteSent } from "@/lib/data/quotes";
 import { renderAndStoreInvoicePdf } from "@/lib/services/invoice-pdf";
 import { validateRecipients } from "@/lib/validation/recipients";
 
@@ -92,6 +93,21 @@ export async function emailDocumentAction(
   if (!res.success) {
     return { success: false, message: "Email failed to send. Try again." };
   }
+
+  // A quote is 'draft' until it actually goes out. Marking HERE, past the
+  // success check and inside the single send action, means every entry point
+  // (the quote detail page, the Documents list) marks it, and a failed send
+  // never does. Best-effort: the email is already delivered, so a status
+  // write that fails must not report the send as failed — it would invite a
+  // duplicate send to the customer.
+  if (kind === "quote") {
+    try {
+      await markQuoteSent(id);
+    } catch (err) {
+      console.error("[emailDocumentAction] markQuoteSent:", err);
+    }
+  }
+
   return {
     success: true,
     emailedTo: validated.emails.join(", "),

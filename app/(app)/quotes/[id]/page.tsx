@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getQuoteById } from "@/lib/data/quotes";
+import { getCustomerById } from "@/lib/data/customers";
 import { formatQuoteCurrency } from "@/lib/quotes/money";
+import { quoteRecipientEmail } from "@/lib/quotes/recipient";
 import { ROUTES } from "@/lib/constants/routes";
+import { QuoteStatusBadge } from "@/components/quotes/quote-status-badge";
+import { EmailQuoteAction } from "@/components/quotes/email-quote-action";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +34,19 @@ export default async function QuoteDetailPage({
   const pdfHref = `/api/pdf/quote/${quote.id}`;
   const lineItems = Array.isArray(quote.line_items) ? quote.line_items : [];
 
+  // Default recipient: the quote's own bill-to address, else the linked
+  // customer's. Only fetch the customer when the quote has no address of its
+  // own — a prospect quote has no customer_id to fetch anyway.
+  const linkedCustomer =
+    !quote.customer_email?.trim() && quote.customer_id
+      ? await getCustomerById(quote.customer_id)
+      : null;
+  const recipientEmail = quoteRecipientEmail(
+    quote.customer_email,
+    linkedCustomer?.email
+  );
+  const quoteTitle = `Quote ${quote.quote_number ?? quote.id.slice(0, 8)}`;
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -40,14 +57,23 @@ export default async function QuoteDetailPage({
           >
             ← Quotes
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-gray-900">
-            Quote {quote.quote_number ?? quote.id.slice(0, 8)}
-          </h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">{quoteTitle}</h1>
+            <QuoteStatusBadge status={quote.status} />
+          </div>
           <p className="mt-1 text-sm text-gray-500">
             {quote.customer_name} · Created {formatDate(quote.created_at)}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Email sits beside Download: the complaint was having to leave the
+              quote and hunt for it in Documentation to send it. */}
+          <EmailQuoteAction
+            quoteId={quote.id}
+            title={quoteTitle}
+            prefillEmail={recipientEmail || null}
+            customerId={quote.customer_id}
+          />
           <a
             href={pdfHref}
             target="_blank"
