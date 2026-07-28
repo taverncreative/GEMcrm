@@ -1599,6 +1599,18 @@ function ServiceSheetFormBody({
               <ReviewRow label="Risk">
                 {`${RISK_LEVEL_LABELS[riskLevel as keyof typeof RISK_LEVEL_LABELS] ?? riskLevel} — ${riskComments}`}
               </ReviewRow>
+              {/* ERA, next to Risk to match the form's ordering. Shown only
+                  when something will actually be stored — derived through the
+                  storage helper, so the row can never promise an ERA that the
+                  untick rule is about to clear. Absent on an ordinary sheet. */}
+              {environmentalCommentsForStorage(
+                eraRequired,
+                environmentalComments
+              ) && (
+                <ReviewRow label="Environmental risk">
+                  {environmentalComments}
+                </ReviewRow>
+              )}
               {reportNotes && (
                 <ReviewRow label="Report notes">{reportNotes}</ReviewRow>
               )}
