@@ -1,0 +1,100 @@
+"use server";
+
+import { requireUser } from "@/lib/auth/require-user";
+import {
+  getDocumentForEmail,
+  type DocumentForEmail,
+  type DocumentKind,
+} from "@/lib/data/documents";
+import { downloadReportPdf, sendDocumentAttachment } from "@/lib/services/email";
+import { renderAndStoreQuotePdf } from "@/lib/services/quote-pdf";
+import { renderAndStoreInvoicePdf } from "@/lib/services/invoice-pdf";
+import { validateRecipients } from "@/lib/validation/recipients";
+
+/**
+ * Load a document's PDF bytes, GENERATING them when there is nothing stored.
+ *
+ * A quote's PDF is rendered lazily — `quote_pdf_url` stays null until someone
+ * downloads it — and a legacy auto-invoice may never have had one rendered
+ * either. Emailing one of those must not fail just because nobody happened to
+ * open it first, so we render (and cache, via the same services the download
+ * routes use) and attach the fresh bytes. The same path covers a STALE stored
+ * URL, where the row points at an object that is no longer there.
+ *
+ * Service sheets and agreements are rendered and stored at completion/signing
+ * and the Documents list only lists rows whose PDF column is non-null, so
+ * there is nothing to generate for them: if their stored object can't be
+ * downloaded, that's a storage fault and the caller reports it rather than
+ * silently sending an email with no document on it.
+ */
+async function loadDocumentPdf(doc: DocumentForEmail): Promise<Buffer | null> {
+  if (doc.pdfUrl) {
+    const stored = await downloadReportPdf(doc.pdfUrl);
+    if (stored) return stored;
+  }
+  if (doc.kind === "quote") {
+    const rendered = await renderAndStoreQuotePdf(doc.id);
+    return rendered?.buffer ?? null;
+  }
+  if (doc.kind === "invoice") {
+    const rendered = await renderAndStoreInvoicePdf(doc.id);
+    return rendered ? downloadReportPdf(rendered.pdfUrl) : null;
+  }
+  return null;
+}
+
+/**
+ * Email any stored document from the Documents list — service sheet,
+ * agreement, quote or invoice — to one or more addresses, after the fact.
+ *
+ * Reuses the generic pieces rather than the report-specific sender: shared
+ * multi-recipient validation (any invalid address HARD-BLOCKS the whole send)
+ * and `sendDocumentAttachment`, whose subject and body name whatever document
+ * was attached. Online-only, like the sibling row actions.
+ */
+export async function emailDocumentAction(
+  kind: DocumentKind,
+  id: string,
+  recipients: string[]
+): Promise<{ success: boolean; message?: string; emailedTo?: string; label?: string }> {
+  await requireUser();
+  if (!id) return { success: false, message: "Missing document id" };
+
+  const validated = validateRecipients(recipients ?? []);
+  if (!validated.ok) return { success: false, message: validated.error };
+
+  const doc = await getDocumentForEmail(kind, id);
+  if (!doc) return { success: false, message: "Document not found" };
+
+  let pdf: Buffer | null;
+  try {
+    pdf = await loadDocumentPdf(doc);
+  } catch (err) {
+    console.error("[emailDocumentAction] pdf:", err);
+    return {
+      success: false,
+      message: "Could not prepare the document PDF. Try again.",
+    };
+  }
+  if (!pdf) {
+    return {
+      success: false,
+      message: "Could not load the document to attach. Try opening it first.",
+    };
+  }
+
+  const res = await sendDocumentAttachment(
+    validated.emails,
+    pdf,
+    doc.fileName,
+    doc.label
+  );
+  if (!res.success) {
+    return { success: false, message: "Email failed to send. Try again." };
+  }
+  return {
+    success: true,
+    emailedTo: validated.emails.join(", "),
+    label: doc.label,
+  };
+}

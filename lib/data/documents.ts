@@ -1,8 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 
+export type DocumentKind = "invoice" | "service_sheet" | "agreement" | "quote";
+
 export interface DocumentItem {
+  /** Kind-prefixed and unique across the union ("quote-<uuid>") — the React
+   *  key. Use `docId` for anything that has to address the underlying row. */
   id: string;
-  kind: "invoice" | "service_sheet" | "agreement" | "quote";
+  /** The underlying row's own id, unprefixed — what the email action takes. */
+  docId: string;
+  kind: DocumentKind;
   title: string;
   reference: string | null;
   customer: { id: string; name: string; company_name: string | null } | null;
@@ -121,6 +127,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
     const status = (inv as unknown as { status: string }).status;
     items.push({
       id: `inv-${inv.id}`,
+      docId: inv.id,
       kind: "invoice",
       title: `Invoice ${inv.invoice_number ?? inv.id.slice(0, 8)}`,
       reference: inv.invoice_number ?? null,
@@ -167,6 +174,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
       : null;
     items.push({
       id: `report-${r.id}`,
+      docId: r.id,
       kind: "service_sheet",
       title: ref ? `Service Sheet ${ref}` : "Service Sheet",
       reference: ref,
@@ -194,6 +202,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
     const renewalState = classifyRenewal(endDate);
     items.push({
       id: `agreement-${a.id}`,
+      docId: a.id,
       kind: "agreement",
       title: `Agreement ${a.reference_number ?? a.id.slice(0, 8)}`,
       reference: a.reference_number ?? null,
@@ -220,6 +229,7 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
     const partyName = (q as unknown as { customer_name: string }).customer_name;
     items.push({
       id: `quote-${q.id}`,
+      docId: q.id,
       kind: "quote",
       title: `Quote ${q.quote_number ?? q.id.slice(0, 8)}`,
       reference: q.quote_number ?? null,
@@ -237,4 +247,114 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
   // Newest first across the union.
   items.sort((x, y) => y.date.localeCompare(x.date));
   return items;
+}
+
+export interface DocumentForEmail {
+  kind: DocumentKind;
+  id: string;
+  /** The stored PDF, or null when none has been rendered yet. Quotes are
+   *  lazy by design (rendered on first download); a legacy auto-invoice can
+   *  also have none. The caller generates in that case — see
+   *  emailDocumentAction. */
+  pdfUrl: string | null;
+  /** Names the document in the email subject/body, e.g. "Quote QUO-1042". */
+  label: string;
+  /** Attachment filename. */
+  fileName: string;
+}
+
+/** Filesystem/mail-client-safe filename from a document label. */
+function attachmentFileName(label: string): string {
+  return `${label.replace(/[\\/:*?"<>|]+/g, " ").trim()}.pdf`;
+}
+
+/**
+ * Look up ONE document by kind + row id, resolved to what an email needs:
+ * where its PDF is (or that there isn't one yet) and what to call it.
+ *
+ * The kinds live in four different tables with four different PDF columns,
+ * so this is the one place that mapping is written down — the same job
+ * getAllDocuments does for the list, for a single row.
+ */
+export async function getDocumentForEmail(
+  kind: DocumentKind,
+  id: string
+): Promise<DocumentForEmail | null> {
+  const supabase = await createClient();
+
+  if (kind === "service_sheet") {
+    const { data } = await supabase
+      .from("reports")
+      .select("id, pdf_url, job:jobs(reference_number, job_date)")
+      .eq("id", id)
+      .maybeSingle();
+    if (!data) return null;
+    const job = Array.isArray(data.job) ? data.job[0] : data.job;
+    const ref = job?.reference_number ?? null;
+    const label = ref
+      ? `Service Sheet ${ref}`
+      : job?.job_date
+        ? `Service Sheet ${new Date(job.job_date).toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })}`
+        : "Service Sheet";
+    return {
+      kind,
+      id,
+      pdfUrl: data.pdf_url ?? null,
+      label,
+      fileName: attachmentFileName(label),
+    };
+  }
+
+  if (kind === "agreement") {
+    const { data } = await supabase
+      .from("agreements")
+      .select("id, reference_number, contract_pdf_url")
+      .eq("id", id)
+      .maybeSingle();
+    if (!data) return null;
+    const label = `Agreement ${data.reference_number ?? data.id.slice(0, 8)}`;
+    return {
+      kind,
+      id,
+      pdfUrl: data.contract_pdf_url ?? null,
+      label,
+      fileName: attachmentFileName(label),
+    };
+  }
+
+  if (kind === "quote") {
+    const { data } = await supabase
+      .from("quotes")
+      .select("id, quote_number, quote_pdf_url")
+      .eq("id", id)
+      .maybeSingle();
+    if (!data) return null;
+    const label = `Quote ${data.quote_number ?? data.id.slice(0, 8)}`;
+    return {
+      kind,
+      id,
+      pdfUrl: data.quote_pdf_url ?? null,
+      label,
+      fileName: attachmentFileName(label),
+    };
+  }
+
+  const { data } = await supabase
+    .from("invoices")
+    .select("id, invoice_number, pdf_url")
+    .eq("id", id)
+    .maybeSingle();
+  if (!data) return null;
+  const label = `Invoice ${data.invoice_number ?? data.id.slice(0, 8)}`;
+  return {
+    kind,
+    id,
+    pdfUrl: data.pdf_url ?? null,
+    label,
+    fileName: attachmentFileName(label),
+  };
 }

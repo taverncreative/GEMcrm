@@ -19,6 +19,16 @@
  *                         replies still land in a real inbox. Unset means
  *                         no Reply-To header at all, which is the
  *                         pre-existing behaviour and the safe default.
+ *   RESEND_BCC          — blind copy on every CUSTOMER-FACING send, e.g.
+ *                         "nate@gemservices.uk". Customer mail is addressed
+ *                         to the customer, so the operator never saw a copy
+ *                         of what went out; this puts one in his inbox
+ *                         without the customer seeing the address (BCC, not
+ *                         To). Opt-in per sender via `bcc: true` — internal
+ *                         mail (feedback, edit requests, developer inbox) is
+ *                         already addressed to us and must NOT be copied.
+ *                         Unset means no BCC at all: behaviour is exactly as
+ *                         it was before.
  *
  * Other email-sending modules in this app (`invoice-email.ts`,
  * `review-message.ts`) delegate to `sendEmail` here, so swapping providers
@@ -114,6 +124,9 @@ interface SendEmailInput {
   /** Override the default Reply-To for one-off cases. Omit to inherit
    *  RESEND_REPLY_TO (see defaultReplyTo). */
   replyTo?: string | string[];
+  /** Opt this send in to the configured RESEND_BCC (see defaultBcc). Set it
+   *  on customer-facing mail only; internal mail is already addressed to us. */
+  bcc?: boolean;
   /** Resend-style attachments: filename + base64 / Buffer content. */
   attachments?: Array<{ filename: string; content: string | Buffer }>;
 }
@@ -161,6 +174,25 @@ function defaultReplyTo(): string | undefined {
 }
 
 /**
+ * Blind-copy address for customer-facing mail, from RESEND_BCC.
+ *
+ * Report/agreement/document mail is addressed to the CUSTOMER, so the
+ * operator never received a copy of what his own system sent. This puts one
+ * in his inbox. BCC rather than To or Cc so the customer never sees the
+ * extra address on their copy.
+ *
+ * Read at call time (like defaultFrom / defaultReplyTo) so the env can change
+ * between sends without a restart. Unset, empty, or whitespace all mean NO
+ * BCC — the pre-existing behaviour. Only applied when the caller passes
+ * `bcc: true`, which the customer-facing senders do and the internal ones
+ * (feedback, edit request) deliberately don't.
+ */
+function defaultBcc(): string | undefined {
+  const value = process.env.RESEND_BCC?.trim();
+  return value ? value : undefined;
+}
+
+/**
  * Send an email. Idempotent at the call-site sense — Resend handles
  * retries; we don't.
  */
@@ -181,6 +213,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   const resend = getResend();
   const from = input.from ?? defaultFrom();
   const replyTo = input.replyTo ?? defaultReplyTo();
+  const bcc = input.bcc ? defaultBcc() : undefined;
 
   // Dev fallback — log a digest so workflows are testable without Resend.
   if (!resend) {
@@ -200,7 +233,9 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
           (replyTo
             ? ` reply_to=${Array.isArray(replyTo) ? replyTo.join(", ") : replyTo}`
             : "") +
-          ` to=${recipients.join(", ")} subject=${input.subject}` +
+          ` to=${recipients.join(", ")}` +
+          (bcc ? ` bcc=${bcc}` : "") +
+          ` subject=${input.subject}` +
           (attachDigest ? ` attachments=${attachDigest}` : "") +
           (anchor ? ` link="${anchor[2]}" -> ${anchor[1]}` : "") +
           (textUrl ? ` link=${textUrl[0]}` : "")
@@ -225,6 +260,9 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       // The SDK takes camelCase `replyTo` and puts `reply_to` on the wire.
       // Omitted entirely when unset, so no empty header is sent.
       ...(replyTo ? { replyTo } : {}),
+      // Blind copy for the operator on customer-facing mail. Omitted entirely
+      // when RESEND_BCC is unset or the sender didn't opt in.
+      ...(bcc ? { bcc } : {}),
       ...(input.attachments ? { attachments: input.attachments } : {}),
     } as Parameters<typeof resend.emails.send>[0];
 
@@ -287,6 +325,7 @@ export async function sendServiceReport(
     to,
     subject: `${BUSINESS.name} – Your Service Report`,
     html: serviceReportHtml(customer.name, link),
+    bcc: true,
     ...(pdf ? { attachments: [{ filename, content: pdf }] } : {}),
   });
 }
@@ -319,6 +358,7 @@ export async function sendAgreement(
     to,
     subject: `${BUSINESS.name} – Your Pest Management Agreement`,
     html: agreementHtml(customer.name, link),
+    bcc: true,
     ...(pdf ? { attachments: [{ filename, content: pdf }] } : {}),
   });
 }
@@ -354,6 +394,7 @@ export async function sendAgreementReview(
     to,
     subject: `${BUSINESS.name} – Your pest management agreement to review`,
     html: agreementReviewHtml(customer.name, link),
+    bcc: true,
     ...(pdf ? { attachments: [{ filename, content: pdf }] } : {}),
   });
 }
@@ -385,11 +426,38 @@ export async function sendLibraryDocument(
   if (!file) {
     return { success: false, error: "Could not load the document to attach" };
   }
+  return sendDocumentAttachment(recipients, file, fileName, label);
+}
+
+/**
+ * Email an ALREADY-LOADED document as an attachment — the generic sender
+ * behind both the library email above and the Documents-list "Email" action.
+ *
+ * Takes bytes rather than a storage path because not every document has a
+ * stored object to fetch: a quote's PDF is rendered lazily, so the caller may
+ * have just generated the buffer in memory. Deliberately NOT the
+ * report-specific `sendServiceReport` — the subject and body name whatever
+ * document was sent, so it reads correctly for a quote, an invoice, an
+ * agreement or a service sheet.
+ *
+ * `fileName`'s extension drives the MIME type Resend infers, so pass the real
+ * name. Customer-facing, so it carries the RESEND_BCC copy.
+ */
+export async function sendDocumentAttachment(
+  recipients: string[],
+  content: Buffer,
+  fileName: string,
+  label: string
+): Promise<SendEmailResult> {
+  if (recipients.length === 0) {
+    return { success: false, error: "Add at least one recipient" };
+  }
   return sendEmail({
     to: recipients,
     subject: `${BUSINESS.name} – ${label}`,
     html: libraryDocumentHtml(label),
-    attachments: [{ filename: fileName, content: file }],
+    attachments: [{ filename: fileName, content }],
+    bcc: true,
   });
 }
 

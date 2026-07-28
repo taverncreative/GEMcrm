@@ -20,6 +20,7 @@ import {
 function doc(overrides: Partial<DocumentItem>): DocumentItem {
   return {
     id: Math.random().toString(36).slice(2),
+    docId: Math.random().toString(36).slice(2),
     kind: "service_sheet",
     title: "Doc",
     reference: null,
