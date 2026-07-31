@@ -362,13 +362,16 @@ describe("CustomerSidePanel — online-required guards", () => {
       expect(screen.getByText("Test Customer")).toBeInTheDocument();
     });
 
-    // Desktop action bar.
+    // Desktop action bar. "Create Invoice" used to sit beside New Booking;
+    // slice 2a removed in-app invoice creation, so it must be GONE rather
+    // than present-but-disabled.
     const bookingBtn = screen.getAllByRole("button", { name: /New Booking/i })[0];
-    const invoiceBtn = screen.getByRole("button", { name: /Create Invoice/i });
     const deleteBtn = screen.getByRole("button", { name: /Delete customer/i });
     expect(bookingBtn).not.toBeDisabled();
-    expect(invoiceBtn).not.toBeDisabled();
     expect(deleteBtn).not.toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: /Create Invoice/i })
+    ).toBeNull();
 
     // Type toggle buttons (Commercial/Domestic) also enabled.
     const commercialBtn = screen.getByRole("button", { name: "Commercial" });
@@ -381,7 +384,7 @@ describe("CustomerSidePanel — online-required guards", () => {
     expect(reviewCheckbox).not.toBeDisabled();
   });
 
-  it("Invoice + Delete stay disabled offline; New Booking + toggles do NOT", async () => {
+  it("Delete stays disabled offline; New Booking + toggles do NOT", async () => {
     await db.customers.put(makeCustomer());
     render(<CustomerSidePanel customerId="cust-1" onClose={vi.fn()} />);
 
@@ -393,17 +396,16 @@ describe("CustomerSidePanel — online-required guards", () => {
     // event-listener path the useIsOnline hook exposes.
     setOffline();
 
-    // Create Invoice + Delete remain online-only — those multi-entity
-    // writes aren't wrapped (Invoice/Agreement out of scope; Delete is
-    // a cascade). They stay disabled with the tooltip.
+    // Delete remains online-only (it is a cascade). Create Invoice is no
+    // longer here at all to be gated — slice 2a removed it.
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: /Create Invoice/i })
+        screen.getByRole("button", { name: /Delete customer/i })
       ).toBeDisabled();
     });
     expect(
-      screen.getByRole("button", { name: /Delete customer/i })
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: /Create Invoice/i })
+    ).toBeNull();
 
     // New Booking is now offline-capable (step 8) — NOT disabled.
     const bookingBtn = screen.getAllByRole("button", {

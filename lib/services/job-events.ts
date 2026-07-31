@@ -3,8 +3,8 @@ import { createTask, hasPendingTaskOfType } from "@/lib/data/tasks";
 import { getCustomerById } from "@/lib/data/customers";
 import { getSiteById } from "@/lib/data/sites";
 import { getReportByJobId } from "@/lib/data/reports";
-import { createInvoiceForJob, getInvoiceByJobId } from "@/lib/data/invoices";
-import { renderAndStoreInvoicePdf } from "@/lib/services/invoice-pdf";
+// No invoice imports: job completion no longer creates one. See the note in
+// onJobCompleted below.
 import { sendServiceReport } from "@/lib/services/email";
 import { todayUk, dateUk } from "@/lib/utils/today-uk";
 import { REVIEW_REQUESTS_ENABLED } from "@/lib/constants/feature-flags";
@@ -109,26 +109,25 @@ export async function onJobCompleted(
       }
     }
 
-    // Auto-create invoice if job has a value and isn't already invoiced.
-    // Render its PDF inline so the auto-invoice comes out complete (number
-    // + 20% VAT + PDF) like a manual one — best-effort: a render failure
-    // never blocks completion; the Documents "Generate PDF" button is the
-    // recovery.
-    if (job.value && job.value > 0 && !job.is_invoiced) {
-      const existingInvoice = await getInvoiceByJobId(job.id);
-      if (!existingInvoice) {
-        const inv = await createInvoiceForJob(
-          job.id,
-          context.customerId,
-          job.value
-        );
-        try {
-          await renderAndStoreInvoicePdf(inv.id);
-        } catch (pdfErr) {
-          console.error("[onJobCompleted] invoice PDF generation:", pdfErr);
-        }
-      }
-    }
+    // NO INVOICE IS CREATED HERE ANY MORE (Slice 2a, 2026-07-31).
+    //
+    // Completing a job with a value used to auto-create an invoice, assign
+    // it a sequential number off invoice_number_seq, render its PDF and
+    // upload it. Nate does his real invoicing in QuickBooks, so those
+    // invoices were never sent: prod accumulated 9 of them, 0 ever sent, 1
+    // ever marked paid, the most recent minted three days before this
+    // change off a £2 job. They were generated AT him, silently.
+    //
+    // What replaced it (slice 1, migration 041): the `needs_invoice` flag.
+    // He ticks "Invoice required" on the service sheet, the job collects in
+    // the homepage "Invoices required" checklist, and he ticks it off once
+    // he has billed it in QuickBooks. That path is entirely separate from
+    // this one and reads no invoice table.
+    //
+    // Deliberately NOT touched here: the existing invoices and their PDFs,
+    // the invoices / invoice_jobs tables, the numbering sequence and
+    // trigger, and `jobs.is_invoiced` / `jobs.is_paid` (inert historical
+    // data on 9 and 1 rows). Hiding the remaining invoice UI is slice 2b.
   } catch (err) {
     console.error("[onJobCompleted] Failed to run post-complete events:", err);
   }

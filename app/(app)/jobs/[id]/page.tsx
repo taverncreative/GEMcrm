@@ -46,7 +46,6 @@ import {
 } from "@/components/jobs/follow-up-context";
 import { RescheduleJobModal } from "@/components/jobs/reschedule-job-modal";
 import { NeedsInvoiceToggle } from "@/components/jobs/needs-invoice-toggle";
-import { CreateInvoiceButton } from "@/components/invoices/create-invoice-button";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { SmartBackButton } from "@/components/smart-back-button";
 import { renderProductsForOperator } from "@/lib/products/render";
@@ -472,8 +471,11 @@ export default function JobDetailPage() {
             <JobStatusActions jobId={job.id} currentStatus={job.job_status} />
             {/* "Invoices required" checklist flag (migration 041). Completed
                 jobs only — the recovery path if the sheet's "Invoice
-                required" box was missed. Slice 1; independent of the legacy
-                Create Invoice button below (Slice 2). */}
+                required" box was missed. This is now the ONLY invoice-related
+                control on this page: the legacy "Create Invoice" button was
+                removed in slice 2a, when in-app invoice creation was stopped
+                for good. The "Invoiced" chip below is a read of historical
+                data, not a creation path. */}
             {job.job_status === "completed" && (
               <NeedsInvoiceToggle
                 jobId={job.id}
@@ -492,33 +494,6 @@ export default function JobDetailPage() {
                 </svg>
                 Fill Service Sheet
               </Link>
-            )}
-            {customer && !job.is_invoiced && (
-              <CreateInvoiceButton
-                label="Create Invoice"
-                presetCustomer={customer}
-                presetJobId={job.id}
-                presetAmount={job.value ?? null}
-                presetDescription={(() => {
-                  // Auto-summarise: "Pest control — wasps, mice · 12 Jun 2026"
-                  const parts: string[] = [];
-                  parts.push("Pest control");
-                  if (job.pest_species && job.pest_species.length > 0) {
-                    parts.push(`— ${job.pest_species.join(", ")}`);
-                  }
-                  parts.push(
-                    `· ${new Date(job.job_date).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}`
-                  );
-                  if (job.reference_number) {
-                    parts.push(`(ref ${job.reference_number})`);
-                  }
-                  return parts.join(" ");
-                })()}
-              />
             )}
             {job.is_invoiced && (
               <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">

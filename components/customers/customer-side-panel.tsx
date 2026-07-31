@@ -60,7 +60,6 @@ const wrappedSetCustomerType = wrapAction(setCustomerTypeAction, {
 });
 import { BookingModal } from "@/components/bookings/booking-modal";
 import { AddSiteForm } from "@/components/sites/add-site-form";
-import { InvoiceCreatorModal } from "@/components/invoices/invoice-creator-modal";
 import { DeleteCustomerConfirm } from "@/components/customers/delete-customer-confirm";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
@@ -121,7 +120,6 @@ export function CustomerSidePanel({
   // attempt actually reached the server.
   const online = useIsOnline();
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [addSiteOpen, setAddSiteOpen] = useState(false);
   const [, startTransition] = useTransition();
@@ -478,19 +476,12 @@ export function CustomerSidePanel({
               {/* Action bar — desktop only. On mobile, the same actions
                   live in the sticky bottom bar so the primary CTA is
                   always thumb-reachable as the panel is scrolled. */}
-              {/* Action bar — both buttons are online-only because their
-                  underlying actions (createBookingAction,
-                  createInvoiceAction) are multi-entity and the
-                  entity_ids[] sync-engine guard hasn't shipped yet.
-                  Step-7 reads-only conversion: keep them visible so
-                  the operator sees what's possible, but disable + add
-                  a tooltip when offline so a tap doesn't silently
-                  fail. The same actions live in the sticky mobile bar
-                  below; this block only renders on md+. */}
-              <div className="hidden grid-cols-2 gap-2 md:grid">
-                {/* New Booking is offline-capable (step 8) — no guard.
-                    Create Invoice stays online-only (multi-entity write
-                    not yet wrapped). */}
+              {/* Action bar — desktop only; the same action lives in the
+                  sticky mobile bar below. "Create Invoice" sat beside New
+                  Booking until slice 2a removed in-app invoice creation, so
+                  this is a single-button row now. New Booking is
+                  offline-capable (step 8), hence no online guard. */}
+              <div className="hidden gap-2 md:grid">
                 <button
                   type="button"
                   onClick={() => setBookingOpen(true)}
@@ -500,18 +491,6 @@ export function CustomerSidePanel({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
                   New Booking
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setInvoiceOpen(true)}
-                  disabled={!online}
-                  title={online ? undefined : "Online required"}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400 disabled:hover:bg-gray-50"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-                  </svg>
-                  Create Invoice
                 </button>
               </div>
 
@@ -1036,17 +1015,12 @@ export function CustomerSidePanel({
         )}
       </aside>
 
-      {/* Booking + invoice + delete preset to this customer */}
+      {/* Booking + delete preset to this customer */}
       {detail && (
         <>
           <BookingModal
             open={bookingOpen}
             onClose={() => setBookingOpen(false)}
-            presetCustomer={detail}
-          />
-          <InvoiceCreatorModal
-            open={invoiceOpen}
-            onClose={() => setInvoiceOpen(false)}
             presetCustomer={detail}
           />
           <DeleteCustomerConfirm

@@ -1,9 +1,18 @@
 /**
- * onJobCompleted auto-invoice (migration 037): when a completed job has a
- * value and isn't already invoiced, the side-effect must create the invoice
- * AND render+store its PDF inline, so an auto-invoice comes out complete
- * rather than bare. PDF generation is best-effort — a render failure is
- * swallowed and never blocks completion.
+ * onJobCompleted creates NO invoice (slice 2a, 2026-07-31).
+ *
+ * This file used to pin the opposite: a completed job with a value
+ * auto-created an invoice and rendered its PDF inline. Nate does his real
+ * invoicing in QuickBooks and never used the in-app one — prod accumulated
+ * 9 invoices, 0 ever sent, the most recent minted three days before this
+ * change off a £2 job — so the whole path was removed. The replacement is
+ * the `needs_invoice` checklist (migration 041), which touches no invoice
+ * table at all.
+ *
+ * The file is KEPT rather than deleted, inverted into a regression guard:
+ * it is the thing that fails if anyone re-adds invoice creation to job
+ * completion. The invoice modules are still mocked so that a re-introduced
+ * import would be observable here rather than hitting a real client.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -63,27 +72,35 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("onJobCompleted auto-invoice PDF", () => {
-  it("creates the invoice AND renders its PDF inline", async () => {
+describe("onJobCompleted no longer creates invoices", () => {
+  it("a completed job WITH a value creates no invoice and no PDF", async () => {
     await onJobCompleted(valuedJob as never, CTX);
-    expect(createInvoiceForJob).toHaveBeenCalledWith("job1", "cust1", 105);
-    expect(renderAndStoreInvoicePdf).toHaveBeenCalledWith("inv1");
+    expect(createInvoiceForJob).not.toHaveBeenCalled();
+    expect(renderAndStoreInvoicePdf).not.toHaveBeenCalled();
+    // Not even a lookup: the whole block is gone, not merely guarded.
+    expect(getInvoiceByJobId).not.toHaveBeenCalled();
   });
 
-  it("a PDF render failure is swallowed (never blocks completion)", async () => {
-    renderAndStoreInvoicePdf.mockRejectedValueOnce(new Error("chromium boom"));
+  it("a large value changes nothing — the amount was never the gate", async () => {
+    await onJobCompleted({ ...valuedJob, value: 5000 } as never, CTX);
+    expect(createInvoiceForJob).not.toHaveBeenCalled();
+  });
+
+  it("a completed job with NO value likewise creates nothing", async () => {
+    await onJobCompleted({ ...valuedJob, value: null } as never, CTX);
+    expect(createInvoiceForJob).not.toHaveBeenCalled();
+    expect(renderAndStoreInvoicePdf).not.toHaveBeenCalled();
+  });
+
+  it("an already-invoiced job creates nothing (unchanged)", async () => {
+    await onJobCompleted({ ...valuedJob, is_invoiced: true } as never, CTX);
+    expect(createInvoiceForJob).not.toHaveBeenCalled();
+    expect(renderAndStoreInvoicePdf).not.toHaveBeenCalled();
+  });
+
+  it("completion still resolves cleanly with the invoice step gone", async () => {
     await expect(
       onJobCompleted(valuedJob as never, CTX)
     ).resolves.toBeUndefined();
-    expect(createInvoiceForJob).toHaveBeenCalledTimes(1);
-  });
-
-  it("no value / already invoiced → no invoice, no PDF", async () => {
-    await onJobCompleted(
-      { ...valuedJob, is_invoiced: true } as never,
-      CTX
-    );
-    expect(createInvoiceForJob).not.toHaveBeenCalled();
-    expect(renderAndStoreInvoicePdf).not.toHaveBeenCalled();
   });
 });
