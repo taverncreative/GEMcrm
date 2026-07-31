@@ -42,10 +42,6 @@ vi.mock("@/lib/data/sites", () => ({
 vi.mock("@/lib/data/reports", () => ({
   getReportByJobId: vi.fn(async () => null),
 }));
-vi.mock("@/lib/data/invoices", () => ({
-  getInvoiceByJobId: vi.fn(async () => null),
-  createInvoiceForJob: vi.fn(async () => ({})),
-}));
 vi.mock("@/lib/services/email", () => ({
   sendServiceReport: vi.fn(async () => ({ success: true })),
 }));

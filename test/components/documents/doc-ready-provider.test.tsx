@@ -93,7 +93,7 @@ describe("ensureCustomerDocReady (imperative API)", () => {
       <DocReadyProvider>
         <Harness
           customer={makeCustomer({ email: "ops@acme.co.uk" })}
-          target={{ verb: "send", doc: "invoice" }}
+          target={{ verb: "send", doc: "agreement" }}
           onResult={onResult}
         />
       </DocReadyProvider>
@@ -116,7 +116,7 @@ describe("ensureCustomerDocReady (imperative API)", () => {
       <DocReadyProvider>
         <Harness
           customer={makeCustomer({ id: "c-1", email: null })}
-          target={{ verb: "send", doc: "invoice" }}
+          target={{ verb: "send", doc: "agreement" }}
           onResult={onResult}
         />
       </DocReadyProvider>
@@ -183,7 +183,7 @@ describe("ensureCustomerDocReady (imperative API)", () => {
       <DocReadyProvider>
         <Harness
           customer={makeCustomer({ id: "c-1", email: null })}
-          target={{ verb: "send", doc: "invoice" }}
+          target={{ verb: "send", doc: "agreement" }}
           onResult={onResult}
         />
       </DocReadyProvider>

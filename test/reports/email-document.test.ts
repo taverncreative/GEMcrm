@@ -56,15 +56,6 @@ vi.mock("@/lib/services/quote-pdf", () => ({
     (renderQuoteMock as unknown as (...x: unknown[]) => Promise<unknown>)(...a),
 }));
 
-const renderInvoiceMock = vi.fn(async (_id: string) => ({
-  pdfUrl: "https://storage.test/reports/invoices/i1/invoice.pdf",
-  customerId: "c1",
-}));
-vi.mock("@/lib/services/invoice-pdf", () => ({
-  renderAndStoreInvoicePdf: (...a: unknown[]) =>
-    (renderInvoiceMock as unknown as (...x: unknown[]) => Promise<unknown>)(...a),
-}));
-
 vi.mock("@/lib/auth/require-user", () => ({
   requireUser: vi.fn(async () => ({ id: "op" })),
 }));
@@ -90,7 +81,6 @@ beforeEach(() => {
   });
   getDocMock.mockReset();
   renderQuoteMock.mockClear();
-  renderInvoiceMock.mockClear();
 });
 
 describe("attaches the right file for each kind", () => {
@@ -114,7 +104,6 @@ describe("attaches the right file for each kind", () => {
     expect(attachment()?.content.toString()).toContain("stored");
     // Nothing generated — the stored PDF was there.
     expect(renderQuoteMock).not.toHaveBeenCalled();
-    expect(renderInvoiceMock).not.toHaveBeenCalled();
   });
 
   it("an agreement sends its stored contract PDF", async () => {

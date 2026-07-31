@@ -58,9 +58,6 @@ vi.mock("@/lib/services/quote-pdf", () => ({
     buffer: Buffer.from("%PDF-1.4 fresh"),
   })),
 }));
-vi.mock("@/lib/services/invoice-pdf", () => ({
-  renderAndStoreInvoicePdf: vi.fn(async () => null),
-}));
 vi.mock("@/lib/auth/require-user", () => ({
   requireUser: vi.fn(async () => ({ id: "op" })),
 }));

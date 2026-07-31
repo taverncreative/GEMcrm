@@ -56,7 +56,6 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 import { sendEmail, sendServiceReport, sendAgreement } from "@/lib/services/email";
-import { sendInvoiceEmail } from "@/lib/services/invoice-email";
 
 const customer = { id: "c1", name: "Edna", email: "edna@example.test" } as Customer;
 const PDF_URL =
@@ -147,14 +146,4 @@ describe("Reply-To applies across ALL senders", () => {
     expect(sendMock.mock.calls[0][0].replyTo).toBe("nate@gemservices.uk");
   });
 
-  it("the invoice inherits it (it delegates to sendEmail)", async () => {
-    const invoice = {
-      id: "abcdef12-0000-4000-8000-000000000000",
-      invoice_number: "00042",
-      amount: 120,
-      due_date: "2026-08-01",
-    } as Invoice;
-    await sendInvoiceEmail(customer, invoice, PDF_URL);
-    expect(sendMock.mock.calls[0][0].replyTo).toBe("nate@gemservices.uk");
-  });
 });

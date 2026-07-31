@@ -47,7 +47,7 @@ function makeCustomer(overrides: Partial<Customer> = {}): Customer {
 }
 
 describe("customerDocReadiness — SEND, email gate (doc-independent)", () => {
-  it.each<DocType>(["invoice", "report", "agreement"])(
+  it.each<DocType>(["report", "agreement"])(
     "%s send with email on file → ready",
     (doc) => {
       const r = customerDocReadiness(
@@ -60,7 +60,7 @@ describe("customerDocReadiness — SEND, email gate (doc-independent)", () => {
     }
   );
 
-  it.each<DocType>(["invoice", "report", "agreement"])(
+  it.each<DocType>(["report", "agreement"])(
     "%s send with no email → email required",
     (doc) => {
       const r = customerDocReadiness(makeCustomer({ email: null }), {
@@ -75,57 +75,39 @@ describe("customerDocReadiness — SEND, email gate (doc-independent)", () => {
   it("whitespace-only email counts as missing", () => {
     const r = customerDocReadiness(makeCustomer({ email: "  " }), {
       verb: "send",
-      doc: "invoice",
+      doc: "report",
     });
     expect(r.required).toEqual(["email"]);
   });
 });
 
-describe("customerDocReadiness — address offered for INVOICE only", () => {
-  it("invoice send, no email, no address → offers address", () => {
-    const r = customerDocReadiness(makeCustomer({ email: null }), {
-      verb: "send",
-      doc: "invoice",
-    });
-    expect(r.optional).toEqual(["address"]);
-  });
+describe("customerDocReadiness — nothing is optional any more", () => {
+  // The invoice was the only document that offered a postal address (its
+  // bill-to block). It was removed in slices 2b/2c, so `optional` is now
+  // empty for every document, prompt or no prompt.
+  it.each<DocType>(["report", "agreement"])(
+    "%s send, no email → prompts for the email and offers nothing",
+    (doc) => {
+      const r = customerDocReadiness(makeCustomer({ email: null }), {
+        verb: "send",
+        doc,
+      });
+      expect(r.required).toEqual(["email"]);
+      expect(r.optional).toEqual([]);
+    }
+  );
 
-  it("invoice send, no email, address already on file → does NOT offer it", () => {
+  it("an address already on file changes nothing", () => {
     const r = customerDocReadiness(
       makeCustomer({ email: null, address_line_1: "1 Way", postcode: "T1 1AA" }),
-      { verb: "send", doc: "invoice" }
+      { verb: "send", doc: "report" }
     );
-    expect(r.optional).toEqual([]);
-  });
-
-  it("report send, no email → never offers an address (site address is used)", () => {
-    const r = customerDocReadiness(makeCustomer({ email: null }), {
-      verb: "send",
-      doc: "report",
-    });
-    expect(r.optional).toEqual([]);
-  });
-
-  it("agreement send, no email → never offers an address", () => {
-    const r = customerDocReadiness(makeCustomer({ email: null }), {
-      verb: "send",
-      doc: "agreement",
-    });
-    expect(r.optional).toEqual([]);
-  });
-
-  it("invoice send with email present → no prompt, so no address offered", () => {
-    const r = customerDocReadiness(makeCustomer({ email: "ops@acme.co.uk" }), {
-      verb: "send",
-      doc: "invoice",
-    });
-    expect(r.ready).toBe(true);
     expect(r.optional).toEqual([]);
   });
 });
 
 describe("customerDocReadiness — GENERATE / DOWNLOAD never prompt", () => {
-  it.each<DocType>(["invoice", "report", "agreement"])(
+  it.each<DocType>(["report", "agreement"])(
     "generate %s with a bare customer → ready, nothing required/offered",
     (doc) => {
       const r = customerDocReadiness(makeCustomer({ email: null }), {
@@ -138,20 +120,20 @@ describe("customerDocReadiness — GENERATE / DOWNLOAD never prompt", () => {
     }
   );
 
-  it("download invoice with no email → ready (download === generate)", () => {
+  it("download with no email → ready (download === generate)", () => {
     const r = customerDocReadiness(makeCustomer({ email: null }), {
       verb: "download",
-      doc: "invoice",
+      doc: "report",
     });
     expect(r.ready).toBe(true);
   });
 });
 
 describe("customerDocReadiness — null customer", () => {
-  it("invoice send + null → email required, address offered", () => {
-    const r = customerDocReadiness(null, { verb: "send", doc: "invoice" });
+  it("agreement send + null → email required, nothing offered", () => {
+    const r = customerDocReadiness(null, { verb: "send", doc: "agreement" });
     expect(r.required).toEqual(["email"]);
-    expect(r.optional).toEqual(["address"]);
+    expect(r.optional).toEqual([]);
   });
 
   it("report send + null → email required, no address", () => {
@@ -161,7 +143,7 @@ describe("customerDocReadiness — null customer", () => {
   });
 
   it("generate + null → ready", () => {
-    const r = customerDocReadiness(null, { verb: "generate", doc: "invoice" });
+    const r = customerDocReadiness(null, { verb: "generate", doc: "report" });
     expect(r.ready).toBe(true);
   });
 });
@@ -171,7 +153,7 @@ describe("needsDocReadyPrompt convenience", () => {
     expect(
       needsDocReadyPrompt(makeCustomer({ email: null }), {
         verb: "send",
-        doc: "invoice",
+        doc: "agreement",
       })
     ).toBe(true);
     expect(
@@ -183,7 +165,7 @@ describe("needsDocReadyPrompt convenience", () => {
     expect(
       needsDocReadyPrompt(makeCustomer({ email: null }), {
         verb: "generate",
-        doc: "invoice",
+        doc: "agreement",
       })
     ).toBe(false);
   });

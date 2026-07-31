@@ -8,7 +8,6 @@
  *     send never fails because of the attachment (the offline replay
  *     path's email step must never strand);
  *   - the link button reads "View online copy";
- *   - the invoice email routes its PDF URL through signedEmailLink
  *     (the raw private-bucket URL was a dead link).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -63,7 +62,6 @@ import {
   sendAgreement,
   sendAgreementReview,
 } from "@/lib/services/email";
-import { sendInvoiceEmail } from "@/lib/services/invoice-email";
 
 const customer = {
   id: "cust1",
@@ -164,24 +162,5 @@ describe("agreement emails — attachment + link", () => {
     expect(sendMock.mock.calls[1][0].attachments![0].filename).toBe(
       "Agreement for review.pdf"
     );
-  });
-});
-
-describe("invoice email — dead-link fix", () => {
-  const invoice = {
-    id: "abcdef12-0000-4000-8000-000000000000",
-    invoice_number: "00042",
-    amount: 120,
-    due_date: "2026-08-01",
-  } as Invoice;
-
-  it("routes the PDF URL through signedEmailLink", async () => {
-    const res = await sendInvoiceEmail(customer, invoice, PDF_URL);
-    expect(res.success).toBe(true);
-    const payload = sendMock.mock.calls[0][0];
-    expect(payload.text).toContain("token=tok123");
-    expect(payload.text).not.toContain("/object/public/");
-    // Link-only by design — no attachment for invoices.
-    expect(payload.attachments).toBeUndefined();
   });
 });

@@ -13,18 +13,18 @@ import type { Customer } from "@/types/database";
  *                                 which a booking always has — so it never
  *                                 prompts.
  *
- * The postal ADDRESS is offered (while a prompt is already open for a
- * required field) but never required, and ONLY for the invoice — that's the
- * one document with a customer bill-to block. Reports and agreements show
- * the site address, so they never collect a customer address. The address
- * never gates an action.
+ * The postal ADDRESS is never collected here. It used to be offered (while
+ * a prompt was already open) for the INVOICE alone, that being the one
+ * document with a customer bill-to block; reports and agreements show the
+ * site address instead. The invoice surface was removed in slice 2b and its
+ * code in 2c, so nothing offers it any more and `optional` is always empty.
  *
  * This module is pure — no IO, no React — so the rule can be unit-tested in
  * isolation and reused by the imperative prompt API and any call site.
  */
 
 export type DocVerb = "send" | "generate" | "download";
-export type DocType = "invoice" | "report" | "agreement";
+export type DocType = "report" | "agreement";
 
 /** A (verb, document-type) pair — what the call site is about to do. */
 export interface DocTarget {
@@ -44,8 +44,10 @@ export interface DocReadiness {
    *  proceed. ("send" → ["email"] when the email is absent; otherwise []). */
   required: DocField[];
   /** Skippable fields worth offering WHILE a prompt is already open — never
-   *  gates the action, empty when `ready`. Only the INVOICE collects an
-   *  address (its bill-to block); reports/agreements never do. */
+   *  gates the action. ALWAYS EMPTY since the invoice (the only document
+   *  that collected an address) was removed. Kept on the shape because the
+   *  prompt component still reads it and its address-capture path is shared;
+   *  retiring the concept is a separate tidy, not part of the invoice work. */
   optional: DocField[];
 }
 
@@ -60,23 +62,12 @@ export function isBlank(value: string | null | undefined): boolean {
   return !value || value.trim() === "";
 }
 
-/** True when the customer has any postal-address line on file. */
-function hasAddress(customer: CustomerDocFields | null): boolean {
-  if (!customer) return false;
-  return (
-    !isBlank(customer.address_line_1) ||
-    !isBlank(customer.town) ||
-    !isBlank(customer.postcode)
-  );
-}
-
 /**
  * Decide, for a (customer, target) pair, whether the completeness prompt is
  * needed and which fields it should collect.
  *
  * Send requires an email when absent; generate/download require nothing.
- * The address is never required — only offered, and only when prompting for
- * an invoice send whose customer has no address on file.
+ * Nothing is optional any more — see the note on DocReadiness.optional.
  */
 export function customerDocReadiness(
   customer: CustomerDocFields | null,
@@ -89,14 +80,9 @@ export function customerDocReadiness(
   const required: DocField[] = needsEmail ? ["email"] : [];
   const ready = required.length === 0;
 
-  // The address is only ever offered ALONGSIDE a prompt we're already
-  // showing, only for the invoice (the one doc with a customer bill-to),
-  // and only when there's no address on file to put in it.
-  const offerAddress =
-    !ready && target.doc === "invoice" && !hasAddress(customer);
-  const optional: DocField[] = offerAddress ? ["address"] : [];
-
-  return { ready, required, optional };
+  // No optional field is offered: the invoice was the only document that
+  // collected a postal address, and it is gone.
+  return { ready, required, optional: [] };
 }
 
 /** Convenience predicate: does this (customer, target) pair need the prompt? */

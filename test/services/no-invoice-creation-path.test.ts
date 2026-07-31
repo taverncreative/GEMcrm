@@ -11,10 +11,10 @@
  * `InvoiceCreatorModal` on a new page. Neither would break any existing
  * test. Scanning the tree is the only thing that actually notices.
  *
- * Deliberately NOT asserted here: that the invoice modules are deleted.
- * They are not, and that is the plan — slice 2a stops creation only; the
- * remaining invoice UI is hidden in 2b and the dead services tidied in 2c.
- * The 9 existing invoices and their PDFs stay reachable throughout.
+ * 2c finished the job: the invoice modules themselves are now deleted, so
+ * this file also asserts they stay deleted. The 9 existing invoices, their
+ * PDFs and every invoice table remain untouched throughout — only code was
+ * removed.
  */
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -68,12 +68,33 @@ function referencing(needle: string, selfPath: string): string[] {
 const rel = (f: string) => f.slice(ROOT.length + 1);
 
 describe("no invoice creation path remains", () => {
-  it("nothing calls createInvoiceForJob (the old auto-generate path)", () => {
-    const callers = referencing(
+  it("the invoice data + service modules are gone (slice 2c)", () => {
+    for (const gone of [
+      "lib/data/invoices.ts",
+      "lib/data/invoice-list.ts",
+      "lib/services/invoice-pdf.ts",
+      "lib/services/invoice-email.ts",
+      "lib/pdf/generate-invoice-pdf.ts",
+      "lib/pdf/templates/invoice-template.ts",
+      "lib/utils/vat.ts",
+    ]) {
+      expect(existsSync(join(ROOT, gone)), `${gone} should not exist`).toBe(
+        false
+      );
+    }
+  });
+
+  it("nothing references the old creation helpers", () => {
+    for (const needle of [
       "createInvoiceForJob",
-      "lib/data/invoices.ts"
-    ).map(rel);
-    expect(callers).toEqual([]);
+      "createStandaloneInvoice",
+      "getJobsReadyToInvoice",
+    ]) {
+      expect(
+        referencing(needle, "__none__").map(rel),
+        `nothing should reference ${needle}`
+      ).toEqual([]);
+    }
   });
 
   it("job-events imports nothing from the invoice modules", () => {

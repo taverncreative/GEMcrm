@@ -7,9 +7,10 @@
  * up somewhere new — which no behavioural test on one component would catch.
  *
  * The counterpart assertions matter just as much: the needs_invoice checklist
- * must still be fully wired, and nothing here may touch the tables, the
- * numbering sequence, the stored PDFs or jobs.is_invoiced / is_paid. This
- * slice is reversible by design.
+ * must still be fully wired, and nothing may touch the tables, the numbering
+ * sequence, the stored PDFs or jobs.is_invoiced / is_paid. 2c removed the
+ * last unreachable module, so the data assertions below now carry no
+ * exclusions at all.
  */
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -169,23 +170,20 @@ describe("the needs_invoice checklist is untouched", () => {
 });
 
 describe("no invoice DATA is touched", () => {
-  it("no reachable code deletes from the invoice tables or the sequence", () => {
-    // lib/data/invoices.ts is excluded deliberately: it still holds
-    // createStandaloneInvoice, whose failed-link rollback deletes the invoice
-    // it just made. That function's only caller (createInvoiceDraftAction)
-    // was deleted, so it is unreachable dead code awaiting slice 2c — it can
-    // never run, and it only ever removed a row it had itself created a
-    // moment earlier. Nothing else anywhere may delete invoice data.
-    const DEAD_MODULE = "lib/data/invoices.ts";
+  it("NOTHING anywhere deletes from the invoice tables or the sequence", () => {
+    // 2b had to exclude lib/data/invoices.ts here, because it still held
+    // createStandaloneInvoice and its failed-link rollback. 2c deleted that
+    // module, so the exclusion is gone and this assertion is now absolute:
+    // no file in the tree touches invoice data at all.
     for (const needle of [
-      'from("invoices").delete',
-      'from("invoice_jobs").delete',
+      'from("invoices")',
+      'from("invoice_jobs")',
       "drop table",
       "invoice_number_seq",
     ]) {
       expect(
-        referencing(needle, DEAD_MODULE),
-        `nothing reachable should reference ${needle}`
+        referencing(needle),
+        `nothing should reference ${needle}`
       ).toEqual([]);
     }
   });
