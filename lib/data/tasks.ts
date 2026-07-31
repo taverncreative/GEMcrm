@@ -297,3 +297,32 @@ export async function completeTask(id: string): Promise<Task> {
 
   return data;
 }
+
+/**
+ * Soft-delete a task — sets `deleted_at = now()`.
+ *
+ * Distinct from {@link completeTask}: completing is a record that the thing
+ * was done, deleting is a record that it should never have been there. A
+ * mistaken or test to-do belongs in the second bucket.
+ *
+ * Goes through the `soft_delete_task` SECURITY DEFINER RPC (migration 050),
+ * NOT a direct `.update()`: the tasks SELECT policy's `USING (deleted_at IS
+ * NULL)` (029) is enforced against the post-update row, so a self-hiding
+ * update is rejected with 42501 for every authenticated user — the same gap
+ * 032/038/043 fixed for customers, jobs and agreements.
+ *
+ * Nothing depends on a task (the FKs all point outward: related_job_id,
+ * related_customer_id, agreement_id, site_id), so there is no cascade and
+ * no impact preview. Once deleted it stops surfacing everywhere — the
+ * server reads are all RLS-filtered and the Dexie reads filter
+ * `!deleted_at`.
+ */
+export async function deleteTask(id: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("soft_delete_task", { p_id: id });
+
+  if (error) {
+    console.error("[deleteTask]", error.code, error.message);
+    throw new Error(`Failed to delete task: ${error.message}`);
+  }
+}

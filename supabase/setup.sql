@@ -1468,3 +1468,84 @@ $$;
 revoke all on function public.get_report_document(uuid) from public;
 revoke all on function public.get_report_document(uuid) from anon;
 grant execute on function public.get_report_document(uuid) to authenticated;
+
+
+-- ============================================================
+-- 050: soft_delete_site + soft_delete_task SECURITY DEFINER RPCs
+-- ============================================================
+-- The last two of the core five to get a delete path. Same narrowest
+-- bypass as soft_delete_customer / _job / _agreement above. Kept here (not
+-- just in migration 050) so a local rebuild from setup.sql matches prod —
+-- the delete UIs call these RPCs and 500 (PGRST202) without them.
+-- See supabase/migrations/050_soft_delete_site_task_rpcs.sql for the full
+-- rationale, in particular why the SITE delete cascades to its jobs and
+-- draft/cancelled agreements and refuses outright on a live contract.
+
+create or replace function public.soft_delete_task(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'soft_delete_task: not authenticated';
+  end if;
+
+  update public.tasks
+     set deleted_at = now()
+   where id = p_id
+     and deleted_at is null;
+end;
+$$;
+
+revoke all on function public.soft_delete_task(uuid) from public;
+revoke all on function public.soft_delete_task(uuid) from anon;
+grant execute on function public.soft_delete_task(uuid) to authenticated;
+
+create or replace function public.soft_delete_site(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_live_agreements int;
+begin
+  if auth.uid() is null then
+    raise exception 'soft_delete_site: not authenticated';
+  end if;
+
+  select count(*)
+    into v_live_agreements
+    from public.agreements
+   where site_id = p_id
+     and deleted_at is null
+     and status in ('active', 'paused');
+
+  if v_live_agreements > 0 then
+    raise exception
+      'soft_delete_site: site has % live agreement(s), cancel them first',
+      v_live_agreements;
+  end if;
+
+  update public.jobs
+     set deleted_at = now()
+   where site_id = p_id
+     and deleted_at is null;
+
+  update public.agreements
+     set deleted_at = now()
+   where site_id = p_id
+     and deleted_at is null;
+
+  update public.sites
+     set deleted_at = now()
+   where id = p_id
+     and deleted_at is null;
+end;
+$$;
+
+revoke all on function public.soft_delete_site(uuid) from public;
+revoke all on function public.soft_delete_site(uuid) from anon;
+grant execute on function public.soft_delete_site(uuid) to authenticated;

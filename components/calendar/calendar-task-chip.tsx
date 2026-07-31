@@ -3,12 +3,20 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { completeTaskAction } from "@/app/(app)/dashboard/actions";
+import { deleteTaskAction } from "@/app/(app)/tasks/actions";
 import {
   completeTaskMeta,
   completeTaskInitialState,
 } from "@/components/dashboard/complete-task-button";
 import { useLocalFirstAction } from "@/lib/actions/wrap";
+import { wrapDirectCallGracefully } from "@/lib/actions/graceful";
+import { useIsOnline } from "@/lib/hooks/use-is-online";
+import { db } from "@/lib/db";
 import type { Task, TaskType } from "@/types/database";
+
+// Same safety net as the other deletes — a transport failure resolves to a
+// `{success:false}` shape rather than throwing out of the transition.
+const wrappedDeleteTask = wrapDirectCallGracefully(deleteTaskAction);
 
 const TASK_TYPE_LABEL: Record<TaskType, string> = {
   general: "Task",
@@ -33,19 +41,30 @@ function formatDate(d: string | null): string | null {
 
 /**
  * A single task on the month calendar — a clickable chip that opens a
- * detail modal where the task can be marked complete. Completion is the
- * shared local-first action (completeTaskMeta); on success we refresh so
- * the server-rendered calendar drops the now-complete task.
+ * detail modal where the task can be marked complete or deleted.
+ *
+ * Complete vs delete: completing records that the thing was done, deleting
+ * records that it should never have been there (a mistake, a duplicate, a
+ * test row). Both leave the calendar; only the second is destructive, so it
+ * sits apart from the primary button and asks first.
+ *
+ * Completion is the shared local-first action (completeTaskMeta). Deletion
+ * is online-only, like every other delete in the app. On success we refresh
+ * so the server-rendered calendar drops the task.
  */
 export function CalendarTaskChip({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  const online = useIsOnline();
   const [state, completeAction, isPending] = useLocalFirstAction(
     completeTaskAction,
     completeTaskInitialState,
     completeTaskMeta
   );
   const [doneOffline, setDoneOffline] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Online completion → row flipped on the server; refresh so the
   // server-rendered calendar re-renders without it (the chip then
@@ -77,6 +96,27 @@ export function CalendarTaskChip({ task }: { task: Task }) {
     }
   }
 
+  async function handleDelete() {
+    setDeleteError(null);
+    setDeleting(true);
+    const res = await wrappedDeleteTask(task.id);
+    if (!res.success) {
+      setDeleteError(res.message ?? "Failed to delete task");
+      setDeleting(false);
+      setConfirmDelete(false);
+      return;
+    }
+    // Mirror into Dexie so the offline-first surfaces (the customer panel's
+    // follow-ups list) drop it without waiting for the next sync pull.
+    try {
+      await db.tasks.update(task.id, { deleted_at: new Date().toISOString() });
+    } catch {
+      // Non-fatal — the next sync pull reconciles it.
+    }
+    setOpen(false);
+    router.refresh();
+  }
+
   const due = formatDate(task.due_date);
 
   return (
@@ -85,6 +125,8 @@ export function CalendarTaskChip({ task }: { task: Task }) {
         type="button"
         onClick={() => {
           setDoneOffline(false);
+          setConfirmDelete(false);
+          setDeleteError(null);
           setOpen(true);
         }}
         className="block w-full truncate rounded bg-purple-100 px-1.5 py-0.5 text-left text-[11px] font-medium text-purple-700 hover:bg-purple-200"
@@ -142,24 +184,76 @@ export function CalendarTaskChip({ task }: { task: Task }) {
               )}
             </div>
 
-            <div className="flex shrink-0 items-center justify-between gap-3 border-t px-5 py-4">
-              {doneOffline ? (
-                <span className="text-sm font-medium text-brand-darker">
-                  Marked done — will sync
-                </span>
-              ) : (
-                <span className="text-xs text-gray-400">
-                  {state.message && !state.success ? state.message : ""}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={handleComplete}
-                disabled={isPending || doneOffline}
-                className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-              >
-                {isPending ? "Completing…" : "Mark complete"}
-              </button>
+            <div className="shrink-0 space-y-3 border-t px-5 py-4">
+              <div className="flex items-center justify-between gap-3">
+                {doneOffline ? (
+                  <span className="text-sm font-medium text-brand-darker">
+                    Marked done — will sync
+                  </span>
+                ) : (
+                  <span className="text-xs text-gray-400">
+                    {state.message && !state.success ? state.message : ""}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleComplete}
+                  disabled={isPending || doneOffline || deleting}
+                  className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+                >
+                  {isPending ? "Completing…" : "Mark complete"}
+                </button>
+              </div>
+
+              {/* Delete is the "this shouldn't exist" escape hatch, kept
+                  visually quiet and behind an inline confirm so it can't be
+                  hit by reflex on the way to Mark complete. Online-only,
+                  consistent with the other deletes; it is a soft delete, so
+                  the copy stays "Delete" / "Removes". */}
+              <div className="flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
+                {confirmDelete ? (
+                  <>
+                    <span className="text-xs text-gray-600">
+                      Delete this task? It leaves the calendar for good.
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(false)}
+                        disabled={deleting}
+                        className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                      >
+                        Keep it
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDelete}
+                        disabled={deleting}
+                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                      >
+                        {deleting ? "Deleting…" : "Yes, delete"}
+                      </button>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs text-red-500">
+                      {deleteError ?? ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      disabled={!online || isPending || doneOffline}
+                      title={
+                        online ? undefined : "Online required to delete a task"
+                      }
+                      className="text-xs font-medium text-gray-500 hover:text-red-600 disabled:cursor-not-allowed disabled:text-gray-300"
+                    >
+                      Delete task
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

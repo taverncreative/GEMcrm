@@ -8,7 +8,7 @@ import { todayUk } from "@/lib/utils/today-uk";
 import { ROUTES } from "@/lib/constants/routes";
 import {
   finaliseDraftAgreementAction,
-  discardDraftAgreementAction,
+  deleteAgreementAction,
 } from "@/app/(app)/agreements/[id]/actions";
 
 /**
@@ -73,7 +73,9 @@ export function AgreementFinalise({
     setError(null);
     startTransition(async () => {
       try {
-        const res = await discardDraftAgreementAction(agreementId);
+        // Draft is one of the two deletable statuses (the other is
+        // cancelled, handled by AgreementDelete on the detail page).
+        const res = await deleteAgreementAction(agreementId);
         if (res.success) {
           router.push(ROUTES.AGREEMENTS);
           router.refresh();

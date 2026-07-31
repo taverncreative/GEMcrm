@@ -6,6 +6,7 @@ import { getJobsBySite, getLastJobForSite } from "@/lib/data/jobs";
 import { getAgreementsBySite } from "@/lib/data/agreements";
 import { QuickBookingForm } from "@/components/jobs/quick-booking-form";
 import { AddAgreementForm } from "@/components/agreements/add-agreement-form";
+import { DeleteSiteButton } from "@/components/sites/delete-site-button";
 import { ROUTES } from "@/lib/constants/routes";
 import { CALL_TYPE_LABELS, AGREEMENT_STATUS_LABELS, AGREEMENT_STATUS_COLORS } from "@/lib/constants/job-labels";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
@@ -89,25 +90,38 @@ export default async function SiteDetailPage({
           <SectionCard
             title="Site Address"
             action={
-              <Link
-                href={ROUTES.siteEdit(site.id)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
+              <div className="flex items-center gap-2">
+                <Link
+                  href={ROUTES.siteEdit(site.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"
+                    />
+                  </svg>
+                  Edit
+                </Link>
+                {/* Delete sits next to Edit, on the one screen that shows
+                    what is attached to the site (jobs + agreements are in
+                    the column alongside). Needs the customer to redirect
+                    to afterwards. */}
+                {customer && (
+                  <DeleteSiteButton
+                    siteId={site.id}
+                    siteLabel={site.address_line_1 ?? "this site"}
+                    customerId={customer.id}
                   />
-                </svg>
-                Edit
-              </Link>
+                )}
+              </div>
             }
           >
             <dl className="space-y-3">

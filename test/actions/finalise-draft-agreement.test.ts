@@ -1,5 +1,5 @@
 /**
- * finaliseDraftAgreementAction + discardDraftAgreementAction +
+ * finaliseDraftAgreementAction + deleteAgreementAction +
  * the updateAgreementStatusAction draft guard (Slice 2).
  *
  * Pins:
@@ -9,7 +9,8 @@
  *     signed_date, THEN generates visits once, THEN writes the SIGNED
  *     contract.pdf over the review URL, THEN auto-sends to the customer;
  *   - missing signatures are rejected before any write;
- *   - discard soft-deletes a draft and refuses a non-draft;
+ *   - delete soft-deletes a DRAFT or CANCELLED agreement and refuses an
+ *     ACTIVE or PAUSED one (a live contract is never deletable);
  *   - the old Activate status path cannot flip a draft active.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -91,9 +92,10 @@ vi.mock("@/lib/auth/require-user", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+import { revalidatePath } from "next/cache";
 import {
   finaliseDraftAgreementAction,
-  discardDraftAgreementAction,
+  deleteAgreementAction,
   updateAgreementStatusAction,
 } from "@/app/(app)/agreements/[id]/actions";
 
@@ -210,18 +212,50 @@ describe("finaliseDraftAgreementAction", () => {
   });
 });
 
-describe("discardDraftAgreementAction", () => {
-  it("soft-deletes a draft", async () => {
-    const res = await discardDraftAgreementAction("a1");
+// The delete guard is the whole point of this action: draft and cancelled
+// are dead paper and go; active and paused are live customer contracts and
+// must stay unreachable from every delete path.
+describe("deleteAgreementAction — status guard", () => {
+  it("soft-deletes a draft (the old Discard draft path)", async () => {
+    const res = await deleteAgreementAction("a1");
     expect(res.success).toBe(true);
     expect(softDeleteAgreementMock).toHaveBeenCalledWith("a1");
   });
 
-  it("refuses a non-draft", async () => {
+  it("soft-deletes a CANCELLED agreement", async () => {
+    getAgreementByIdMock.mockResolvedValue({ ...DRAFT, status: "cancelled" });
+    const res = await deleteAgreementAction("a1");
+    expect(res.success).toBe(true);
+    expect(softDeleteAgreementMock).toHaveBeenCalledWith("a1");
+  });
+
+  it("refuses an ACTIVE agreement, with a message that says what to do", async () => {
     getAgreementByIdMock.mockResolvedValue({ ...DRAFT, status: "active" });
-    const res = await discardDraftAgreementAction("a1");
+    const res = await deleteAgreementAction("a1");
+    expect(res.success).toBe(false);
+    expect(res.message).toMatch(/cancel it first/i);
+    expect(softDeleteAgreementMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a PAUSED agreement (a live contract on hold)", async () => {
+    getAgreementByIdMock.mockResolvedValue({ ...DRAFT, status: "paused" });
+    const res = await deleteAgreementAction("a1");
     expect(res.success).toBe(false);
     expect(softDeleteAgreementMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a missing id and a missing agreement", async () => {
+    expect((await deleteAgreementAction("")).success).toBe(false);
+    getAgreementByIdMock.mockResolvedValue(null);
+    expect((await deleteAgreementAction("a1")).success).toBe(false);
+    expect(softDeleteAgreementMock).not.toHaveBeenCalled();
+  });
+
+  // Perf: the callers navigate and run a scoped router.refresh(), so the
+  // action must not purge the whole client router cache.
+  it("does NOT call revalidatePath", async () => {
+    await deleteAgreementAction("a1");
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
 

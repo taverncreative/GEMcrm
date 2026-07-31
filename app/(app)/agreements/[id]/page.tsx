@@ -9,6 +9,7 @@ import { proxyAssetUrl } from "@/lib/storage/asset-url";
 import { AgreementSend } from "@/components/agreements/agreement-send";
 import { AgreementReviewSend } from "@/components/agreements/agreement-review-send";
 import { AgreementFinalise } from "@/components/agreements/agreement-finalise";
+import { AgreementDelete } from "@/components/agreements/agreement-delete";
 import { formatAddress } from "@/lib/utils/format-address";
 import { todayUk } from "@/lib/utils/today-uk";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
@@ -150,6 +151,13 @@ export default async function AgreementDetailPage({
                 agreementId={agreement.id}
                 defaultSignatoryName={agreement.contact_name}
               />
+            </SectionCard>
+          )}
+          {/* Cancelled is the only other deletable status — active and
+              paused are live contracts and stay protected. */}
+          {agreement.status === "cancelled" && (
+            <SectionCard title="Delete">
+              <AgreementDelete agreementId={agreement.id} />
             </SectionCard>
           )}
           <SectionCard title="Agreement">

@@ -1,6 +1,6 @@
 "use server";
 
-import { createTask } from "@/lib/data/tasks";
+import { createTask, deleteTask } from "@/lib/data/tasks";
 import { TaskCreateSchema } from "@/lib/validation/task";
 import { requireUser } from "@/lib/auth/require-user";
 import type { ActionState } from "@/types/actions";
@@ -67,4 +67,31 @@ export async function createTaskAction(
   // current route to surface the new to-do on the server-rendered
   // calendar/dashboard. Avoids the client-cache purge / prefetch stampede.
   return { success: true, errors: {}, message: "Task created" };
+}
+
+/**
+ * Soft-delete a task. Online-only (mirrors the customer/job/site deletes) —
+ * unlike task COMPLETION, which is local-first and outbox-replayable, this
+ * is not registered for replay: a delete is rare, deliberate, and never
+ * needs to happen from a van with no signal.
+ *
+ * No revalidatePath — the caller mirrors the soft-delete into Dexie and
+ * runs a scoped router.refresh() to re-render the server-rendered calendar
+ * without it.
+ */
+export async function deleteTaskAction(
+  taskId: string
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!taskId) return { success: false, message: "Missing task id" };
+
+  try {
+    await deleteTask(taskId);
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to delete task",
+    };
+  }
 }
