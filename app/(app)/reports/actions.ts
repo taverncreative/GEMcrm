@@ -9,7 +9,6 @@ import {
 import { downloadReportPdf, sendDocumentAttachment } from "@/lib/services/email";
 import { renderAndStoreQuotePdf } from "@/lib/services/quote-pdf";
 import { markQuoteSent } from "@/lib/data/quotes";
-import { renderAndStoreInvoicePdf } from "@/lib/services/invoice-pdf";
 import { validateRecipients } from "@/lib/validation/recipients";
 import { softDeleteReport } from "@/lib/data/reports";
 
@@ -22,7 +21,7 @@ import { softDeleteReport } from "@/lib/data/reports";
  * every other delete in the app. There is no hard-delete counterpart (see
  * {@link softDeleteReport} and migration 039).
  *
- * Online-only, like the sibling row actions (email, invoice pay/chase).
+ * Online-only, like the sibling row actions.
  */
 export async function deleteReportAction(
   reportId: string
@@ -48,10 +47,9 @@ export async function deleteReportAction(
  * Load a document's PDF bytes, GENERATING them when there is nothing stored.
  *
  * A quote's PDF is rendered lazily — `quote_pdf_url` stays null until someone
- * downloads it — and a legacy auto-invoice may never have had one rendered
- * either. Emailing one of those must not fail just because nobody happened to
- * open it first, so we render (and cache, via the same services the download
- * routes use) and attach the fresh bytes. The same path covers a STALE stored
+ * downloads it. Emailing one must not fail just because nobody happened to
+ * open it first, so we render (and cache, via the same service the download
+ * route uses) and attach the fresh bytes. The same path covers a STALE stored
  * URL, where the row points at an object that is no longer there.
  *
  * Service sheets and agreements are rendered and stored at completion/signing
@@ -69,16 +67,12 @@ async function loadDocumentPdf(doc: DocumentForEmail): Promise<Buffer | null> {
     const rendered = await renderAndStoreQuotePdf(doc.id);
     return rendered?.buffer ?? null;
   }
-  if (doc.kind === "invoice") {
-    const rendered = await renderAndStoreInvoicePdf(doc.id);
-    return rendered ? downloadReportPdf(rendered.pdfUrl) : null;
-  }
   return null;
 }
 
 /**
  * Email any stored document from the Documents list — service sheet,
- * agreement, quote or invoice — to one or more addresses, after the fact.
+ * agreement or quote — to one or more addresses, after the fact.
  *
  * Reuses the generic pieces rather than the report-specific sender: shared
  * multi-recipient validation (any invalid address HARD-BLOCKS the whole send)

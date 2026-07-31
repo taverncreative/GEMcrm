@@ -14,8 +14,10 @@ import {
   getOverdueTasks,
   getCustomerContactTasks,
 } from "@/lib/data/tasks";
-import { getExpiringAgreements } from "@/lib/data/agreements";
-import { getRevenueStats } from "@/lib/data/invoices";
+import {
+  getExpiringAgreements,
+  getCommittedAnnualRevenue,
+} from "@/lib/data/agreements";
 import { getDailyStats } from "@/lib/data/daily-stats";
 import { getReviewRequestCandidates } from "@/lib/data/reviews";
 import { DailySummary } from "@/components/dashboard/daily-summary";
@@ -75,7 +77,7 @@ async function DashboardWidgets() {
     jobsToInvoice,
     expiringAgreements,
     contactTasks,
-    revenueStats,
+    committedAnnual,
     dailyStats,
     reviewCandidates,
     calendarJobs,
@@ -95,7 +97,7 @@ async function DashboardWidgets() {
     getJobsNeedingInvoice(),
     getExpiringAgreements(30),
     getCustomerContactTasks(5),
-    getRevenueStats(),
+    getCommittedAnnualRevenue(),
     getDailyStats(),
     getReviewRequestCandidates(10),
     getJobsInRange(dateUk(calendarStart), dateUk(calendarEnd)),
@@ -164,7 +166,7 @@ async function DashboardWidgets() {
             id: "revenue-stats",
             node: (
               <WidgetFrame id="revenue-stats" title="Revenue">
-                <RevenueStatsWidget stats={revenueStats} />
+                <RevenueStatsWidget committedAnnual={committedAnnual} />
               </WidgetFrame>
             ),
           },

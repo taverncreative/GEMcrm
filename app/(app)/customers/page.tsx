@@ -18,9 +18,6 @@
  *     latestJobCallType — filtered through `!is_archived &&
  *     !deleted_at` per Surface 3's Gap B + soft-delete conventions)
  *   - agreements (for `hasActiveAgreement`)
- *   - invoiceCount via the online-only
- *     `getInvoiceCountsForCustomersAction` (Gap A → Option A; offline
- *     the column shows "—")
  *
  * Filter / sort / search:
  *
@@ -47,12 +44,11 @@
  */
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
-import { getInvoiceCountsForCustomersAction } from "@/app/(app)/customers/actions";
 import { CustomerSearch } from "@/components/customers/customer-search";
 import { CustomersTabs } from "@/components/customers/customers-tabs";
 import { CustomersTable } from "@/components/customers/customers-table";
@@ -92,10 +88,9 @@ function buildListItems(args: {
   sites: Site[];
   jobs: Job[];
   agreements: Agreement[];
-  invoiceCounts: Record<string, number> | null;
   today: string;
 }): CustomerListItem[] {
-  const { customers, sites, jobs, agreements, invoiceCounts, today } = args;
+  const { customers, sites, jobs, agreements, today } = args;
 
   // Index sites by customer_id and remember the reverse map so we can
   // attribute each job back to its customer in O(1) per job.
@@ -145,12 +140,6 @@ function buildListItems(args: {
       ...c,
       jobCount: cJobs.length,
       serviceSheetCount: completed.length,
-      // `null` when offline (invoiceCounts === null); the table
-      // renders this as "—". When online, the action returns 0 for
-      // any customer with no invoices, so the lookup is authoritative
-      // and we don't fall back to null.
-      invoiceCount:
-        invoiceCounts === null ? null : invoiceCounts[c.id] ?? 0,
       primarySite: cSites[0] ?? null,
       latestJobCallType: latestJob?.call_type ?? null,
       upcomingJob: upcoming
@@ -209,48 +198,14 @@ export default function CustomersPage() {
     []
   );
 
-  // ─── Invoice counts (online-only) ─────────────────────────────────
-  // Lazily fetched once when online + customers have loaded. Reset
-  // to null while offline so the column renders "—" instead of stale
-  // counts from a previous online session.
-
-  const [invoiceCounts, setInvoiceCounts] =
-    useState<Record<string, number> | null>(null);
-
-  useEffect(() => {
-    if (!online) {
-      setInvoiceCounts(null);
-      return;
-    }
-    if (!customers || customers.length === 0) return;
-    let cancelled = false;
-    void getInvoiceCountsForCustomersAction(customers.map((c) => c.id))
-      .then((counts) => {
-        if (!cancelled) setInvoiceCounts(counts);
-      })
-      .catch(() => {
-        // The action could fail in mid-transition (online → offline
-        // flip while the fetch was in flight). Keep the previous
-        // counts rather than collapsing to null — they're at worst
-        // a few seconds stale.
-        if (!cancelled) {
-          /* no-op */
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [online, customers]);
-
   // ─── Derive list items + apply filter/sort/search ─────────────────
   //
   // Build the full set first (matches server logic byte-for-byte),
   // then apply the same `customer_type` + ilike-on-name/company
   // predicates the server did, then slice to the limit.
   //
-  // We memoise on the live results so re-renders triggered by other
-  // pieces of state (e.g. invoiceCounts updating) don't re-run the
-  // O(n) build unnecessarily.
+  // We memoise on the live results so unrelated re-renders don't re-run
+  // the O(n) build unnecessarily.
 
   const today = todayUk();
   const allItems = useMemo<CustomerListItem[] | null>(() => {
@@ -263,10 +218,9 @@ export default function CustomersPage() {
       sites,
       jobs,
       agreements,
-      invoiceCounts,
       today,
     });
-  }, [customers, sites, jobs, agreements, invoiceCounts, today]);
+  }, [customers, sites, jobs, agreements, today]);
 
   const rows = useMemo<CustomerListItem[] | null>(() => {
     if (allItems === null) return null;

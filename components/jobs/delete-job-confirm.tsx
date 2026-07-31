@@ -28,9 +28,9 @@ interface DeleteJobConfirmProps {
  * Single-step delete confirmation for a job. Far lower-stakes than the
  * customer delete (one recoverable soft-delete, no cascade), so there's NO
  * type-the-name friction — a clear confirm is enough. Surfaces the impact:
- * if the job is on an invoice it's named (the invoice STANDS), and any
- * follow-up child jobs are flagged. Warn-and-proceed — an invoiced job is
- * NOT blocked (mirrors how customer-delete leaves dependents in place).
+ * a completed job's service sheet is flagged as surviving, and any follow-up
+ * child jobs are named. Warn-and-proceed — nothing here blocks the delete
+ * (mirrors how customer-delete leaves dependents in place).
  *
  * It's a SOFT delete, so the copy stays "Delete job" / "Removes" — never
  * "permanently" / "forever".
@@ -137,15 +137,8 @@ export function DeleteJobConfirm({
             </div>
           )}
 
-          {impact && (impact.invoiceNumber || impact.followUps > 0) && (
+          {impact && impact.followUps > 0 && (
             <div className="mt-4 space-y-2 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-800">
-              {impact.invoiceNumber && (
-                <p>
-                  On invoice{" "}
-                  <span className="font-medium">{impact.invoiceNumber}</span>,
-                  which will stand — deleting the job doesn&rsquo;t change it.
-                </p>
-              )}
               {impact.followUps > 0 && (
                 <p>
                   {impact.followUps} follow-up{" "}

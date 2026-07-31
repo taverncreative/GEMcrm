@@ -215,7 +215,7 @@ export function DeleteSiteButton({
                         ? "1 service sheet stays"
                         : `${impact.serviceSheets} service sheets stay`}{" "}
                       in Documents as the record of work performed, and must
-                      be deleted separately. Any invoice stands.
+                      be deleted separately.
                     </div>
                   )}
                 </>

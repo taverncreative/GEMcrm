@@ -1,85 +1,46 @@
 import { WidgetCard } from "./widget-card";
-import type { RevenueStats } from "@/lib/data/invoices";
 
 interface RevenueStatsProps {
-  stats: RevenueStats;
+  /** Sum of contract_value across active commercial agreements. */
+  committedAnnual: number;
 }
 
 function gbp(n: number): string {
   return `£${n.toLocaleString("en-GB", { maximumFractionDigits: 0 })}`;
 }
 
-export function RevenueStatsWidget({ stats }: RevenueStatsProps) {
-  const year = new Date().getFullYear();
+/**
+ * Committed annual revenue from signed agreements.
+ *
+ * This widget used to carry six figures: revenue today, total YTD, a
+ * commercial/domestic split, outstanding invoices and a count of unpaid
+ * jobs. Every one of those came from the invoices table or the legacy
+ * `jobs.is_paid` flag, and Nate invoices in QuickBooks — so they only ever
+ * reported what the app had auto-generated at him (9 invoices, 1 ever marked
+ * paid). A homepage reading "£0 today, £105 this year" is worse than no
+ * figure at all, so slice 2b removed them.
+ *
+ * What is left is the one figure that was never invoice-derived: the annual
+ * value of active commercial PMAs. It comes from signed agreements, it is
+ * forward-looking, and it is worth seeing.
+ *
+ * The widget keeps its `revenue-stats` id so a saved dashboard layout still
+ * places it where the operator put it. (DashboardGrid filters saved ids
+ * against the registry and appends unknown ones, so a changed or removed id
+ * degrades gracefully either way — keeping it just avoids a layout shift.)
+ */
+export function RevenueStatsWidget({ committedAnnual }: RevenueStatsProps) {
   return (
     <WidgetCard title="Revenue">
-      {/* Widget lives in a column of the masonry grid (~half page), so we
-          stay 2-up on every viewport rather than expanding to 3 wide. */}
-      <div className="grid grid-cols-2 gap-4">
-        <Stat
-          label={`Total ${year}`}
-          value={gbp(stats.revenueYtd)}
-          tone="strong"
-        />
-        <Stat
-          label="Committed PMA / yr"
-          value={gbp(stats.commercialCommittedAnnual)}
-          hint="Sum of active PMAs"
-        />
-        <Stat
-          label="Commercial YTD"
-          value={gbp(stats.revenueYtdCommercial)}
-          tone="brand"
-        />
-        <Stat
-          label="Domestic YTD"
-          value={gbp(stats.revenueYtdDomestic)}
-          tone="purple"
-        />
-        <Stat
-          label="Outstanding"
-          value={gbp(stats.unpaidInvoicesTotal)}
-          tone={stats.unpaidInvoicesTotal > 0 ? "warn" : "muted"}
-        />
-        <Stat label="Today" value={gbp(stats.revenueToday)} />
-      </div>
-
-      {stats.unpaidJobsCount > 0 && (
-        <p className="mt-3 text-xs text-amber-700">
-          {stats.unpaidJobsCount} completed job{stats.unpaidJobsCount === 1 ? "" : "s"} not yet paid.
-        </p>
-      )}
-    </WidgetCard>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  hint,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "default" | "strong" | "warn" | "muted" | "brand" | "purple";
-}) {
-  const colour = {
-    default: "text-gray-900",
-    strong: "text-gray-900",
-    warn: "text-red-600",
-    muted: "text-gray-900",
-    brand: "text-brand-darker",
-    purple: "text-purple-700",
-  }[tone];
-
-  return (
-    <div>
       <p className="text-[11px] uppercase tracking-wider text-gray-400">
-        {label}
+        Committed PMA / yr
       </p>
-      <p className={`mt-1 text-xl font-semibold ${colour}`}>{value}</p>
-      {hint && <p className="mt-0.5 text-[11px] text-gray-400">{hint}</p>}
-    </div>
+      <p className="mt-1 text-3xl font-semibold text-gray-900">
+        {gbp(committedAnnual)}
+      </p>
+      <p className="mt-1 text-[11px] text-gray-400">
+        Annual value of active commercial agreements
+      </p>
+    </WidgetCard>
   );
 }

@@ -44,33 +44,18 @@
  * collapsed into a per-row check now that the data is fully in
  * memory — same outcome, simpler code.
  *
- * Write entry points stay online-only via useIsOnline:
+ * Write entry points:
  *
  *   - StartJobButton  → opens BookingModal; multi-entity write,
  *                       entity_ids[] guard is the prereq for ever
- *                       wrapping it. Now gets the useIsOnline guard
- *                       (the existing button had none).
- *   - Multi-select → Create Invoice (invoice_jobs pass C): checkbox
- *     column on the Completed tab over uninvoiced rows only, with a
- *     same-customer lock (one invoice covers one customer). The
- *     selection bar's button carries the same useIsOnline gate; the
- *     created invoice goes through the online-only server action, then
- *     a runSync('manual') pulls the flipped is_invoiced flags back
- *     into Dexie so the checkboxes disappear without waiting for the
- *     30s interval tick.
- *   - Invoiced rows show a status chip instead of the checkbox
- *     (pass E): Paid from the synced is_paid flag (offline-capable);
- *     Draft/Sent via one batched online read of the invoices table;
- *     neutral "Invoiced" offline / pre-resolve. Read-only — no Dexie
- *     or sync-pull changes.
+ *                       wrapping it.
  */
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
-import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { formatAddress } from "@/lib/utils/format-address";
 import { formatWindow } from "@/lib/utils/format-time";
 import { CALL_TYPE_LABELS } from "@/lib/constants/job-labels";
@@ -80,12 +65,10 @@ import { JobsFilter } from "@/components/jobs/jobs-filter";
 import { JobsStatusTabs } from "@/components/jobs/jobs-status-tabs";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { StartJobButton } from "@/components/jobs/start-job-button";
-import { getInvoiceStatusesForJobsAction } from "@/app/(app)/invoices/actions";
 import { SyncStatePill } from "@/components/sync/sync-state-pill";
 import type {
   CallType,
   Customer,
-  InvoiceStatus,
   Job,
   JobStatus,
   Site,
@@ -112,47 +95,6 @@ function JobsTableSkeleton() {
         ))}
       </div>
     </div>
-  );
-}
-
-/**
- * Invoice state for an invoiced row, in the slot the checkbox occupies
- * on uninvoiced rows.
- *
- * Paid derives from the SYNCED job row (is_paid) — works offline.
- * Draft vs Sent needs the invoices table, which isn't in Dexie; those
- * arrive via one batched online lookup. Until it resolves — or while
- * offline — an invoiced-but-unpaid row shows a neutral "Invoiced".
- * Colour only where it earns it: Paid green, Draft amber (needs
- * action), Sent/Invoiced muted.
- */
-function InvoiceStatusChip({
-  paid,
-  status,
-}: {
-  paid: boolean;
-  status: InvoiceStatus | null;
-}) {
-  const label =
-    paid || status === "paid"
-      ? "Paid"
-      : status === "sent"
-        ? "Sent"
-        : status === "draft"
-          ? "Draft"
-          : "Invoiced";
-  const cls =
-    label === "Paid"
-      ? "bg-brand-soft text-brand-darker"
-      : label === "Draft"
-        ? "bg-amber-100 text-amber-700"
-        : "bg-gray-100 text-gray-500";
-  return (
-    <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}
-    >
-      {label}
-    </span>
   );
 }
 
@@ -214,7 +156,6 @@ export default function JobsPage() {
   // (latest first), natural for browsing the Completed archive.
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  const online = useIsOnline();
 
   // ─── Chained Dexie reads ──────────────────────────────────────────
 
@@ -278,45 +219,6 @@ export default function JobsPage() {
     return list.slice(0, JOBS_LIMIT);
   }, [jobs, sites, customers, filter, status, searchParam, today, sortDir]);
 
-  const selectable = status === "completed";
-
-  // ─── Invoice status chips (Pass E) ────────────────────────────────
-  // Draft/Sent live only on the invoices table (not synced to Dexie),
-  // so fetch them in ONE batched read for the visible invoiced rows
-  // when online. Keyed on the sorted id list so the effect re-runs
-  // only when the visible invoiced set actually changes. Offline or
-  // pre-resolve, the chip falls back to neutral "Invoiced" (Paid still
-  // works offline via the synced is_paid flag).
-  const [invoiceStatuses, setInvoiceStatuses] = useState<
-    Record<string, InvoiceStatus>
-  >({});
-  const invoicedIdsKey = useMemo(() => {
-    if (!selectable || !rows) return "";
-    return rows
-      .filter((j) => j.is_invoiced)
-      .map((j) => j.id)
-      .sort()
-      .join(",");
-  }, [selectable, rows]);
-
-  useEffect(() => {
-    if (!online || invoicedIdsKey === "") return;
-    let live = true;
-    getInvoiceStatusesForJobsAction(invoicedIdsKey.split(",")).then(
-      (statuses) => {
-        // Merge rather than replace: a narrower search shouldn't wipe
-        // statuses already fetched for rows it filtered out.
-        if (live) setInvoiceStatuses((prev) => ({ ...prev, ...statuses }));
-      },
-      () => {
-        // Transport failure (offline mid-flight) — fallback chip stands.
-      }
-    );
-    return () => {
-      live = false;
-    };
-  }, [invoicedIdsKey, online]);
-
   return (
     <div>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -349,13 +251,6 @@ export default function JobsPage() {
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    {selectable && (
-                      <th className="px-4 py-3">
-                        <span className="sr-only">
-                          Select for invoicing / invoice status
-                        </span>
-                      </th>
-                    )}
                     <th className="px-4 py-3">Ref</th>
                     <th className="px-4 py-3">
                       <button
@@ -389,21 +284,6 @@ export default function JobsPage() {
                   {rows.map((job) => {
                     return (
                     <tr key={job.id} className="hover:bg-gray-50">
-                      {/* Historical invoice state only. The select-to-invoice
-                          checkbox that used to share this cell was removed in
-                          slice 2a: nothing in the app creates an invoice any
-                          more. The chip stays so an already-invoiced job still
-                          reads as one; hiding it is slice 2b. */}
-                      {selectable && (
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          {job.is_invoiced && (
-                            <InvoiceStatusChip
-                              paid={job.is_paid}
-                              status={invoiceStatuses[job.id] ?? null}
-                            />
-                          )}
-                        </td>
-                      )}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <Link
                           href={ROUTES.jobDetail(job.id)}

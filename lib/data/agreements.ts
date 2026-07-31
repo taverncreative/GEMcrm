@@ -350,3 +350,45 @@ export async function cancelAgreementVisits(
     throw new Error(`Failed to remove future visits: ${error.message}`);
   }
 }
+
+/**
+ * Forward-looking committed commercial revenue: the sum of `contract_value`
+ * across ACTIVE agreements held by commercial customers.
+ *
+ * This lived in lib/data/invoices.ts as one field of a larger `RevenueStats`
+ * until slice 2b. The rest of that bundle (revenue today, YTD, the
+ * commercial/domestic split, outstanding invoices, unpaid-jobs count) was all
+ * derived from the invoices table and the legacy `jobs.is_paid` flag. Nate
+ * invoices in QuickBooks, so those figures only ever reflected what the app
+ * happened to auto-generate — 9 invoices, 1 ever marked paid — which made
+ * them worse than useless on a dashboard. They are gone; this one is real,
+ * comes from signed agreements, and is worth showing, so it moved here where
+ * its data actually lives.
+ */
+export async function getCommittedAnnualRevenue(): Promise<number> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("agreements")
+    .select("contract_value, customer:customers!inner(customer_type)")
+    .eq("status", "active")
+    .is("deleted_at", null);
+
+  if (error) {
+    console.error("[getCommittedAnnualRevenue]", error.code, error.message);
+    return 0;
+  }
+
+  let total = 0;
+  for (const row of data ?? []) {
+    // PostgREST types an embedded 1:1 relation as an array — unwrap both.
+    const cust = Array.isArray((row as { customer: unknown }).customer)
+      ? ((row as unknown as { customer: { customer_type: string }[] })
+          .customer[0] ?? null)
+      : ((row as unknown as { customer: { customer_type: string } | null })
+          .customer ?? null);
+    if (cust?.customer_type === "commercial") {
+      total += Number(row.contract_value ?? 0);
+    }
+  }
+  return total;
+}

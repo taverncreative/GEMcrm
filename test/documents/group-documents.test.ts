@@ -36,7 +36,7 @@ const CUST_B = { id: "b", name: "Bob Smith", company_name: null };
 
 // A has 2 docs (07-10, 07-01), B has 1 (07-15), plus 1 no-customer (07-20).
 const A1 = doc({ id: "a1", customer: CUST_A, date: "2026-07-10", kind: "service_sheet" });
-const A2 = doc({ id: "a2", customer: CUST_A, date: "2026-07-01", kind: "invoice" });
+const A2 = doc({ id: "a2", customer: CUST_A, date: "2026-07-01", kind: "quote" });
 const B1 = doc({ id: "b1", customer: CUST_B, date: "2026-07-15", kind: "agreement" });
 const NONE = doc({ id: "n1", customer: null, date: "2026-07-20", kind: "service_sheet" });
 

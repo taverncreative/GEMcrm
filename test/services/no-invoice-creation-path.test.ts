@@ -17,7 +17,7 @@
  * The 9 existing invoices and their PDFs stay reachable throughout.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = process.cwd();
@@ -88,22 +88,26 @@ describe("no invoice creation path remains", () => {
     expect(imports.some((l) => l.includes("invoice-pdf"))).toBe(false);
   });
 
-  it("no page or component mounts the invoice creator modal", () => {
-    const mounts = referencing(
-      "<InvoiceCreatorModal",
-      "components/invoices/invoice-creator-modal.tsx"
-    ).map(rel);
-    // create-invoice-button is itself orphaned (nothing renders it); it is
-    // deleted in a later slice, so it is the one allowed holdover.
-    expect(mounts).toEqual(["components/invoices/create-invoice-button.tsx"]);
+  it("the invoice creator components are gone entirely (slice 2b)", () => {
+    // 2a orphaned these; 2b deleted them along with the server actions they
+    // called, which is what finally closed the createInvoiceDraftAction
+    // endpoint. Nothing may reference them, and they must not come back.
+    for (const gone of [
+      "components/invoices/invoice-creator-modal.tsx",
+      "components/invoices/create-invoice-button.tsx",
+      "app/(app)/invoices/actions.ts",
+    ]) {
+      expect(existsSync(join(ROOT, gone)), `${gone} should not exist`).toBe(
+        false
+      );
+    }
+    for (const needle of ["InvoiceCreatorModal", "CreateInvoiceButton"]) {
+      expect(referencing(needle, "__none__").map(rel)).toEqual([]);
+    }
   });
 
-  it("nothing renders the CreateInvoiceButton", () => {
-    const users = referencing(
-      "CreateInvoiceButton",
-      "components/invoices/create-invoice-button.tsx"
-    ).map(rel);
-    expect(users).toEqual([]);
+  it("nothing imports the deleted invoice actions module", () => {
+    expect(referencing("invoices/actions", "__none__").map(rel)).toEqual([]);
   });
 });
 

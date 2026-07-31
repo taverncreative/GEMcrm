@@ -26,7 +26,7 @@ interface DeleteCustomerConfirmProps {
 
 /**
  * Two-step delete confirmation:
- *   1. Show the impact (sites, jobs, agreements, invoices that will go too)
+ *   1. Show the impact (sites, jobs, agreements that will go too)
  *   2. Require the user to type the customer name to enable the delete button
  *
  * This is intentional friction — accidental deletes here would cascade
@@ -121,7 +121,6 @@ export function DeleteCustomerConfirm({
                 <ImpactRow label="Sites" count={impact.sites} />
                 <ImpactRow label="Jobs / bookings" count={impact.jobs} />
                 <ImpactRow label="Agreements" count={impact.agreements} />
-                <ImpactRow label="Invoices" count={impact.invoices} />
               </ul>
             </div>
           )}

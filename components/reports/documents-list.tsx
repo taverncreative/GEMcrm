@@ -1,17 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ROUTES } from "@/lib/constants/routes";
 import { proxyAssetUrl } from "@/lib/storage/asset-url";
-import {
-  markInvoicePaidAction,
-  sendInvoiceFollowUpAction,
-  generateInvoicePdfAction,
-} from "@/app/(app)/invoices/actions";
-import { getCustomerDetailAction } from "@/app/(app)/customers/actions";
-import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { EmailDocumentButton } from "@/components/documents/email-document-button";
 import { DeleteReportButton } from "@/components/reports/delete-report-button";
 import type { DocumentItem } from "@/lib/data/documents";
@@ -27,14 +19,12 @@ interface DocumentsListProps {
 }
 
 const KIND_LABEL: Record<DocumentItem["kind"], string> = {
-  invoice: "Invoices",
   service_sheet: "Service Sheets",
   agreement: "Agreements",
   quote: "Quotes",
 };
 
 const KIND_COLOR: Record<DocumentItem["kind"], string> = {
-  invoice: "bg-brand-soft text-brand-darker",
   service_sheet: "bg-blue-100 text-blue-700",
   agreement: "bg-amber-100 text-amber-700",
   quote: "bg-purple-100 text-purple-700",
@@ -76,9 +66,6 @@ function metaLine(item: DocumentItem): string {
     // The job date (subtitle) is the meaningful date for a sheet; fall back to
     // the created date so the row always carries one.
     parts.push(item.subtitle ?? formatDate(item.date));
-  } else if (item.kind === "invoice") {
-    if (item.subtitle) parts.push(item.subtitle); // amount
-    parts.push(formatDate(item.date));
   } else if (item.kind === "quote") {
     if (item.subtitle) parts.push(item.subtitle); // total
     parts.push(formatDate(item.date));
@@ -120,8 +107,8 @@ function KindBadge({ kind }: { kind: DocumentItem["kind"] }) {
   );
 }
 
-/** The actions cluster (invoice pay/chase + Open / Generate / No PDF), shared
- *  by the desktop table cell and the mobile card so the logic never drifts. */
+/** The actions cluster (Open / No PDF + per-kind extras), shared by the
+ *  desktop table cell and the mobile card so the logic never drifts. */
 function RowActions({ item }: { item: DocumentItem }) {
   // An explicit `href` (e.g. a quote's on-demand /api/pdf route) is used as-is;
   // otherwise a stored storage URL is routed through the auth-gated proxy.
@@ -129,7 +116,6 @@ function RowActions({ item }: { item: DocumentItem }) {
     item.href ?? (item.url ? proxyAssetUrl(item.url) ?? item.url : null);
   return (
     <>
-      {item.kind === "invoice" && item.invoiceId && <InvoiceActions item={item} />}
       {openHref ? (
         <a
           href={openHref}
@@ -152,8 +138,6 @@ function RowActions({ item }: { item: DocumentItem }) {
             />
           </svg>
         </a>
-      ) : item.kind === "invoice" && item.invoiceId ? (
-        <GenerateInvoicePdfButton invoiceId={item.invoiceId} />
       ) : (
         <span className="text-xs text-gray-300">No PDF</span>
       )}
@@ -200,7 +184,6 @@ export function DocumentsList({ items }: DocumentsListProps) {
   const searched = filterDocumentsByCustomer(items, query);
   const counts: Record<Filter, number> = {
     all: searched.length,
-    invoice: searched.filter((i) => i.kind === "invoice").length,
     service_sheet: searched.filter((i) => i.kind === "service_sheet").length,
     agreement: searched.filter((i) => i.kind === "agreement").length,
     quote: searched.filter((i) => i.kind === "quote").length,
@@ -242,11 +225,6 @@ export function DocumentsList({ items }: DocumentsListProps) {
           label={`All (${counts.all})`}
           active={filter === "all"}
           onClick={() => setFilter("all")}
-        />
-        <FilterPill
-          label={`Invoices (${counts.invoice})`}
-          active={filter === "invoice"}
-          onClick={() => setFilter("invoice")}
         />
         <FilterPill
           label={`Service Sheets (${counts.service_sheet})`}
@@ -597,126 +575,6 @@ function FilterPill({
       }`}
     >
       {label}
-    </button>
-  );
-}
-
-/**
- * Per-invoice action chip — green Paid badge when settled, otherwise
- * Mark Paid + (if overdue) Send Follow-up.
- */
-function InvoiceActions({ item }: { item: DocumentItem }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [busy, setBusy] = useState<"paid" | "chase" | null>(null);
-  const ensureReady = useEnsureCustomerDocReady();
-
-  if (item.invoiceStatus === "paid") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 text-xs font-medium text-brand-darker">
-        <span className="h-1.5 w-1.5 rounded-full bg-brand" />
-        Paid
-      </span>
-    );
-  }
-
-  function handlePaid() {
-    if (!item.invoiceId) return;
-    setBusy("paid");
-    startTransition(async () => {
-      const res = await markInvoicePaidAction(item.invoiceId!);
-      setBusy(null);
-      if (res.success) router.refresh();
-    });
-  }
-
-  function handleChase() {
-    if (!item.invoiceId) return;
-    setBusy("chase");
-    // Gate the chase email: a follow-up is on an already-sent invoice (so the
-    // email is usually present and the gate passes silently), but if it's
-    // since been cleared, prompt for it. The row only carries {id,name}, so
-    // fetch the full customer for the readiness check.
-    void (async () => {
-      if (item.customer) {
-        const detail = await getCustomerDetailAction(item.customer.id);
-        if (detail?.customer) {
-          const gate = await ensureReady(detail.customer, {
-            verb: "send",
-            doc: "invoice",
-          });
-          if (!gate.proceed) {
-            setBusy(null);
-            return;
-          }
-        }
-      }
-      startTransition(async () => {
-        const res = await sendInvoiceFollowUpAction(item.invoiceId!);
-        setBusy(null);
-        if (res.success) router.refresh();
-      });
-    })();
-  }
-
-  return (
-    <>
-      {item.invoiceOverdue && (
-        <button
-          type="button"
-          onClick={handleChase}
-          disabled={isPending}
-          className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-          title="Send a follow-up email with the original PDF"
-        >
-          {busy === "chase" ? "Sending…" : "Follow up"}
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={handlePaid}
-        disabled={isPending}
-        className="inline-flex items-center gap-1 rounded-lg border border-brand bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-darker hover:bg-brand hover:text-white disabled:opacity-50"
-      >
-        {busy === "paid" ? "Saving…" : "Mark paid"}
-      </button>
-    </>
-  );
-}
-
-/**
- * Backfill trigger for an invoice with no stored PDF — the legacy
- * auto-invoice path (createInvoiceForJob) never renders one. Generates
- * and stores it server-side, then refreshes so the row's "Open" link
- * appears. Online-only like the sibling pay/chase actions.
- */
-function GenerateInvoicePdfButton({ invoiceId }: { invoiceId: string }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [failed, setFailed] = useState(false);
-
-  function handleGenerate() {
-    setFailed(false);
-    startTransition(async () => {
-      const res = await generateInvoicePdfAction(invoiceId);
-      if (res.success) router.refresh();
-      else setFailed(true);
-    });
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={handleGenerate}
-      disabled={isPending}
-      title={
-        failed
-          ? "Generation failed — try again"
-          : "Generate the invoice PDF"
-      }
-      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-    >
-      {isPending ? "Generating…" : failed ? "Retry PDF" : "Generate PDF"}
     </button>
   );
 }

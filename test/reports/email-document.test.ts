@@ -190,21 +190,6 @@ describe("a quote whose PDF has never been generated", () => {
     expect(attachment()?.content.toString()).toContain("freshly-rendered-quote");
   });
 
-  it("an invoice with no stored PDF is generated the same way", async () => {
-    getDocMock.mockResolvedValue({
-      kind: "invoice",
-      id: "i1",
-      pdfUrl: null,
-      label: "Invoice 00042",
-      fileName: "Invoice 00042.pdf",
-    });
-
-    const res = await emailDocumentAction("invoice", "i1", ["ap@example.test"]);
-
-    expect(res.success).toBe(true);
-    expect(renderInvoiceMock).toHaveBeenCalledWith("i1");
-    expect(attachment()?.filename).toBe("Invoice 00042.pdf");
-  });
 });
 
 describe("guards", () => {

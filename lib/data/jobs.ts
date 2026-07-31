@@ -249,7 +249,7 @@ export async function getJobById(id: string): Promise<Job | null> {
 
 /**
  * Soft-delete a job — sets `deleted_at = now()`. The job row + its
- * dependents (any invoice link, generated report, follow-up children) are
+ * dependents (generated report, follow-up children, any legacy invoice) are
  * LEFT in place — soft delete doesn't cascade — but the job stops surfacing
  * everywhere the reads filter `deleted_at IS NULL` (the server reads above +
  * the Dexie reads).
@@ -274,13 +274,12 @@ export async function deleteJob(jobId: string): Promise<void> {
 }
 
 /**
- * What a job delete leaves behind, for the confirm dialog. If the job is on
- * an invoice that invoice STANDS (soft-deleting the job doesn't touch it),
- * and any follow-up child jobs keep their parent link.
+ * What a job delete leaves behind, for the confirm dialog: follow-up child
+ * jobs keep their parent link, and a completed job's service sheet survives.
+ * Any legacy invoice link also stands (soft-deleting a job never touches it)
+ * but is no longer surfaced — the invoice UI is hidden as of slice 2b.
  */
 export interface JobDeleteImpact {
-  /** Invoice number if this job is on an invoice, else null. */
-  invoiceNumber: string | null;
   /** Count of still-live follow-up jobs whose parent is this job. */
   followUps: number;
   /**
@@ -303,31 +302,6 @@ export async function getJobDeleteImpact(
   jobId: string
 ): Promise<JobDeleteImpact> {
   const supabase = await createClient();
-
-  // Invoice link — canonical invoice_jobs first, then the legacy
-  // invoices.job_id column for pre-031 rows.
-  const { data: link } = await supabase
-    .from("invoice_jobs")
-    .select("invoice:invoices(invoice_number)")
-    .eq("job_id", jobId)
-    .maybeSingle();
-  // The invoice_jobs→invoices embed is to-one at runtime, but PostgREST's
-  // generated types widen it to an array — normalise both shapes.
-  const invoiceRel = link?.invoice as unknown as
-    | { invoice_number: string | null }
-    | { invoice_number: string | null }[]
-    | null
-    | undefined;
-  const invoiceObj = Array.isArray(invoiceRel) ? invoiceRel[0] : invoiceRel;
-  let invoiceNumber: string | null = invoiceObj?.invoice_number ?? null;
-  if (!invoiceNumber) {
-    const { data: legacy } = await supabase
-      .from("invoices")
-      .select("invoice_number")
-      .eq("job_id", jobId)
-      .maybeSingle();
-    invoiceNumber = (legacy?.invoice_number as string | null) ?? null;
-  }
 
   const { count } = await supabase
     .from("jobs")
@@ -356,7 +330,6 @@ export async function getJobDeleteImpact(
     job?.job_status === "completed" && (reportCount ?? 0) > 0;
 
   return {
-    invoiceNumber,
     followUps: count ?? 0,
     completedWithServiceSheet,
     clientSigned: Boolean(job?.client_signature_url),
@@ -654,7 +627,7 @@ export async function markReportEmailed(
 
 /**
  * Move a saved Service Sheet from in_progress → completed. Runs the
- * post-completion side-effects (review task, invoice auto-create, etc.)
+ * post-completion side-effects (review task, etc.)
  * are still wired up by the action layer.
  */
 export async function finalizeServiceSheet(jobId: string): Promise<Job> {

@@ -43,9 +43,6 @@ vi.mock("@/app/(app)/customers/actions", () => ({
 vi.mock("@/components/bookings/booking-modal", () => ({
   BookingModal: () => <div data-testid="mock-booking-modal" />,
 }));
-vi.mock("@/components/invoices/invoice-creator-modal", () => ({
-  InvoiceCreatorModal: () => <div data-testid="mock-invoice-modal" />,
-}));
 vi.mock("@/components/customers/delete-customer-confirm", () => ({
   DeleteCustomerConfirm: () => <div data-testid="mock-delete-confirm" />,
 }));

@@ -471,11 +471,10 @@ export default function JobDetailPage() {
             <JobStatusActions jobId={job.id} currentStatus={job.job_status} />
             {/* "Invoices required" checklist flag (migration 041). Completed
                 jobs only — the recovery path if the sheet's "Invoice
-                required" box was missed. This is now the ONLY invoice-related
-                control on this page: the legacy "Create Invoice" button was
-                removed in slice 2a, when in-app invoice creation was stopped
-                for good. The "Invoiced" chip below is a read of historical
-                data, not a creation path. */}
+                required" box was missed. This is the ONLY invoice-related
+                control left on this page: "Create Invoice" went in slice 2a
+                and the legacy "Invoiced" chip in 2b. The jobs.is_invoiced
+                flag it read is still on the row, just not surfaced. */}
             {job.job_status === "completed" && (
               <NeedsInvoiceToggle
                 jobId={job.id}
@@ -494,11 +493,6 @@ export default function JobDetailPage() {
                 </svg>
                 Fill Service Sheet
               </Link>
-            )}
-            {job.is_invoiced && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
-                Invoiced
-              </span>
             )}
             <SyncStatePill />
             {/* Soft-delete this job — subtle, destructive-on-hover. Online-only

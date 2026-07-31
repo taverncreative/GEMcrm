@@ -1,7 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { quoteRecipientEmail } from "@/lib/quotes/recipient";
 
-export type DocumentKind = "invoice" | "service_sheet" | "agreement" | "quote";
+// Invoices were a fourth kind until slice 2b. Nate invoices in QuickBooks,
+// so the whole in-app invoice surface is hidden; the rows, their PDFs and the
+// tables are all still there, just not listed here. Restoring the kind is a
+// revert of this slice, nothing more.
+export type DocumentKind = "service_sheet" | "agreement" | "quote";
 
 export interface DocumentItem {
   /** Kind-prefixed and unique across the union ("quote-<uuid>") — the React
@@ -29,7 +33,7 @@ export interface DocumentItem {
    *  look up. Other kinds leave it undefined and fall back to fetching the
    *  linked customer client-side. */
   recipientEmail?: string | null;
-  /** Subtitle for the document, e.g. amount for an invoice. */
+  /** Subtitle for the document, e.g. the total on a quote. */
   subtitle?: string;
   /** Service-sheet only: site address one-liner (line 1 + town/postcode),
    *  so a row is distinguishable even when the job has no reference. */
@@ -42,15 +46,10 @@ export interface DocumentItem {
    *  performed — and the row carries a "Job deleted" chip so it reads as
    *  orphaned rather than broken. Drives that chip. */
   jobDeleted?: boolean;
-  /** Renewal date on agreements; due date on invoices. Drives the badge. */
+  /** Renewal date on agreements. Drives the badge. */
   renewalDate?: string | null;
   /** Driven by renewalDate: ok | upcoming (<=30d) | overdue. */
   renewalState?: "ok" | "upcoming" | "overdue" | null;
-  /** Invoice-specific surface for the actions row. */
-  invoiceId?: string;
-  invoiceStatus?: "draft" | "sent" | "paid";
-  invoiceDueDate?: string | null;
-  invoiceOverdue?: boolean;
 }
 
 /** One row of `list_report_documents` (migration 049) — a report with its
@@ -94,22 +93,14 @@ function formatGbp(value: number): string {
 }
 
 /**
- * Pulls invoices, service-report PDFs, and agreement contract PDFs into a
- * single normalised list for the Reports → Documents view.
+ * Pulls service-report PDFs, agreement contract PDFs and quotes into a
+ * single normalised list for the Reports → Documents view. Invoices are
+ * deliberately absent (slice 2b) — see the note on DocumentKind.
  *
  * Sorted newest first across all kinds. Caller can filter client-side.
  */
 export async function getAllDocuments(): Promise<DocumentItem[]> {
   const supabase = await createClient();
-
-  // Invoices — every row, whether or not it has a generated PDF. Without a
-  // PDF we still show it (link disabled in the UI) so the user can see
-  // there's a draft that needs the PDF re-generated.
-  const { data: invoices } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, amount, pdf_url, created_at, customer:customers(id, name, company_name)")
-    .order("created_at", { ascending: false })
-    .limit(200);
 
   // Service reports — only live rows (deleted_at is null) with a generated
   // PDF, via the `list_report_documents` SECURITY DEFINER RPC (migration
@@ -166,35 +157,6 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
   }
 
   const items: DocumentItem[] = [];
-
-  for (const inv of invoices ?? []) {
-    const cust = one(
-      (inv as unknown as { customer: Joined<{ id: string; name: string; company_name: string | null }> })
-        .customer
-    );
-    // Surface invoice metadata so the documents list can render
-    // pay / chase action buttons without a second round-trip.
-    const dueDate = (inv as unknown as { due_date?: string | null }).due_date ?? null;
-    const status = (inv as unknown as { status: string }).status;
-    items.push({
-      id: `inv-${inv.id}`,
-      docId: inv.id,
-      kind: "invoice",
-      title: `Invoice ${inv.invoice_number ?? inv.id.slice(0, 8)}`,
-      reference: inv.invoice_number ?? null,
-      customer: cust,
-      url: inv.pdf_url ?? "",
-      date: inv.created_at,
-      subtitle: formatGbp(Number(inv.amount)),
-      invoiceId: inv.id,
-      invoiceStatus: status as "draft" | "sent" | "paid",
-      invoiceDueDate: dueDate,
-      invoiceOverdue:
-        status !== "paid" && dueDate
-          ? new Date(dueDate).getTime() < Date.now()
-          : false,
-    });
-  }
 
   // The RPC returns one flat row per report — job/site/customer already
   // resolved owner-side — so there is no embed to unwrap here. A row whose
@@ -316,9 +278,8 @@ export interface DocumentForEmail {
   kind: DocumentKind;
   id: string;
   /** The stored PDF, or null when none has been rendered yet. Quotes are
-   *  lazy by design (rendered on first download); a legacy auto-invoice can
-   *  also have none. The caller generates in that case — see
-   *  emailDocumentAction. */
+   *  lazy by design (rendered on first download). The caller generates in
+   *  that case — see emailDocumentAction. */
   pdfUrl: string | null;
   /** Names the document in the email subject/body, e.g. "Quote QUO-1042". */
   label: string;
@@ -423,18 +384,7 @@ export async function getDocumentForEmail(
     };
   }
 
-  const { data } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, pdf_url")
-    .eq("id", id)
-    .maybeSingle();
-  if (!data) return null;
-  const label = `Invoice ${data.invoice_number ?? data.id.slice(0, 8)}`;
-  return {
-    kind,
-    id,
-    pdfUrl: data.pdf_url ?? null,
-    label,
-    fileName: attachmentFileName(label),
-  };
+  // No invoice branch: invoices are not listed in Documents (slice 2b), so
+  // nothing can reach this function with kind "invoice".
+  return null;
 }

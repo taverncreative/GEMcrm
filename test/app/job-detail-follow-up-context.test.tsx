@@ -63,9 +63,6 @@ vi.mock("@/components/smart-back-button", () => ({
 vi.mock("@/components/jobs/report-actions", () => ({
   ReportActions: () => <div data-testid="mock-report-actions" />,
 }));
-vi.mock("@/components/invoices/create-invoice-button", () => ({
-  CreateInvoiceButton: () => <div data-testid="mock-create-invoice" />,
-}));
 
 import JobDetailPage from "@/app/(app)/jobs/[id]/page";
 import { db } from "@/lib/db";

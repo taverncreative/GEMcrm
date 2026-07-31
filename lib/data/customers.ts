@@ -218,8 +218,8 @@ export async function setGoogleReviewReceived(
  * from every read across the app — list views, detail panels,
  * dashboards, calendar joins, the lot.
  *
- * The customer's child rows (sites, jobs, agreements, invoices, tasks,
- * reports) are NOT touched. Hard-delete cascades used to remove them
+ * The customer's child rows (sites, jobs, agreements, tasks, reports)
+ * are NOT touched. Hard-delete cascades used to remove them
  * automatically; with soft delete that's no longer the case. They'll
  * still effectively disappear from list views because most read
  * queries inner-join through customers/sites and RLS hides the parent
@@ -265,7 +265,6 @@ export interface DeleteImpact {
   sites: number;
   jobs: number;
   agreements: number;
-  invoices: number;
 }
 
 export async function getDeleteImpact(
@@ -292,16 +291,10 @@ export async function getDeleteImpact(
     .select("id", { count: "exact", head: true })
     .eq("customer_id", customerId);
 
-  const { count: invoicesCount } = await supabase
-    .from("invoices")
-    .select("id", { count: "exact", head: true })
-    .eq("customer_id", customerId);
-
   return {
     sites: siteIds.length,
     jobs,
     agreements: agreementsCount ?? 0,
-    invoices: invoicesCount ?? 0,
   };
 }
 
@@ -509,15 +502,6 @@ export async function updateCustomerType(
 export interface CustomerListItem extends Customer {
   jobCount: number;
   serviceSheetCount: number;
-  /**
-   * Invoice count for this customer. `null` when the count is
-   * unavailable — this happens offline on the converted list page
-   * because the `invoices` table is not synced to Dexie (offline-pwa
-   * Gap A → Option A; same precedent as `reports`). The
-   * `CustomersTable` renders "—" for null. The server-side
-   * `getCustomerListItems` always returns an actual number.
-   */
-  invoiceCount: number | null;
   primarySite: Site | null;
   latestJobCallType: string | null;
   upcomingJob: { id: string; job_date: string; site_id: string | null } | null;
@@ -619,21 +603,6 @@ export async function getCustomerListItems(
   }
   const activeAgreementCustomers = new Set(agreements.map((a) => a.customer_id));
 
-  // Invoice counts per customer
-  const invoiceCountsMap = new Map<string, number>();
-  {
-    const { data } = await supabase
-      .from("invoices")
-      .select("customer_id")
-      .in("customer_id", customerIds);
-    for (const row of data ?? []) {
-      invoiceCountsMap.set(
-        row.customer_id,
-        (invoiceCountsMap.get(row.customer_id) ?? 0) + 1
-      );
-    }
-  }
-
   const today = todayUk();
 
   return customers.map((c) => {
@@ -652,7 +621,6 @@ export async function getCustomerListItems(
       ...c,
       jobCount: cJobs.length,
       serviceSheetCount: completed.length,
-      invoiceCount: invoiceCountsMap.get(c.id) ?? 0,
       primarySite: cSites[0] ?? null,
       latestJobCallType: latestJob?.call_type ?? null,
       upcomingJob: upcoming

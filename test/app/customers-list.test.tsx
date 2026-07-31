@@ -12,7 +12,7 @@
  *       `name|company_name ilike` behaviour
  *   (d) soft-deleted customers are excluded
  *   (e) the Add Customer link disables when offline
- *   (f) invoiceCount renders "—" offline (Gap A → Option A)
+ *   (f) the Invoices column is gone (slice 2b)
  *
  * Dexie is the real fake-indexeddb instance from the harness;
  * server-action mocks intercept getInvoiceCountsForCustomersAction.
@@ -280,43 +280,22 @@ describe("CustomersPage — Add Customer guard", () => {
   });
 });
 
-// ─── (f) invoiceCount em-dash offline ─────────────────────────────
+// ─── (f) the Invoices column is gone (slice 2b) ───────────────────
 
-describe("CustomersPage — invoiceCount Gap A", () => {
-  it("invokes the online-only action when online and renders counts", async () => {
+describe("CustomersPage — no invoice column", () => {
+  it("renders no Invoices header and never fetches invoice counts", async () => {
     await db.customers.put(makeCustomer({ id: "c-1", name: "Test Customer" }));
-
-    invoiceCountsMock.mockResolvedValue({ "c-1": 7 });
 
     render(<CustomersPage />);
 
     await waitFor(() => {
-      expect(invoiceCountsMock).toHaveBeenCalled();
-    });
-    // The desktop table cell shows the count — assertion uses
-    // `getAllByText` because counts can appear in multiple table layers.
-    await waitFor(() => {
-      expect(screen.getAllByText("7").length).toBeGreaterThan(0);
-    });
-  });
-
-  it("does NOT call the online-only action when offline; em-dash shows in invoiceCount cell", async () => {
-    await db.customers.put(makeCustomer({ id: "c-1", name: "Test Customer" }));
-
-    setOffline();
-    render(<CustomersPage />);
-
-    await waitFor(() => {
-      expect(
-        screen.getAllByText("Test Customer").length
-      ).toBeGreaterThan(0);
+      expect(screen.getAllByText("Test Customer").length).toBeGreaterThan(0);
     });
 
+    // The column and its online-only per-customer count both went with the
+    // rest of the invoice UI. Nothing offline-vs-online about it any more:
+    // there is simply no invoice read on this page.
+    expect(screen.queryByText("Invoices")).toBeNull();
     expect(invoiceCountsMock).not.toHaveBeenCalled();
-    // Em-dashes appear in many places; the count CELL is the one that
-    // matters but tightly targeting it is brittle. Looser assertion:
-    // the page rendered without crashing and the action wasn't called.
-    // Tightening this would require a data-testid on the cell, which
-    // the existing CustomersTable doesn't have — out of scope here.
   });
 });
