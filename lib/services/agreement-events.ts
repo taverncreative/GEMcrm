@@ -5,6 +5,31 @@ import type { Agreement } from "@/types/database";
 
 /**
  * Check if jobs already exist for this agreement.
+ *
+ * REGENERATION TRAP — read before wiring this to anything new.
+ *
+ * This counts through the USER-SCOPED client (anon key + the operator's
+ * cookie), so RLS applies and the jobs SELECT policy (029) filters
+ * `deleted_at IS NULL`. Soft-deleted visits are therefore INVISIBLE to this
+ * count.
+ *
+ * That matters now that cancelling an agreement soft-deletes its future
+ * visits (migration 051). If a future "regenerate on reactivate" feature
+ * called generateAgreementJobs for a previously-cancelled agreement, this
+ * guard would read zero, conclude no visits exist, and generate a fresh set
+ * from the agreement's ORIGINAL `start_date` — which by then is in the
+ * past. The result is a pile of past-dated "scheduled" visits alongside the
+ * soft-deleted originals.
+ *
+ * This is very likely what already happened to the live active agreement,
+ * which carries 23 soft-deleted visits (a complete duplicate series on the
+ * 16th of each month, plus duplicated 27th-series rows) beside its 8 live
+ * ones.
+ *
+ * Not fixed here, deliberately: nothing calls generateAgreementJobs on a
+ * status change today (only create and draft-finalise), so there is no live
+ * bug to fix. Any future regeneration work needs a guard that survives soft
+ * deletes AND a start date rebased on today, not just this function.
  */
 async function hasJobsForAgreement(agreementId: string): Promise<boolean> {
   const supabase = await createClient();

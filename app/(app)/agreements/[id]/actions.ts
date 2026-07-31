@@ -6,6 +6,7 @@ import {
   getAgreementById,
   getAgreementWithContext,
   softDeleteAgreement,
+  cancelAgreementVisits,
 } from "@/lib/data/agreements";
 import { getCustomerById } from "@/lib/data/customers";
 import { sendAgreement, sendAgreementReview } from "@/lib/services/email";
@@ -26,6 +27,14 @@ import type { Agreement } from "@/types/database";
 const VALID = ["active", "paused", "cancelled"] as const;
 type UpdatableStatus = (typeof VALID)[number];
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// NOTE: there is deliberately no impact-preview server action. The cancel
+// confirm dialog counts the agreement's visits from Dexie via the pure
+// agreementCancelImpact helper, because cancelling is offline-capable and a
+// dialog that could only count over the network would sit with its confirm
+// button disabled exactly when the operator has no signal.
+
 export async function updateAgreementStatusAction(
   _prev: ActionState,
   formData: FormData
@@ -33,6 +42,11 @@ export async function updateAgreementStatusAction(
   await requireUser();
   const id = formData.get("agreement_id") as string;
   const status = formData.get("status") as string;
+  // Cut-off for the visit removal, captured on the operator's device at the
+  // moment they pressed Cancel and carried on the outbox entry. Read here
+  // rather than recomputed so an offline cancel replayed three days later
+  // removes the set the operator SAW, not a set recalculated at replay time.
+  const cutoffDate = (formData.get("cutoff_date") as string | null) ?? "";
 
   if (!id) {
     return { success: false, errors: {}, message: "Missing agreement ID" };
@@ -66,6 +80,35 @@ export async function updateAgreementStatusAction(
       errors: {},
       message: err instanceof Error ? err.message : "Failed to update status",
     };
+  }
+
+  // CANCEL also clears the contract's future scheduled visits — the whole
+  // point of the change. Deliberately NOT done for `paused`: pause means the
+  // contract is live but on hold, so its visits stay exactly where they are
+  // (stripping them would make pause a soft cancel, and nothing regenerates
+  // them on resume).
+  //
+  // Runs AFTER the status write, and a failure here does NOT roll the status
+  // back: the agreement really is cancelled, and reporting failure would
+  // invite a second cancel. The operator is told the visits are still there
+  // so they can retry, which the RPC's `deleted_at is null` predicate makes
+  // safe to do.
+  if (status === "cancelled") {
+    // A missing or malformed date only happens for an outbox entry queued
+    // before this field existed; today is the honest fallback there.
+    const fromDate = ISO_DATE.test(cutoffDate) ? cutoffDate : todayUk();
+    try {
+      await cancelAgreementVisits(id, fromDate);
+    } catch (err) {
+      return {
+        success: false,
+        errors: {},
+        message:
+          err instanceof Error
+            ? `Agreement cancelled, but its future visits are still on the calendar: ${err.message}`
+            : "Agreement cancelled, but its future visits are still on the calendar.",
+      };
+    }
   }
 
   revalidatePath(`${ROUTES.AGREEMENTS}/${id}`);

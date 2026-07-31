@@ -1549,3 +1549,46 @@ $$;
 revoke all on function public.soft_delete_site(uuid) from public;
 revoke all on function public.soft_delete_site(uuid) from anon;
 grant execute on function public.soft_delete_site(uuid) to authenticated;
+
+
+-- ============================================================
+-- 051: cancel_agreement_visits SECURITY DEFINER RPC
+-- ============================================================
+-- Cancelling an agreement removes its FUTURE scheduled visits. The
+-- `job_status = 'scheduled'` predicate is the database-level guarantee that
+-- a completed or in-progress visit is never touched; `job_date >=
+-- p_from_date` keeps past-dated scheduled visits (missed, still to be
+-- written up) in place. The cut-off is a parameter rather than
+-- `current_date` because cancelling is offline-capable and a replay must
+-- remove the set the operator saw. Kept here (not just in migration 051) so
+-- a local rebuild from setup.sql matches prod — the cancel path calls this
+-- RPC and 500s (PGRST202) without it.
+-- See supabase/migrations/051_cancel_agreement_visits_rpc.sql for the full
+-- rationale, including why this is one-way.
+
+create or replace function public.cancel_agreement_visits(
+  p_agreement_id uuid,
+  p_from_date date
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'cancel_agreement_visits: not authenticated';
+  end if;
+
+  update public.jobs
+     set deleted_at = now()
+   where agreement_id = p_agreement_id
+     and deleted_at is null
+     and job_status = 'scheduled'
+     and job_date >= p_from_date;
+end;
+$$;
+
+revoke all on function public.cancel_agreement_visits(uuid, date) from public;
+revoke all on function public.cancel_agreement_visits(uuid, date) from anon;
+grant execute on function public.cancel_agreement_visits(uuid, date) to authenticated;

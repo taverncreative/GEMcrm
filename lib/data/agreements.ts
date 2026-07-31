@@ -313,3 +313,40 @@ export async function softDeleteAgreement(id: string): Promise<void> {
     throw new Error(`Failed to discard agreement: ${error.message}`);
   }
 }
+
+/**
+ * Remove an agreement's FUTURE scheduled visits, on cancel.
+ *
+ * Goes through the `cancel_agreement_visits` SECURITY DEFINER RPC
+ * (migration 051) rather than a loop of `soft_delete_job`: one filtered
+ * bulk update in one transaction, so the visits either all go or none do.
+ * (The block-out flow's applyJobCancellations loop is deliberately
+ * best-effort per job — right there, wrong here.)
+ *
+ * The RPC owns the rules. `job_status = 'scheduled'` in its WHERE clause is
+ * what guarantees a COMPLETED visit (the record of work performed) and an
+ * IN_PROGRESS one (a sheet being filled at the site) are never touched, and
+ * that guarantee is a property of the database rather than of this caller.
+ *
+ * `fromDate` is the operator's captured cut-off, NOT `current_date`:
+ * cancelling is offline-capable, so a replay days later must remove the set
+ * the operator saw. Past-dated scheduled visits stay put either way.
+ *
+ * One-way: nothing regenerates these. See the note on hasJobsForAgreement
+ * in lib/services/agreement-events.ts.
+ */
+export async function cancelAgreementVisits(
+  agreementId: string,
+  fromDate: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cancel_agreement_visits", {
+    p_agreement_id: agreementId,
+    p_from_date: fromDate,
+  });
+
+  if (error) {
+    console.error("[cancelAgreementVisits]", error.code, error.message);
+    throw new Error(`Failed to remove future visits: ${error.message}`);
+  }
+}
