@@ -120,6 +120,23 @@ export function DeleteJobConfirm({
             Removes {jobLabel} from your job list and dashboard.
           </p>
 
+          {/* Extra, visually distinct warning for a completed job carrying a
+              service sheet. The delete is still ALLOWED (John's call) — this
+              exists so it can't happen by reflex, and so the survival of the
+              sheet is stated up front rather than discovered later. */}
+          {impact?.completedWithServiceSheet && (
+            <div className="mt-4 space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <p className="font-semibold">
+                This job has a{impact.clientSigned ? " signed" : ""} service
+                sheet — a record of work performed.
+              </p>
+              <p>
+                The service sheet will remain in Documents and must be deleted
+                separately.
+              </p>
+            </div>
+          )}
+
           {impact && (impact.invoiceNumber || impact.followUps > 0) && (
             <div className="mt-4 space-y-2 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-800">
               {impact.invoiceNumber && (

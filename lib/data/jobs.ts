@@ -283,6 +283,20 @@ export interface JobDeleteImpact {
   invoiceNumber: string | null;
   /** Count of still-live follow-up jobs whose parent is this job. */
   followUps: number;
+  /**
+   * The job is COMPLETED and has a generated service sheet — i.e. a signed
+   * record of work performed. Deleting it is still ALLOWED (John's call),
+   * but the dialog raises an extra warning so it can't happen by reflex.
+   *
+   * The sheet SURVIVES the delete: soft-deleting a job never cascades, and
+   * `list_report_documents` (049) deliberately keeps an orphaned sheet
+   * visible with all its detail. It has to be removed separately from
+   * Documents — which the warning copy says outright.
+   */
+  completedWithServiceSheet: boolean;
+  /** The sheet carries a client signature — sharpens the warning copy from
+   *  "record of work" to "signed record of work". */
+  clientSigned: boolean;
 }
 
 export async function getJobDeleteImpact(
@@ -321,7 +335,32 @@ export async function getJobDeleteImpact(
     .eq("parent_job_id", jobId)
     .is("deleted_at", null);
 
-  return { invoiceNumber, followUps: count ?? 0 };
+  // Signed-service-sheet check for the extra warning. "Has a sheet" means a
+  // LIVE report row with a generated PDF — a sheet already deleted from
+  // Documents shouldn't re-warn. The job must also be completed: a sheet on
+  // a non-completed job isn't a finished record of work.
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("job_status, client_signature_url")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  const { count: reportCount } = await supabase
+    .from("reports")
+    .select("id", { count: "exact", head: true })
+    .eq("job_id", jobId)
+    .not("pdf_url", "is", null)
+    .is("deleted_at", null);
+
+  const completedWithServiceSheet =
+    job?.job_status === "completed" && (reportCount ?? 0) > 0;
+
+  return {
+    invoiceNumber,
+    followUps: count ?? 0,
+    completedWithServiceSheet,
+    clientSigned: Boolean(job?.client_signature_url),
+  };
 }
 
 /**

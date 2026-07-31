@@ -11,6 +11,38 @@ import { renderAndStoreQuotePdf } from "@/lib/services/quote-pdf";
 import { markQuoteSent } from "@/lib/data/quotes";
 import { renderAndStoreInvoicePdf } from "@/lib/services/invoice-pdf";
 import { validateRecipients } from "@/lib/validation/recipients";
+import { softDeleteReport } from "@/lib/data/reports";
+
+/**
+ * Soft-delete a service sheet from the Documents list.
+ *
+ * The ONLY delete path for a report, and deliberately a soft one: the sheet
+ * is the record of work performed, so the row is stamped `deleted_at` and
+ * the stored PDF is left untouched in the `reports` bucket — consistent with
+ * every other delete in the app. There is no hard-delete counterpart (see
+ * {@link softDeleteReport} and migration 039).
+ *
+ * Online-only, like the sibling row actions (email, invoice pay/chase).
+ */
+export async function deleteReportAction(
+  reportId: string
+): Promise<{ success: boolean; message?: string }> {
+  await requireUser();
+  if (!reportId) return { success: false, message: "Missing report id" };
+  try {
+    await softDeleteReport(reportId);
+  } catch (err) {
+    return {
+      success: false,
+      message:
+        err instanceof Error ? err.message : "Failed to delete service sheet",
+    };
+  }
+  // No revalidatePath — it purges the WHOLE client router cache and triggers
+  // a prefetch stampede in prod (the same reason deleteJobAction skips it).
+  // The caller drops the row optimistically and calls router.refresh().
+  return { success: true };
+}
 
 /**
  * Load a document's PDF bytes, GENERATING them when there is nothing stored.

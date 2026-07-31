@@ -48,6 +48,10 @@ vi.mock("@/lib/supabase/server", () => ({
       };
       return builder;
     },
+    // Service sheets moved off a PostgREST embed onto the
+    // `list_report_documents` RPC (migration 049). This spec covers quotes,
+    // and its `reports` fixture is empty, so the RPC returns nothing too.
+    rpc: async () => ({ data: TABLES.reports, error: null }),
   }),
 }));
 

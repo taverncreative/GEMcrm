@@ -13,6 +13,7 @@ import {
 import { getCustomerDetailAction } from "@/app/(app)/customers/actions";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { EmailDocumentButton } from "@/components/documents/email-document-button";
+import { DeleteReportButton } from "@/components/reports/delete-report-button";
 import type { DocumentItem } from "@/lib/data/documents";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
 import {
@@ -89,6 +90,26 @@ function metaLine(item: DocumentItem): string {
   return parts.join(" · ");
 }
 
+/**
+ * Marks a service sheet whose job has been soft-deleted (or is missing).
+ *
+ * The row keeps ALL its detail — reference, customer, site, date — because
+ * the sheet is the record of work performed and outliving its job doesn't
+ * make it less true. This chip is the only thing that differs, so Nate can
+ * see why the sheet has no job to open and that removing it is a separate,
+ * deliberate act.
+ */
+function JobDeletedChip() {
+  return (
+    <span
+      className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700"
+      title="The job this sheet came from has been deleted. The sheet is kept as the record of work performed."
+    >
+      Job deleted
+    </span>
+  );
+}
+
 function KindBadge({ kind }: { kind: DocumentItem["kind"] }) {
   return (
     <span
@@ -135,6 +156,13 @@ function RowActions({ item }: { item: DocumentItem }) {
         <GenerateInvoicePdfButton invoiceId={item.invoiceId} />
       ) : (
         <span className="text-xs text-gray-300">No PDF</span>
+      )}
+      {item.kind === "service_sheet" && (
+        <DeleteReportButton
+          reportId={item.docId}
+          title={item.title}
+          jobDeleted={item.jobDeleted}
+        />
       )}
       <EmailDocumentButton
         kind={item.kind}
@@ -390,6 +418,7 @@ function MobileDocCard({ item }: { item: DocumentItem }) {
     <li className="px-4 py-3">
       <div className="flex items-start gap-2.5">
         <KindBadge kind={item.kind} />
+        {item.jobDeleted && <JobDeletedChip />}
         <div className="min-w-0 flex-1">
           <p className="font-medium text-gray-900">
             {item.customer ? (
@@ -420,7 +449,10 @@ function DesktopDocRow({ item }: { item: DocumentItem }) {
   return (
     <tr className="hover:bg-gray-50">
       <td className="px-4 py-3">
-        <KindBadge kind={item.kind} />
+        <div className="flex flex-wrap items-center gap-1">
+          <KindBadge kind={item.kind} />
+          {item.jobDeleted && <JobDeletedChip />}
+        </div>
       </td>
       <td className="px-4 py-3">
         <div className="font-mono text-xs text-gray-900">

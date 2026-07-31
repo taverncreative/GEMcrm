@@ -394,6 +394,11 @@ export interface Report {
   updated_at: string;
   report_type: string;
   pdf_url: string | null;
+  /** Soft-delete stamp (migration 049). A service sheet outlives its job —
+   *  the `on delete cascade` never fires because jobs are only ever
+   *  soft-deleted — so it needs a delete of its own. Set via the
+   *  `soft_delete_report` RPC; the stored PDF is left in the bucket. */
+  deleted_at: string | null;
 }
 
 /**

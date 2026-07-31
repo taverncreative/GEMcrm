@@ -36,6 +36,12 @@ export interface DocumentItem {
   siteAddress?: string | null;
   /** Service-sheet only: pests recorded on the job. */
   pests?: string[];
+  /** Service-sheet only: the job this sheet was produced from was
+   *  soft-deleted (or is missing outright). The sheet DELIBERATELY stays in
+   *  the list with all its detail intact — it is the record of work
+   *  performed — and the row carries a "Job deleted" chip so it reads as
+   *  orphaned rather than broken. Drives that chip. */
+  jobDeleted?: boolean;
   /** Renewal date on agreements; due date on invoices. Drives the badge. */
   renewalDate?: string | null;
   /** Driven by renewalDate: ok | upcoming (<=30d) | overdue. */
@@ -45,6 +51,26 @@ export interface DocumentItem {
   invoiceStatus?: "draft" | "sent" | "paid";
   invoiceDueDate?: string | null;
   invoiceOverdue?: boolean;
+}
+
+/** One row of `list_report_documents` (migration 049) — a report with its
+ *  job/site/customer already resolved owner-side, so a soft-deleted job's
+ *  sheet keeps every detail a live one has. */
+interface ReportDocumentRow {
+  id: string;
+  created_at: string;
+  pdf_url: string | null;
+  job_id: string;
+  job_deleted: boolean;
+  reference_number: string | null;
+  job_date: string | null;
+  pest_species: string[] | null;
+  site_address_line_1: string | null;
+  site_town: string | null;
+  site_postcode: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_company_name: string | null;
 }
 
 function classifyRenewal(
@@ -85,13 +111,28 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
     .order("created_at", { ascending: false })
     .limit(200);
 
-  // Service reports — only those with a generated PDF.
-  const { data: reports } = await supabase
-    .from("reports")
-    .select("id, job_id, pdf_url, created_at, job:jobs(reference_number, job_date, pest_species, site:sites(address_line_1, town, postcode, customer:customers(id, name, company_name)))")
-    .not("pdf_url", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(200);
+  // Service reports — only live rows (deleted_at is null) with a generated
+  // PDF, via the `list_report_documents` SECURITY DEFINER RPC (migration
+  // 049) rather than a PostgREST embed.
+  //
+  // WHY THE RPC: the embed this replaced — `job:jobs(...site(...customer))`
+  // — is a LEFT join, and the jobs SELECT policy filters
+  // `deleted_at IS NULL`. So the moment a job was soft-deleted its report
+  // survived but the embed came back NULL, and the row rendered as an
+  // anonymous "Service Sheet" with no reference, customer, site or date.
+  //
+  // A soft-deleted job's sheet MUST stay visible WITH its details — it is
+  // the record of work performed (John's call) — so the fix is a read that
+  // can see past that policy, not an `!inner` join that would hide the row.
+  // The RPC runs as owner, resolves job/site/customer regardless of the
+  // job's soft-delete, and returns `job_deleted` to drive the UI chip.
+  const { data: reports, error: reportsError } = await supabase.rpc(
+    "list_report_documents",
+    { p_limit: 200 }
+  );
+  if (reportsError) {
+    console.error("[getAllDocuments] reports", reportsError.code, reportsError.message);
+  }
 
   // Agreements — only those with a generated PDF.
   const { data: agreements } = await supabase
@@ -155,51 +196,44 @@ export async function getAllDocuments(): Promise<DocumentItem[]> {
     });
   }
 
-  for (const r of reports ?? []) {
-    const job = one(
-      (r as unknown as {
-        job: Joined<{
-          reference_number: string | null;
-          job_date: string;
-          pest_species: string[] | null;
-          site: Joined<{
-            address_line_1: string | null;
-            town: string | null;
-            postcode: string | null;
-            customer: Joined<{ id: string; name: string; company_name: string | null }>;
-          }>;
-        }>;
-      }).job
-    );
-    const site = one(job?.site);
-    const cust = one(site?.customer);
-    const ref = job?.reference_number ?? null;
+  // The RPC returns one flat row per report — job/site/customer already
+  // resolved owner-side — so there is no embed to unwrap here. A row whose
+  // job is soft-deleted carries exactly the same detail as a live one; only
+  // `job_deleted` differs.
+  for (const r of (reports ?? []) as ReportDocumentRow[]) {
+    const ref = r.reference_number ?? null;
     // Site one-liner: line 1 + town + postcode, whichever are present. This
     // is what keeps ref-less service sheets from all reading "Service Sheet".
-    const siteAddress = site
-      ? [site.address_line_1, site.town, site.postcode]
-          .map((p) => p?.trim())
-          .filter(Boolean)
-          .join(", ") || null
-      : null;
+    const siteAddress =
+      [r.site_address_line_1, r.site_town, r.site_postcode]
+        .map((p) => p?.trim())
+        .filter(Boolean)
+        .join(", ") || null;
     items.push({
       id: `report-${r.id}`,
       docId: r.id,
       kind: "service_sheet",
       title: ref ? `Service Sheet ${ref}` : "Service Sheet",
       reference: ref,
-      customer: cust,
+      customer: r.customer_id
+        ? {
+            id: r.customer_id,
+            name: r.customer_name ?? "",
+            company_name: r.customer_company_name,
+          }
+        : null,
       url: r.pdf_url ?? "",
       date: r.created_at,
-      subtitle: job?.job_date
-        ? new Date(job.job_date).toLocaleDateString("en-GB", {
+      subtitle: r.job_date
+        ? new Date(r.job_date).toLocaleDateString("en-GB", {
             day: "numeric",
             month: "short",
             year: "numeric",
           })
         : undefined,
       siteAddress,
-      pests: job?.pest_species ?? [],
+      pests: r.pest_species ?? [],
+      jobDeleted: r.job_deleted,
     });
   }
 
@@ -316,6 +350,9 @@ export async function getDocumentForEmail(
       .from("reports")
       .select("id, pdf_url, job:jobs(reference_number, job_date)")
       .eq("id", id)
+      // A soft-deleted sheet must not be emailable — it is gone from the
+      // list, so the only way here would be a stale open dialog.
+      .is("deleted_at", null)
       .maybeSingle();
     if (!data) return null;
     const job = Array.isArray(data.job) ? data.job[0] : data.job;

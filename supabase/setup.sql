@@ -91,7 +91,11 @@ create table if not exists reports (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   report_type text not null default 'service',
-  pdf_url text
+  pdf_url text,
+  -- 049: soft-delete. The `on delete cascade` above never fires in practice
+  -- (jobs are only ever soft-deleted), so a report outlives its job and needs
+  -- a delete of its own. See the 049 block at the foot of this file.
+  deleted_at timestamptz
 );
 
 -- Indexes
@@ -1331,3 +1335,102 @@ alter table jobs add constraint jobs_completed_requires_filled_sheet
       and coalesce(array_length(method_used, 1), 0) > 0
     )
   );
+
+
+-- ============================================================
+-- 049: report soft-delete + orphan-safe Documents read.
+-- Mirror of migration 049_report_soft_delete.sql. `reports.deleted_at` is
+-- declared on the table above; this block adds the index, the two RPCs and
+-- the hard-delete revoke. See the migration for the full rationale — in
+-- short: a service sheet had no delete path at all, and a soft-deleted job
+-- orphaned its report into an anonymous "Service Sheet" row. Orphans are
+-- kept VISIBLE WITH their details (John's call — the sheet is the record of
+-- work performed) via a SECURITY DEFINER read that sees past the jobs
+-- SELECT policy, and are separately deletable.
+-- ============================================================
+
+create index if not exists idx_reports_live
+  on public.reports (created_at desc)
+  where deleted_at is null;
+
+create or replace function public.soft_delete_report(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'soft_delete_report: not authenticated';
+  end if;
+
+  update public.reports
+     set deleted_at = now()
+   where id = p_id
+     and deleted_at is null;
+end;
+$$;
+
+revoke all on function public.soft_delete_report(uuid) from public;
+revoke all on function public.soft_delete_report(uuid) from anon;
+grant execute on function public.soft_delete_report(uuid) to authenticated;
+
+-- Extends 039's M1 to reports: a signed service sheet must never be
+-- removable by a raw REST DELETE.
+revoke delete, truncate on public.reports from authenticated;
+
+create or replace function public.list_report_documents(p_limit int default 200)
+returns table (
+  id uuid,
+  created_at timestamptz,
+  pdf_url text,
+  job_id uuid,
+  job_deleted boolean,
+  reference_number text,
+  job_date date,
+  pest_species text[],
+  site_address_line_1 text,
+  site_town text,
+  site_postcode text,
+  customer_id uuid,
+  customer_name text,
+  customer_company_name text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'list_report_documents: not authenticated';
+  end if;
+
+  return query
+    select r.id,
+           r.created_at,
+           r.pdf_url,
+           r.job_id,
+           (j.id is null or j.deleted_at is not null) as job_deleted,
+           j.reference_number,
+           j.job_date,
+           j.pest_species,
+           s.address_line_1,
+           s.town,
+           s.postcode,
+           c.id,
+           c.name,
+           c.company_name
+      from public.reports r
+      left join public.jobs      j on j.id = r.job_id
+      left join public.sites     s on s.id = j.site_id
+      left join public.customers c on c.id = s.customer_id
+     where r.deleted_at is null
+       and r.pdf_url is not null
+     order by r.created_at desc
+     limit p_limit;
+end;
+$$;
+
+revoke all on function public.list_report_documents(int) from public;
+revoke all on function public.list_report_documents(int) from anon;
+grant execute on function public.list_report_documents(int) to authenticated;

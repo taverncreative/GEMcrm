@@ -37,7 +37,13 @@ function builder(table: string) {
 }
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ from: (t: string) => builder(t) }),
+  createClient: async () => ({
+    from: (t: string) => builder(t),
+    // Service sheets moved off a PostgREST embed onto the
+    // `list_report_documents` RPC (migration 049). This spec is about the
+    // agreements filter, so an empty report set is the right stub.
+    rpc: async () => ({ data: [], error: null }),
+  }),
 }));
 
 import { getAllDocuments } from "@/lib/data/documents";
