@@ -118,7 +118,7 @@ const { requireUserMock } = vi.hoisted(() => ({
 vi.mock("@/lib/auth/require-user", () => ({ requireUser: requireUserMock }));
 
 import { softDeleteReport } from "@/lib/data/reports";
-import { getAllDocuments } from "@/lib/data/documents";
+import { getAllDocuments, getDocumentForEmail } from "@/lib/data/documents";
 import { getJobDeleteImpact } from "@/lib/data/jobs";
 import { deleteReportAction } from "@/app/(app)/reports/actions";
 
@@ -187,6 +187,27 @@ beforeEach(() => {
         }
       }
       return { error: null };
+    }
+    if (fn === "get_report_document") {
+      // Mirrors the single-row definer read: same blind-spot-free join, and
+      // the `deleted_at is null` guard lives in the function, not the caller.
+      const r = reportRows.find(
+        (x) => x.id === params.p_id && x.deleted_at == null
+      );
+      if (!r) return { data: [], error: null };
+      const j = jobRows.find((x) => x.id === r.job_id);
+      return {
+        data: [
+          {
+            id: r.id,
+            pdf_url: r.pdf_url,
+            job_deleted: !j || j.deleted_at != null,
+            reference_number: j?.reference_number ?? null,
+            job_date: j?.job_date ?? null,
+          },
+        ],
+        error: null,
+      };
     }
     if (fn === "list_report_documents") {
       // Mirrors the migration-049 function body. Crucially the jobs join does
@@ -318,6 +339,34 @@ describe("deleteReportAction — auth gate", () => {
     });
     const res = await deleteReportAction(ORPHAN_REPORT);
     expect(res.success).toBe(false);
+  });
+});
+
+describe("emailed attachment agrees with the Documents row", () => {
+  it("an ORPHANED sheet emails with its proper label, not the bare fallback", async () => {
+    const doc = await getDocumentForEmail("service_sheet", ORPHAN_REPORT);
+    expect(doc?.label).toBe("Service Sheet 00091");
+    expect(doc?.label).not.toBe("Service Sheet");
+    expect(doc?.fileName).toContain("00091");
+  });
+
+  it("the label matches the row title exactly, orphan or not", async () => {
+    const items = await getAllDocuments();
+    for (const id of [ORPHAN_REPORT, LIVE_REPORT]) {
+      const doc = await getDocumentForEmail("service_sheet", id);
+      expect(doc?.label).toBe(sheet(items, id)!.title);
+    }
+  });
+
+  it("a live sheet is unaffected", async () => {
+    const doc = await getDocumentForEmail("service_sheet", LIVE_REPORT);
+    expect(doc?.label).toBe("Service Sheet 00092");
+    expect(doc?.pdfUrl).toBe("https://example.test/live.pdf");
+  });
+
+  it("a soft-deleted sheet is not emailable", async () => {
+    await softDeleteReport(ORPHAN_REPORT);
+    expect(await getDocumentForEmail("service_sheet", ORPHAN_REPORT)).toBeNull();
   });
 });
 

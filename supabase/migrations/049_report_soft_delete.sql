@@ -146,8 +146,56 @@ revoke all on function public.list_report_documents(int) from public;
 revoke all on function public.list_report_documents(int) from anon;
 grant execute on function public.list_report_documents(int) to authenticated;
 
+-- ── 3. get_report_document — the same read, for ONE sheet ──────────
+-- `getDocumentForEmail` resolves the label that names the emailed
+-- attachment ("Service Sheet 00091"). It used the same jobs embed the list
+-- did, so it had the same blind spot: for a soft-deleted job the embed came
+-- back null and the attachment fell back to a bare "Service Sheet" — the
+-- Documents ROW would read "Service Sheet 00091" while the PDF that landed
+-- in the customer's inbox was called something else.
+--
+-- Same definer treatment, single row. Narrower return than the list
+-- function: the email path needs only the pdf and the label inputs.
+-- `deleted_at is null` is enforced HERE rather than by the caller, so a
+-- soft-deleted sheet can't be emailed from a stale open dialog.
+
+create or replace function public.get_report_document(p_id uuid)
+returns table (
+  id uuid,
+  pdf_url text,
+  job_deleted boolean,
+  reference_number text,
+  job_date date
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'get_report_document: not authenticated';
+  end if;
+
+  return query
+    select r.id,
+           r.pdf_url,
+           (j.id is null or j.deleted_at is not null) as job_deleted,
+           j.reference_number,
+           j.job_date
+      from public.reports r
+      left join public.jobs j on j.id = r.job_id
+     where r.id = p_id
+       and r.deleted_at is null;
+end;
+$$;
+
+revoke all on function public.get_report_document(uuid) from public;
+revoke all on function public.get_report_document(uuid) from anon;
+grant execute on function public.get_report_document(uuid) to authenticated;
+
 -- Rollback:
 --   revoke delete, truncate is intentionally NOT restored — see 039.
+--   drop function if exists public.get_report_document(uuid);
 --   drop function if exists public.list_report_documents(int);
 --   drop function if exists public.soft_delete_report(uuid);
 --   drop index if exists public.idx_reports_live;

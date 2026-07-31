@@ -1434,3 +1434,37 @@ $$;
 revoke all on function public.list_report_documents(int) from public;
 revoke all on function public.list_report_documents(int) from anon;
 grant execute on function public.list_report_documents(int) to authenticated;
+
+create or replace function public.get_report_document(p_id uuid)
+returns table (
+  id uuid,
+  pdf_url text,
+  job_deleted boolean,
+  reference_number text,
+  job_date date
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'get_report_document: not authenticated';
+  end if;
+
+  return query
+    select r.id,
+           r.pdf_url,
+           (j.id is null or j.deleted_at is not null) as job_deleted,
+           j.reference_number,
+           j.job_date
+      from public.reports r
+      left join public.jobs j on j.id = r.job_id
+     where r.id = p_id
+       and r.deleted_at is null;
+end;
+$$;
+
+revoke all on function public.get_report_document(uuid) from public;
+revoke all on function public.get_report_document(uuid) from anon;
+grant execute on function public.get_report_document(uuid) to authenticated;

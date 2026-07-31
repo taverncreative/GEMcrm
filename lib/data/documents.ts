@@ -346,21 +346,35 @@ export async function getDocumentForEmail(
   const supabase = await createClient();
 
   if (kind === "service_sheet") {
-    const { data } = await supabase
-      .from("reports")
-      .select("id, pdf_url, job:jobs(reference_number, job_date)")
-      .eq("id", id)
-      // A soft-deleted sheet must not be emailable — it is gone from the
-      // list, so the only way here would be a stale open dialog.
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (!data) return null;
-    const job = Array.isArray(data.job) ? data.job[0] : data.job;
-    const ref = job?.reference_number ?? null;
+    // Via the `get_report_document` definer RPC (migration 049), NOT a jobs
+    // embed — the embed is subject to the jobs SELECT policy, so an orphaned
+    // sheet resolved to a null job and the attachment fell back to a bare
+    // "Service Sheet" while its Documents ROW read "Service Sheet 00091".
+    // The row and the emailed file must agree. The RPC also enforces
+    // `deleted_at is null`, so a soft-deleted sheet can't be emailed from a
+    // stale open dialog.
+    const { data, error } = await supabase.rpc("get_report_document", {
+      p_id: id,
+    });
+    if (error) {
+      console.error("[getDocumentForEmail] report", error.code, error.message);
+      return null;
+    }
+    const row = (
+      data as
+        | {
+            pdf_url: string | null;
+            reference_number: string | null;
+            job_date: string | null;
+          }[]
+        | null
+    )?.[0];
+    if (!row) return null;
+    const ref = row.reference_number ?? null;
     const label = ref
       ? `Service Sheet ${ref}`
-      : job?.job_date
-        ? `Service Sheet ${new Date(job.job_date).toLocaleDateString("en-GB", {
+      : row.job_date
+        ? `Service Sheet ${new Date(row.job_date).toLocaleDateString("en-GB", {
             day: "numeric",
             month: "long",
             year: "numeric",
@@ -369,7 +383,7 @@ export async function getDocumentForEmail(
     return {
       kind,
       id,
-      pdfUrl: data.pdf_url ?? null,
+      pdfUrl: row.pdf_url ?? null,
       label,
       fileName: attachmentFileName(label),
     };
