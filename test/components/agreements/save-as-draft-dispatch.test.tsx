@@ -54,7 +54,11 @@ function fill(name: string, value: string) {
 
 async function renderWizardOnTerms() {
   render(<AddAgreementForm siteId="s1" />);
-  await userEvent.click(screen.getByRole("button", { name: /New Agreement/ }));
+  // The wizard resolves its persisted draft (IndexedDB) before mounting
+  // the body, so the launcher button is enabled asynchronously.
+  await userEvent.click(
+    await screen.findByRole("button", { name: /New Agreement/ })
+  );
   // John's flow: fill steps 1-3; the step-4 signee stays EMPTY (hidden).
   fill("reference_number", "GEM-TEST-001");
   fill("contact_name", "Test Co");

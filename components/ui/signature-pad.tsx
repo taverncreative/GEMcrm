@@ -6,6 +6,13 @@ interface SignaturePadProps {
   label: string;
   onSignature: (dataUrl: string) => void;
   onClear: () => void;
+  /** A previously captured signature (data URL) to paint on mount —
+   *  used when a form rehydrates from a persisted draft. Without it a
+   *  restored signature exists in the parent's state but the pad renders
+   *  blank, which reads to the operator as "my signature was lost" and
+   *  invites a needless re-sign. Repainted after a true canvas resize,
+   *  and abandoned the moment the operator draws or clears. */
+  initialDataUrl?: string;
 }
 
 /**
@@ -21,10 +28,20 @@ interface SignaturePadProps {
  *     When the tab becomes visible, ResizeObserver fires and we re-size + re-paint.
  *   - Fixes the bug where only the conditionally-mounted second signature worked.
  */
-export function SignaturePad({ label, onSignature, onClear }: SignaturePadProps) {
+export function SignaturePad({
+  label,
+  onSignature,
+  onClear,
+  initialDataUrl,
+}: SignaturePadProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
-  const [hasSignature, setHasSignature] = useState(false);
+  const [hasSignature, setHasSignature] = useState(!!initialDataUrl);
+  // Once the operator touches the pad (draws or clears), the restored
+  // image is history — never repaint over their own strokes on a later
+  // resize. Captured in a ref because the resize path reads it outside
+  // React's render cycle.
+  const ownedByUserRef = useRef(false);
 
   const configureContext = useCallback((ctx: CanvasRenderingContext2D) => {
     ctx.strokeStyle = "#1a1a1a";
@@ -60,16 +77,38 @@ export function SignaturePad({ label, onSignature, onClear }: SignaturePadProps)
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
       configureContext(ctx);
+      // The assignment above just cleared the bitmap. If we're showing a
+      // restored draft signature the operator hasn't touched, paint it
+      // back — otherwise a rehydrated wizard shows an empty pad the
+      // first time step 4 becomes visible (the 0×0 → sized transition
+      // this observer exists for).
+      paintInitial();
+    }
+
+    function paintInitial() {
+      if (!canvas || !ctx) return;
+      if (!initialDataUrl || ownedByUserRef.current) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const img = new Image();
+      img.onload = () => {
+        // Re-check on load: the operator may have started signing during
+        // the (async) decode, and their strokes must win.
+        if (ownedByUserRef.current) return;
+        ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      };
+      img.src = initialDataUrl;
     }
 
     resize();
+    paintInitial();
 
     // ResizeObserver fires when the element transitions from 0×0 (hidden) to visible,
     // which is exactly the condition that was breaking signatures.
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [configureContext]);
+  }, [configureContext, initialDataUrl]);
 
   function getPos(e: React.PointerEvent): { x: number; y: number } | null {
     const canvas = canvasRef.current;
@@ -89,6 +128,9 @@ export function SignaturePad({ label, onSignature, onClear }: SignaturePadProps)
     // Capture the pointer so we still get move/up events if the finger slides off-canvas.
     canvas.setPointerCapture(e.pointerId);
     drawingRef.current = true;
+    // The operator is signing over whatever was here — from now on the
+    // canvas is theirs and a resize must never repaint the draft image.
+    ownedByUserRef.current = true;
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
     e.preventDefault();
@@ -125,6 +167,9 @@ export function SignaturePad({ label, onSignature, onClear }: SignaturePadProps)
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    // An explicit clear also takes the canvas off the restored image, or
+    // the next resize would helpfully paint it straight back.
+    ownedByUserRef.current = true;
     const rect = canvas.getBoundingClientRect();
     // clearRect uses the current transform (dpr-scaled), so passing rect dimensions
     // clears the full logical area.

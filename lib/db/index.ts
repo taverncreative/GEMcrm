@@ -55,6 +55,7 @@ import type {
   Product,
 } from "@/types/database";
 import type { ServiceSheetDraft } from "@/lib/db/drafts";
+import type { AgreementDraft } from "@/lib/db/agreement-drafts";
 
 // ─── Sync-infrastructure table types ────────────────────────────────
 
@@ -183,6 +184,7 @@ class GemCrmDb extends Dexie {
   photos_pending!: EntityTable<PendingPhoto, "id">;
   sync_meta!: EntityTable<SyncMetaEntry, "key">;
   service_sheet_drafts!: EntityTable<ServiceSheetDraft, "job_id">;
+  agreement_drafts!: EntityTable<AgreementDraft, "site_id">;
 
   constructor() {
     super("gemcrm");
@@ -319,6 +321,22 @@ class GemCrmDb extends Dexie {
     // `deleted_at` for the "hide soft-deleted/retired" local filter.
     this.version(6).stores({
       products: "id, brand_name, chemical_name, deleted_at",
+    });
+
+    // ─── v7: agreement_drafts ─────────────────────────────────────
+    //
+    // In-progress agreement-wizard state, including the two captured
+    // signature data URLs (see lib/db/agreement-drafts.ts for why this
+    // exists: a dropped connection used to unmount the wizard via the
+    // route error boundary and destroy signatures the customer had
+    // already given).
+    //
+    // Fresh store → version bump required, no upgrade callback (same as
+    // v5/v6). PK = site_id (one in-progress agreement per site); index
+    // on `updated_at` for a future "stale drafts" cleanup view, matching
+    // v4's service_sheet_drafts shape.
+    this.version(7).stores({
+      agreement_drafts: "site_id, updated_at",
     });
   }
 }

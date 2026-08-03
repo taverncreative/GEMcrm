@@ -54,7 +54,11 @@ function el(name: string): HTMLInputElement | HTMLTextAreaElement {
 
 async function renderAndFill() {
   render(<AddAgreementForm siteId="s1" />);
-  await userEvent.click(screen.getByRole("button", { name: /New Agreement/ }));
+  // Mount is async now: the wizard resolves its persisted draft from
+  // IndexedDB before the body (and its launcher) render.
+  await userEvent.click(
+    await screen.findByRole("button", { name: /New Agreement/ })
+  );
   for (const [k, v] of Object.entries(TYPED)) {
     fireEvent.change(el(k), { target: { value: v } });
   }
