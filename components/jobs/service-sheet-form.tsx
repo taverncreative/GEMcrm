@@ -518,6 +518,26 @@ function ServiceSheetFormBody({
     );
   }, [siteAgreement]);
   const prevErrorsRef = useRef<Record<string, string>>({});
+  // The data URLs the pads are MOUNTED with, held constant for the life of
+  // the mount. Without these the restored signature exists in state (and
+  // would submit correctly) while the canvas renders blank — which reads
+  // to the operator as "my signature was lost", invites a needless
+  // re-sign, and is one tap from real loss: pressing Clear discards the
+  // stored signature for good. Same pattern as the agreement wizard.
+  //
+  // Deliberately seeded from the DRAFT, not from the live techSig /
+  // clientSig state: feeding the live value back in would make the pad
+  // repaint its own output on every resize, painting over strokes the
+  // operator is still drawing.
+  //
+  // useState, not useRef, because this value is read during render (it
+  // is a prop). A never-updated state initialiser is the idiomatic way
+  // to freeze a mount-time value that the render output depends on;
+  // reading a ref here is what react-hooks/refs correctly rejects.
+  const [initialSigs] = useState({
+    tech: draft?.tech_sig ?? "",
+    client: draft?.client_sig ?? "",
+  });
   const router = useRouter();
 
   // Wrapped: local-first Dexie update + outbox enqueue. With
@@ -1399,6 +1419,7 @@ function ServiceSheetFormBody({
             label=""
             onSignature={setTechSig}
             onClear={() => setTechSig("")}
+            initialDataUrl={initialSigs.tech}
           />
         </div>
         {errors.technician_signature && (
@@ -1448,6 +1469,7 @@ function ServiceSheetFormBody({
               label="Client Signature"
               onSignature={setClientSig}
               onClear={() => setClientSig("")}
+              initialDataUrl={initialSigs.client}
             />
           </div>
         )}

@@ -1,11 +1,17 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { todayUk } from "@/lib/utils/today-uk";
 import { ROUTES } from "@/lib/constants/routes";
+import {
+  loadFinaliseDraft,
+  saveFinaliseDraft,
+  clearFinaliseDraft,
+  type AgreementFinaliseDraft,
+} from "@/lib/db/agreement-finalise-drafts";
 import {
   finaliseDraftAgreementAction,
   deleteAgreementAction,
@@ -21,25 +27,112 @@ import {
  * it to the customer. Discard soft-deletes the draft after an explicit
  * confirm. Both are online-only, like the rest of the agreement flow.
  */
-export function AgreementFinalise({
-  agreementId,
-  defaultSignatoryName,
-}: {
+interface AgreementFinaliseProps {
   agreementId: string;
   defaultSignatoryName: string | null;
+}
+
+/**
+ * Outer wrapper: gates render on the finalise-draft read so the body's
+ * useState initial values get the draft if there is one.
+ *
+ * A one-shot load rather than useLiveQuery, matching the agreement
+ * wizard: this panel writes its own draft on a debounce, and a reactive
+ * query would re-render the tree on every save for no benefit — the body
+ * owns the state from mount onwards.
+ */
+export function AgreementFinalise(props: AgreementFinaliseProps) {
+  const [draft, setDraft] = useState<
+    AgreementFinaliseDraft | null | undefined
+  >(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    void loadFinaliseDraft(props.agreementId).then((d) => {
+      if (alive) setDraft(d ?? null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [props.agreementId]);
+
+  // `undefined` = the IDB read is still in flight. It resolves in
+  // milliseconds; hold a similar footprint so the card doesn't jump.
+  if (draft === undefined) {
+    return (
+      <div className="animate-pulse space-y-2">
+        <div className="h-8 w-full max-w-md rounded bg-gray-100" />
+        <div className="h-9 w-44 rounded-lg bg-gray-100" />
+      </div>
+    );
+  }
+
+  return <AgreementFinaliseBody {...props} draft={draft} />;
+}
+
+function AgreementFinaliseBody({
+  agreementId,
+  defaultSignatoryName,
+  draft,
+}: AgreementFinaliseProps & {
+  /** null if no draft exists, the stored draft otherwise. */
+  draft: AgreementFinaliseDraft | null;
 }) {
   const router = useRouter();
   const online = useIsOnline();
   const [isPending, startTransition] = useTransition();
-  const [open, setOpen] = useState(false);
-  const [gemSig, setGemSig] = useState("");
-  const [clientSig, setClientSig] = useState("");
+  // Re-open the panel automatically when a draft came back. Otherwise a
+  // reload would show the collapsed "Finalise agreement" button with no
+  // sign that the signatures survived, and the operator would open it,
+  // find the pads filled, and have no idea why — or worse, assume the
+  // signatures were lost and ask the customer to sign again, which is
+  // the exact outcome this whole change exists to prevent.
+  const [open, setOpen] = useState(draft !== null);
+  const [gemSig, setGemSig] = useState(draft?.gem_signature ?? "");
+  const [clientSig, setClientSig] = useState(draft?.client_signature ?? "");
   const [signatoryName, setSignatoryName] = useState(
-    defaultSignatoryName ?? ""
+    draft?.signatory_name ?? defaultSignatoryName ?? ""
   );
-  const [signedDate, setSignedDate] = useState(todayUk());
+  const [signedDate, setSignedDate] = useState(draft?.signed_date ?? todayUk());
   const [error, setError] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // The data URLs the pads are MOUNTED with, held constant for the life
+  // of the mount. Passing the live gemSig / clientSig back in would make
+  // a pad repaint its own output on every resize, over strokes still
+  // being drawn.
+  //
+  // useState, not useRef: this is read during render (it is a prop), and
+  // a never-updated state initialiser is the idiomatic way to freeze a
+  // mount-time value the render output depends on.
+  const [initialSigs] = useState({
+    gem: draft?.gem_signature ?? "",
+    client: draft?.client_signature ?? "",
+  });
+
+  // ── Draft auto-save ──
+  //
+  // Mirror the panel's state to IndexedDB ~500ms after the last change.
+  // Nothing is written until there is something worth keeping, so merely
+  // opening the panel on an agreement never leaves a ghost row.
+  const draftSavedOnceRef = useRef(draft !== null);
+  useEffect(() => {
+    if (!draftSavedOnceRef.current) {
+      const hasContent =
+        gemSig !== "" || clientSig !== "" || signatoryName.trim() !== "";
+      if (!hasContent) return;
+      draftSavedOnceRef.current = true;
+    }
+    const t = setTimeout(() => {
+      void saveFinaliseDraft({
+        agreement_id: agreementId,
+        gem_signature: gemSig,
+        client_signature: clientSig,
+        signatory_name: signatoryName,
+        signed_date: signedDate,
+      });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [agreementId, gemSig, clientSig, signatoryName, signedDate]);
 
   function finalise() {
     setError(null);
@@ -57,6 +150,11 @@ export function AgreementFinalise({
           signed_date: signedDate,
         });
         if (res.success) {
+          // Signed and live — the draft has done its job. Best-effort:
+          // a clear that fails must never turn a successful finalise
+          // into an error on screen; the stale row is harmless because
+          // the panel is gone once the agreement is active.
+          await clearFinaliseDraft(agreementId);
           // The page re-renders as an active agreement (badge, status
           // actions, signed PDF, visits list).
           router.refresh();
@@ -77,6 +175,10 @@ export function AgreementFinalise({
         // cancelled, handled by AgreementDelete on the detail page).
         const res = await deleteAgreementAction(agreementId);
         if (res.success) {
+          // The agreement is gone, so there is nothing left to sign —
+          // drop any captured signatures with it rather than leaving
+          // them orphaned in IndexedDB.
+          await clearFinaliseDraft(agreementId);
           router.push(ROUTES.AGREEMENTS);
           router.refresh();
         } else {
@@ -154,6 +256,7 @@ export function AgreementFinalise({
         label="Signed By GEM Services *"
         onSignature={setGemSig}
         onClear={() => setGemSig("")}
+        initialDataUrl={initialSigs.gem}
       />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
@@ -192,6 +295,7 @@ export function AgreementFinalise({
         label="Signed By Client *"
         onSignature={setClientSig}
         onClear={() => setClientSig("")}
+        initialDataUrl={initialSigs.client}
       />
       {error && <p className="text-xs text-red-500">{error}</p>}
       <div className="flex items-center justify-between gap-2 pt-1">

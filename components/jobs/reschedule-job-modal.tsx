@@ -283,9 +283,18 @@ export function RescheduleJobModal({
             </div>
           )}
 
-          {clientError && (
-            <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-600">
-              {clientError}
+          {/* Client-side gate (clash, missing date) and the wrapper's
+              local-failure message share one banner: from the operator's
+              side they are the same thing, "this didn't save and here's
+              why". Without the state.message half, a failed local write
+              or a failed outbox enqueue was completely invisible here —
+              the modal just sat there. */}
+          {(clientError || (state.message && !state.success)) && (
+            <div
+              role="alert"
+              className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-600"
+            >
+              {clientError ?? state.message}
             </div>
           )}
 

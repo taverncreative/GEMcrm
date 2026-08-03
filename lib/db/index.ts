@@ -56,6 +56,7 @@ import type {
 } from "@/types/database";
 import type { ServiceSheetDraft } from "@/lib/db/drafts";
 import type { AgreementDraft } from "@/lib/db/agreement-drafts";
+import type { AgreementFinaliseDraft } from "@/lib/db/agreement-finalise-drafts";
 
 // ─── Sync-infrastructure table types ────────────────────────────────
 
@@ -185,6 +186,10 @@ class GemCrmDb extends Dexie {
   sync_meta!: EntityTable<SyncMetaEntry, "key">;
   service_sheet_drafts!: EntityTable<ServiceSheetDraft, "job_id">;
   agreement_drafts!: EntityTable<AgreementDraft, "site_id">;
+  agreement_finalise_drafts!: EntityTable<
+    AgreementFinaliseDraft,
+    "agreement_id"
+  >;
 
   constructor() {
     super("gemcrm");
@@ -337,6 +342,24 @@ class GemCrmDb extends Dexie {
     // v4's service_sheet_drafts shape.
     this.version(7).stores({
       agreement_drafts: "site_id, updated_at",
+    });
+
+    // ─── v8: agreement_finalise_drafts ────────────────────────────
+    //
+    // The OTHER two-signature surface: making an existing draft
+    // agreement live (see lib/db/agreement-finalise-drafts.ts). Until
+    // this table, that panel held both signatures in plain component
+    // state, so any remount destroyed them with the customer standing
+    // there.
+    //
+    // Fresh store → version bump required, no upgrade callback (same as
+    // v5/v6/v7). PK = agreement_id, NOT site_id: a site can hold several
+    // draft agreements, and a wizard draft and a finalise can be in
+    // flight for the same site at once — sharing site_id would let one
+    // clobber the other. Index on `updated_at` for a future stale-draft
+    // cleanup, matching v4/v7.
+    this.version(8).stores({
+      agreement_finalise_drafts: "agreement_id, updated_at",
     });
   }
 }
