@@ -72,4 +72,25 @@ describe("UpcomingVisits — overdue styling", () => {
     expect(screen.queryByText(/Overdue by/)).toBeNull();
     expect(screen.queryByText(/Overdue \(/)).toBeNull();
   });
+
+  it("shows the weekday on every date, overdue rows included", () => {
+    const past = localDateOffset(-5);
+    const future = localDateOffset(10);
+    render(
+      <UpcomingVisits
+        jobs={[
+          job("p", past, "Past Farm"),
+          job("f", future, "Future Shop"),
+        ]}
+      />
+    );
+
+    // "Fri 24 Jul" — short weekday, day, short month, no year.
+    const shape = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2}$/;
+    for (const name of ["Past Farm", "Future Shop"]) {
+      const row = screen.getByText(name).closest("a");
+      const dateLabel = row?.querySelector("span.tabular-nums")?.textContent;
+      expect(dateLabel).toMatch(shape);
+    }
+  });
 });

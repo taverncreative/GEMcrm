@@ -1,17 +1,13 @@
 import { ROUTES } from "@/lib/constants/routes";
 import type { JobWithContext } from "@/lib/data/jobs";
 import { customerDisplayName } from "@/lib/utils/customer-display-name";
+import { formatShortDate } from "@/lib/utils/format-date";
 import Link from "next/link";
 import { Fragment } from "react";
 
 interface UpcomingVisitsProps {
   jobs: JobWithContext[];
 }
-
-const SHORT_DATE: Intl.DateTimeFormatOptions = {
-  day: "numeric",
-  month: "short",
-};
 
 // Whole days a visit is PAST today (date-only, no time-of-day drift).
 //   > 0  = overdue by that many days (before today)
@@ -99,10 +95,10 @@ export function UpcomingVisits({ jobs }: UpcomingVisitsProps) {
 
             const tone = dueTone(job.job_date);
             const bar = tone ? BAR[tone] : null;
-            const dateLabel = new Date(job.job_date).toLocaleDateString(
-              "en-GB",
-              SHORT_DATE
-            );
+            // "Fri 24 Jul" — the weekday is what an operator plans around
+            // on a rolling list; the year is omitted so the row still fits
+            // a ~390px phone without crowding the customer name.
+            const dateLabel = formatShortDate(job.job_date);
 
             return (
               <Fragment key={job.id}>
