@@ -43,6 +43,13 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useEnsureCustomerDocReady } from "@/components/documents/doc-ready-provider";
 import { nextRoutineOffsetDays } from "@/lib/services/agreement-schedule";
 import { findClashingJobLocal } from "@/lib/db/lookups";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
+import {
+  SHEET_FIELDS,
+  encodeSheetFields,
+  parseSheetFields,
+  type SheetField,
+} from "@/lib/data/sheet-fields";
 
 /** Sheet input + the combined-finalize flag (offline-pwa pass B) and
  *  the amend flag (L2). The flags ride along so applyLocal knows
@@ -52,6 +59,10 @@ import { findClashingJobLocal } from "@/lib/db/lookups";
 export interface CompleteSheetInput extends ServiceSheetInput {
   finalize: boolean;
   amend: boolean;
+  /** Columns this submission speaks for. Mirrors the server-side manifest
+   *  so the optimistic local write cannot blank something the replayed
+   *  server write is going to preserve. */
+  fields: SheetField[];
 }
 
 function buildRawSheetInput(formData: FormData) {
@@ -121,6 +132,7 @@ export function parseServiceSheetFormData(
     ...result.data,
     finalize: (formData.get("finalize") as string) === "true",
     amend: (formData.get("amend") as string) === "true",
+    fields: parseSheetFields(formData.get("sheet_fields") as string | null),
   };
 }
 
@@ -156,6 +168,8 @@ export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
   parseInput: parseServiceSheetFormData,
   applyLocal: async (input) => {
     const now = new Date().toISOString();
+    const owned = new Set(input.fields);
+    const owns = (f: SheetField) => !input.amend || owned.has(f);
     // photo_data_urls holds either client-UUID strings (offline path,
     // photos already in photos_pending) or `data:image/...` strings
     // (online direct path). For local rendering we resolve UUIDs to
@@ -187,10 +201,20 @@ export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
         input.environmental_comments
       ),
       report_notes: input.report_notes || null,
-      photo_urls: localPhotoUrls,
-      client_present: input.client_present,
-      client_name: input.client_name || null,
-      needs_invoice: input.invoice_required,
+      // Same manifest rule as the server (lib/data/sheet-fields.ts): on an
+      // amend, only mirror a column this submission actually speaks for.
+      // Otherwise the optimistic local row would show the loss the server
+      // is about to refuse to make.
+      ...(owns("photo_urls") ? { photo_urls: localPhotoUrls } : {}),
+      ...(owns("client_present")
+        ? { client_present: input.client_present }
+        : {}),
+      ...(owns("client_name")
+        ? { client_name: input.client_name || null }
+        : {}),
+      ...(owns("needs_invoice")
+        ? { needs_invoice: input.invoice_required }
+        : {}),
       // Combined entry (finalize) completes the job locally — the
       // optimistic mirror of the server's finalizeServiceSheet. The
       // non-finalize shape keeps today's in_progress semantics. Amend
@@ -256,6 +280,72 @@ const completeServiceSheetOpts = {
   }),
 };
 
+/**
+ * Load a signature that is already stored on the job, as a data URL the
+ * pad can paint AND submit back.
+ *
+ * A completed sheet holds its signatures as Storage objects, not data
+ * URLs, so there is nothing for the pad to paint and nothing the form can
+ * hand back. This fetches the object through the SAME-ORIGIN auth-gated
+ * proxy (`/api/storage/reports/...`), which matters twice over: no CORS,
+ * so drawing it into the canvas does not taint it and `toDataURL` still
+ * works if the operator re-signs; and no signed URL needed client-side.
+ *
+ * `uploadBase64Image` upserts to a deterministic key
+ * (`signatures/<jobId>/technician.png`, no cache-buster), so an untouched
+ * signature re-uploads to the same key and the stored column string comes
+ * back byte-identical.
+ *
+ * Status is exposed because a FAILURE must be visible and must be safe:
+ * the pad stays blank, the operator is told why, and the form does not
+ * claim authority over that column, so the stored URL is preserved rather
+ * than nulled. Offline lands here too.
+ */
+type SignatureLoad =
+  | { status: "absent" }
+  | { status: "loading" }
+  | { status: "ready"; dataUrl: string }
+  | { status: "failed" };
+
+function useStoredSignature(
+  storedUrl: string | null | undefined,
+  /** Skip when a draft already carries a newer signature. */
+  skip: boolean
+): SignatureLoad {
+  const [state, setState] = useState<SignatureLoad>(
+    storedUrl && !skip ? { status: "loading" } : { status: "absent" }
+  );
+
+  useEffect(() => {
+    if (!storedUrl || skip) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const src = proxyAssetUrl(storedUrl);
+        if (!src) throw new Error("unresolvable signature reference");
+        const res = await fetch(src, { credentials: "same-origin" });
+        if (!res.ok) throw new Error(`signature fetch ${res.status}`);
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+        if (alive) setState({ status: "ready", dataUrl });
+      } catch (err) {
+        console.warn("[serviceSheet] signature load failed:", err);
+        if (alive) setState({ status: "failed" });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [storedUrl, skip]);
+
+  return state;
+}
+
 const STEP_LABELS = ["Visit", "Service", "Risk", "Photos", "Sign off"] as const;
 
 function getErrorStep(errors: Record<string, string>): number | null {
@@ -294,6 +384,24 @@ interface ServiceSheetFormProps {
    *  on an amend of a sheet that already carries one, which is what makes the
    *  tick default to on so the ERA shows expanded rather than looking lost. */
   defaultEnvironmentalComments?: string;
+  // ── Sign-off state already on the job ──
+  // These five were the whole amend data-loss bug: writeServiceSheet
+  // writes all of them, the form never loaded any of them, so saving an
+  // amend wrote back empties. Proven against the database — an amend that
+  // changed nothing but the forced re-sign nulled the client signature,
+  // flipped client_present false, nulled client_name, cleared
+  // needs_invoice and DELETED BOTH PHOTOS.
+  defaultClientPresent?: boolean;
+  defaultClientName?: string;
+  defaultInvoiceRequired?: boolean;
+  /** Photos already stored on the job, as their stored references. */
+  defaultPhotoUrls?: string[];
+  /** Stored signature objects. Fetched through the same-origin proxy and
+   *  converted to data URLs so the pads can show them (see
+   *  useStoredSignature) — a Storage URL is not something a canvas can
+   *  submit back. */
+  defaultTechSignatureUrl?: string | null;
+  defaultClientSignatureUrl?: string | null;
   /** Pre-filled customer context shown in the header strip. */
   customerName?: string;
   customerCompany?: string | null;
@@ -366,6 +474,12 @@ function ServiceSheetFormBody({
   defaultReportNotes = "",
   defaultRiskComments = "",
   defaultEnvironmentalComments = "",
+  defaultClientPresent = false,
+  defaultClientName = "",
+  defaultInvoiceRequired = false,
+  defaultPhotoUrls = [],
+  defaultTechSignatureUrl = null,
+  defaultClientSignatureUrl = null,
   customerName,
   customerCompany,
   customerEmail,
@@ -445,14 +559,19 @@ function ServiceSheetFormBody({
   const [environmentalComments, setEnvironmentalComments] = useState(
     draft?.environmental_comments ?? defaultEnvironmentalComments
   );
-  const [clientName, setClientName] = useState(draft?.client_name ?? "");
+  const [clientName, setClientName] = useState(
+    draft?.client_name ?? defaultClientName
+  );
   const [techSig, setTechSig] = useState(draft?.tech_sig ?? "");
   const [clientSig, setClientSig] = useState(draft?.client_sig ?? "");
   const [customerPresent, setCustomerPresent] = useState<"yes" | "no" | "">(
-    draft?.customer_present ?? ""
+    draft?.customer_present ?? (defaultClientPresent ? "yes" : "")
   );
+  // Seeded from the job's stored photos when there is no draft, so an
+  // amend shows what the sheet already has instead of an empty picker
+  // whose save would delete every one of them.
   const [photoDataUrls, setPhotoDataUrls] = useState<string[]>(
-    draft?.photo_data_urls ?? []
+    draft?.photo_data_urls ?? defaultPhotoUrls
   );
   const [scheduleFollowUp, setScheduleFollowUp] = useState(
     draft?.schedule_follow_up ?? false
@@ -471,8 +590,41 @@ function ServiceSheetFormBody({
   );
   const routineDateTouchedRef = useRef(!!draft?.routine_date);
   const [invoiceRequired, setInvoiceRequired] = useState(
-    draft?.invoice_required ?? false
+    draft?.invoice_required ?? defaultInvoiceRequired
   );
+
+  // ── Stored signatures (amend) ──
+  // Fetched through the same-origin proxy and converted to data URLs, so
+  // the pads can show what is already signed AND hand it back unchanged.
+  // Skipped when a draft already holds a newer signature.
+  const techLoad = useStoredSignature(
+    defaultTechSignatureUrl,
+    !!draft?.tech_sig
+  );
+  const clientLoad = useStoredSignature(
+    defaultClientSignatureUrl,
+    !!draft?.client_sig
+  );
+  // Did the operator touch a pad? Signing or clearing both count: either
+  // way this submission now speaks for that column. Without this, a
+  // deliberate Clear would be indistinguishable from a failed load.
+  const [techTouched, setTechTouched] = useState(false);
+  const [clientTouched, setClientTouched] = useState(false);
+
+  // Adopt a loaded signature into form state once, unless the operator has
+  // already drawn over it.
+  useEffect(() => {
+    if (techLoad.status === "ready" && !techTouched && techSig === "") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTechSig(techLoad.dataUrl);
+    }
+  }, [techLoad, techTouched, techSig]);
+  useEffect(() => {
+    if (clientLoad.status === "ready" && !clientTouched && clientSig === "") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setClientSig(clientLoad.dataUrl);
+    }
+  }, [clientLoad, clientTouched, clientSig]);
 
   // The site's ACTIVE agreement (Dexie, offline-fine): drives the routine
   // date default and the "scheduled by the agreement" note. Also find the
@@ -854,6 +1006,24 @@ function ServiceSheetFormBody({
     setPhotoDataUrls(urls);
   }, []);
 
+  // ── What this submission is authoritative for ──
+  // Sent as a manifest so the server can leave everything else OUT of the
+  // UPDATE (see lib/data/sheet-fields.ts). Every column below is loaded
+  // synchronously from the job, so the form always speaks for them. The
+  // two signatures are conditional: if the stored one could not be
+  // fetched (offline, storage down) and the operator has not touched the
+  // pad, this form has nothing to say about that column and must not be
+  // allowed to blank it.
+  const ownedFields: SheetField[] = SHEET_FIELDS.filter((f) => {
+    if (f === "technician_signature_url") {
+      return techLoad.status !== "failed" || techTouched;
+    }
+    if (f === "client_signature_url") {
+      return clientLoad.status !== "failed" || clientTouched;
+    }
+    return true;
+  });
+
   const totalSteps = STEP_LABELS.length;
   const inputClass =
     "mt-1 block w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder-gray-400 shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500";
@@ -883,6 +1053,11 @@ function ServiceSheetFormBody({
       noValidate
     >
       <input type="hidden" name="job_id" value={jobId} />
+      <input
+        type="hidden"
+        name="sheet_fields"
+        value={encodeSheetFields(ownedFields)}
+      />
       <input type="hidden" name="call_type" value={callType} />
       <input
         type="hidden"
@@ -1400,6 +1575,7 @@ function ServiceSheetFormBody({
             parentId={jobId}
             onChange={onPhotosChange}
             defaultPhotoIds={draft?.photo_data_urls}
+            defaultRemoteUrls={draft ? undefined : defaultPhotoUrls}
           />
         </div>
 
@@ -1417,10 +1593,28 @@ function ServiceSheetFormBody({
           </label>
           <SignaturePad
             label=""
-            onSignature={setTechSig}
-            onClear={() => setTechSig("")}
-            initialDataUrl={initialSigs.tech}
+            onSignature={(sig) => {
+              setTechTouched(true);
+              setTechSig(sig);
+            }}
+            onClear={() => {
+              setTechTouched(true);
+              setTechSig("");
+            }}
+            initialDataUrl={initialSigs.tech || techSig}
           />
+          {techLoad.status === "loading" && (
+            <p className="mt-1 text-xs text-gray-400">
+              Loading the signature already on this sheet...
+            </p>
+          )}
+          {techLoad.status === "failed" && (
+            <p className="mt-1 text-xs text-amber-700">
+              Couldn&rsquo;t load the signature already on this sheet, so the
+              pad is blank. The stored one is safe and stays as it is unless
+              you sign again here.
+            </p>
+          )}
         </div>
         {errors.technician_signature && (
           <p className="-mt-4 text-sm text-red-500">{errors.technician_signature}</p>
@@ -1441,7 +1635,10 @@ function ServiceSheetFormBody({
                   checked={customerPresent === opt}
                   onChange={() => {
                     setCustomerPresent(opt);
-                    if (opt === "no") setClientSig("");
+                    if (opt === "no") {
+                      setClientTouched(true);
+                      setClientSig("");
+                    }
                   }}
                   className="sr-only"
                 />
@@ -1467,10 +1664,28 @@ function ServiceSheetFormBody({
             </div>
             <SignaturePad
               label="Client Signature"
-              onSignature={setClientSig}
-              onClear={() => setClientSig("")}
-              initialDataUrl={initialSigs.client}
+              onSignature={(sig) => {
+                setClientTouched(true);
+                setClientSig(sig);
+              }}
+              onClear={() => {
+                setClientTouched(true);
+                setClientSig("");
+              }}
+              initialDataUrl={initialSigs.client || clientSig}
             />
+            {clientLoad.status === "loading" && (
+              <p className="mt-1 text-xs text-gray-400">
+                Loading the signature already on this sheet...
+              </p>
+            )}
+            {clientLoad.status === "failed" && (
+              <p className="mt-1 text-xs text-amber-700">
+                Couldn&rsquo;t load the signature already on this sheet, so
+                the pad is blank. The stored one is safe and stays as it is
+                unless you sign again here.
+              </p>
+            )}
           </div>
         )}
 

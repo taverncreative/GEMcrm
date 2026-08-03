@@ -13,6 +13,11 @@ import {
 import { generateJobReference } from "@/lib/data/job-references";
 import { callTypeOtherDescForStorage } from "@/lib/utils/call-type-other";
 import { environmentalCommentsForStorage } from "@/lib/utils/environmental-comments";
+import { storageObjectPath } from "@/lib/storage/asset-url";
+import {
+  LEGACY_AMEND_FIELDS,
+  type SheetField,
+} from "@/lib/data/sheet-fields";
 
 function emptyToNull(value: string | undefined): string | null {
   return value && value.trim() !== "" ? value.trim() : null;
@@ -583,9 +588,10 @@ export async function createBooking(
  */
 export async function saveServiceSheet(
   jobId: string,
-  input: ServiceSheetInput
+  input: ServiceSheetInput,
+  opts: WriteSheetOptions = {}
 ): Promise<Job> {
-  return writeServiceSheet(jobId, input, "in_progress");
+  return writeServiceSheet(jobId, input, "in_progress", opts);
 }
 
 /**
@@ -646,31 +652,70 @@ export async function finalizeServiceSheet(jobId: string): Promise<Job> {
 }
 
 /**
+ * Which columns a save is allowed to write.
+ *
+ * Only consulted on the AMEND path. A fresh fill starts from a blank job
+ * and stays authoritative for the whole sheet, exactly as before.
+ */
+export interface WriteSheetOptions {
+  /** True when editing an already-completed sheet. */
+  amend?: boolean;
+  /** Columns this submission actually loaded, so may overwrite. */
+  fields?: readonly SheetField[];
+}
+
+/**
  * Internal writer — does the uploads + DB update in one transaction.
  */
 async function writeServiceSheet(
   jobId: string,
   input: ServiceSheetInput,
-  newStatus: JobStatus
+  newStatus: JobStatus,
+  opts: WriteSheetOptions = {}
 ): Promise<Job> {
+  // On an amend, the submission only speaks for the columns it declares
+  // (see lib/data/sheet-fields.ts). Everything else is left OUT of the
+  // UPDATE, so it cannot change. A fill starts from a blank job, so it
+  // stays authoritative for everything exactly as before.
+  const authoritative: ReadonlySet<SheetField> | null = opts.amend
+    ? new Set(
+        opts.fields && opts.fields.length > 0
+          ? opts.fields
+          : LEGACY_AMEND_FIELDS
+      )
+    : null;
+  const owns = (field: SheetField): boolean =>
+    authoritative === null || authoritative.has(field);
+
   let techSigUrl: string | null = null;
   let clientSigUrl: string | null = null;
 
-  if (input.technician_signature?.startsWith("data:image")) {
+  // Only upload when this submission actually speaks for the signature.
+  // A declared-but-empty value is a deliberate clear and writes null; an
+  // UNdeclared signature never reaches the update object at all, which is
+  // what keeps a failed signature fetch (offline, storage down) from
+  // destroying the stored URL.
+  if (
+    owns("technician_signature_url") &&
+    input.technician_signature?.startsWith("data:image")
+  ) {
     techSigUrl = await uploadBase64Image(
       input.technician_signature,
       `signatures/${jobId}/technician.png`
     );
   }
 
-  if (input.client_signature?.startsWith("data:image")) {
+  if (
+    owns("client_signature_url") &&
+    input.client_signature?.startsWith("data:image")
+  ) {
     clientSigUrl = await uploadBase64Image(
       input.client_signature,
       `signatures/${jobId}/client.png`
     );
   }
 
-  // Photos arrive here in one of two shapes:
+  // Photos arrive here in one of three shapes:
   //
   //   1. **Client photo id (UUID)** — the offline-sync path. The
   //      photos loop already uploaded the blob to
@@ -681,12 +726,24 @@ async function writeServiceSheet(
   //      direct-submit path (form action invoked while online, no
   //      photos loop involved). Upload via the existing helper.
   //
+  //   3. **An already-stored reports-bucket reference** — a photo the
+  //      sheet already had, handed back by an AMEND. The blob is long
+  //      gone from photos_pending by then, so the form carries the
+  //      stored reference instead. We re-derive the URL from the object
+  //      path rather than echoing the incoming string, so what lands in
+  //      the column is always OUR bucket's canonical URL and an
+  //      untouched photo round-trips byte-identical. This is what lets
+  //      an amend REMOVE a photo (it drops out of the list) without
+  //      being able to lose the ones it kept.
+  //
   // Anything else is an error — silent fallthrough on unknown formats
   // would be a future-regression magnet (a malformed pull, a future
   // schema change). Reject loudly.
   const supabase = await createClient();
   const photoUrls: string[] = [];
-  if (input.photo_data_urls.length > 0) {
+  // Skipped entirely when this submission doesn't speak for the photos —
+  // no uploads, no URL building, and the column stays out of the UPDATE.
+  if (owns("photo_urls") && input.photo_data_urls.length > 0) {
     for (let idx = 0; idx < input.photo_data_urls.length; idx++) {
       const ref = input.photo_data_urls[idx];
       if (isPhotoClientId(ref)) {
@@ -694,6 +751,12 @@ async function writeServiceSheet(
         const { data: urlData } = supabase.storage
           .from(PHOTO_BUCKET)
           .getPublicUrl(photoStoragePath(ref));
+        photoUrls.push(urlData.publicUrl);
+      } else if (storageObjectPath(ref)?.startsWith("photos/")) {
+        // Path 3: a photo the sheet already had, returned by an amend.
+        const { data: urlData } = supabase.storage
+          .from(PHOTO_BUCKET)
+          .getPublicUrl(storageObjectPath(ref)!);
         photoUrls.push(urlData.publicUrl);
       } else if (ref.startsWith("data:image")) {
         // Path 2: online direct submit. Upload the legacy way.
@@ -739,45 +802,58 @@ async function writeServiceSheet(
     }
   }
 
+  // Built per column so an UNOWNED one is absent from the statement
+  // entirely. A column that isn't in the UPDATE cannot change — that is
+  // the structural guarantee, rather than trusting a value comparison.
+  const patch: Record<string, unknown> = {};
+  const set = (field: SheetField, value: unknown) => {
+    if (owns(field)) patch[field] = value;
+  };
+
+  set("call_type", input.call_type);
+  // Cleared to null unless the type is "other", so a description never
+  // lingers after the operator switches the call type on Step 1.
+  set(
+    "call_type_other_desc",
+    callTypeOtherDescForStorage(input.call_type, input.call_type_other_desc)
+  );
+  set("pest_species", input.pest_species);
+  set("findings", emptyToNull(input.findings));
+  set("recommendations", emptyToNull(input.recommendations));
+  set("method_used", input.method_used);
+  // `treatment` is the legacy free-text mirror of method_used and always
+  // travels with it, so it has no manifest key of its own.
+  if (owns("method_used")) patch.treatment = input.method_used.join(", ");
+  // Structured products (migration 047). Replaces the free-text
+  // pesticides_used, which is now legacy/read-only — we no longer write it,
+  // so old sheets keep their original free text and new sheets carry only
+  // structured rows (empty [] is valid — a survey visit).
+  set("products_used", input.products_used);
+  set("risk_level", input.risk_level);
+  set("risk_comments", emptyToNull(input.risk_comments));
+  // ERA free text. Null unless the operator ticked the box, so abandoned
+  // text never reaches the row (and so never reaches a customer PDF).
+  set(
+    "environmental_comments",
+    environmentalCommentsForStorage(
+      input.era_required,
+      input.environmental_comments
+    )
+  );
+  set("report_notes", emptyToNull(input.report_notes));
+  set("photo_urls", photoUrls);
+  set("client_present", input.client_present);
+  set("client_name", emptyToNull(input.client_name));
+  set("needs_invoice", input.invoice_required);
+  set("technician_signature_url", techSigUrl);
+  set("client_signature_url", clientSigUrl);
+  // in_progress went through the guarded write above; only
+  // non-downgrading statuses are written unconditionally.
+  if (newStatus !== "in_progress") patch.job_status = newStatus;
+
   const { data, error } = await supabase
     .from("jobs")
-    .update({
-      call_type: input.call_type,
-      // Cleared to null unless the type is "other", so a description never
-      // lingers after the operator switches the call type on Step 1.
-      call_type_other_desc: callTypeOtherDescForStorage(
-        input.call_type,
-        input.call_type_other_desc
-      ),
-      pest_species: input.pest_species,
-      findings: emptyToNull(input.findings),
-      recommendations: emptyToNull(input.recommendations),
-      treatment: input.method_used.join(", "),
-      method_used: input.method_used,
-      // Structured products (migration 047). Replaces the free-text
-      // pesticides_used, which is now legacy/read-only — we no longer write it,
-      // so old sheets keep their original free text and new sheets carry only
-      // structured rows (empty [] is valid — a survey visit).
-      products_used: input.products_used,
-      risk_level: input.risk_level,
-      risk_comments: emptyToNull(input.risk_comments),
-      // ERA free text. Null unless the operator ticked the box, so abandoned
-      // text never reaches the row (and so never reaches a customer PDF).
-      environmental_comments: environmentalCommentsForStorage(
-        input.era_required,
-        input.environmental_comments
-      ),
-      report_notes: emptyToNull(input.report_notes),
-      photo_urls: photoUrls,
-      client_present: input.client_present,
-      client_name: emptyToNull(input.client_name),
-      needs_invoice: input.invoice_required,
-      technician_signature_url: techSigUrl,
-      client_signature_url: clientSigUrl,
-      // in_progress went through the guarded write above; only
-      // non-downgrading statuses are written unconditionally.
-      ...(newStatus !== "in_progress" ? { job_status: newStatus } : {}),
-    })
+    .update(patch)
     .eq("id", jobId)
     .select()
     .single();

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Image from "next/image";
 import { capturePhoto, type PhotoParentType } from "@/lib/db/photos";
 import { db } from "@/lib/db";
+import { proxyAssetUrl } from "@/lib/storage/asset-url";
 
 interface PhotoUploadProps {
   /** Where this photo set is attached — used by `capturePhoto` to
@@ -25,6 +26,15 @@ interface PhotoUploadProps {
    *  photos_pending row has been cleaned up (e.g. already uploaded
    *  and removed by the photos loop) are silently dropped. */
   defaultPhotoIds?: string[];
+  /** Photos ALREADY stored on the record, as their stored reference.
+   *  Used by an amend: by then the photos_pending blobs are long gone
+   *  (the sync engine cleans them up once uploaded), so `defaultPhotoIds`
+   *  can restore nothing and the tiles would come back empty — which is
+   *  what let an amend silently drop every photo the sheet had. These
+   *  render straight from the auth-gated storage proxy and are handed
+   *  back through `onChange` as their stored reference, so an untouched
+   *  photo round-trips and a removed one genuinely goes. */
+  defaultRemoteUrls?: string[];
 }
 
 const MAX_FILES = 10;
@@ -32,8 +42,9 @@ const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8 MB per file
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
 interface QueuedPhoto {
-  /** Client-generated UUID stored in photos_pending. Goes into the
-   *  form's `photo_data_urls` hidden field. */
+  /** What goes into the form's `photo_data_urls` hidden field: a
+   *  client-generated UUID for a freshly captured photo, or the stored
+   *  reference for one the record already had. */
   id: string;
   /** Object URL minted from the compressed blob, for the preview tile.
    *  Revoked when the photo is removed or the component unmounts. */
@@ -69,6 +80,7 @@ export function PhotoUpload({
   parentId,
   onChange,
   defaultPhotoIds,
+  defaultRemoteUrls,
 }: PhotoUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<QueuedPhoto[]>([]);
@@ -130,9 +142,34 @@ export function PhotoUpload({
         }
       }
       if (restored.length === 0) return;
-      setPhotos(restored);
-      onChange(restored.map((p) => p.id));
+      setPhotos((prev) => {
+        const next = [...prev, ...restored];
+        onChange(next.map((p) => p.id));
+        return next;
+      });
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Already-stored photos (an amend). Mount-only for the same reason as
+  // the draft restore above. No IDB lookup: the reference IS the value we
+  // hand back, and the tile renders through the auth-gated proxy.
+  const remoteOnceRef = useRef(false);
+  useEffect(() => {
+    if (remoteOnceRef.current) return;
+    if (!defaultRemoteUrls || defaultRemoteUrls.length === 0) return;
+    remoteOnceRef.current = true;
+    const tiles: QueuedPhoto[] = defaultRemoteUrls.map((ref, i) => ({
+      id: ref,
+      src: proxyAssetUrl(ref) ?? ref,
+      name: `Photo ${i + 1}`,
+      size: 0,
+    }));
+    setPhotos((prev) => {
+      const next = [...tiles, ...prev];
+      onChange(next.map((p) => p.id));
+      return next;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

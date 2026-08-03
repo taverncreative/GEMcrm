@@ -322,6 +322,12 @@ export default function CompleteServiceSheetPage() {
       </div>
 
       <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
+        {/* Sign-off state already on the job (defaultClientPresent through
+            defaultClientSignatureUrl below) is NOT decoration: without it the
+            amend form loaded nothing for those columns and saving wrote back
+            empties, which deleted the client signature, both photos, the
+            client name and the invoice flag. The server-side field manifest
+            in lib/data/sheet-fields.ts is the belt to this braces. */}
         <ServiceSheetForm
           jobId={job.id}
           defaultCallType={job.call_type ?? ""}
@@ -335,6 +341,12 @@ export default function CompleteServiceSheetPage() {
           defaultReportNotes={job.report_notes ?? ""}
           defaultRiskComments={job.risk_comments ?? ""}
           defaultEnvironmentalComments={job.environmental_comments ?? ""}
+          defaultClientPresent={job.client_present ?? false}
+          defaultClientName={job.client_name ?? ""}
+          defaultInvoiceRequired={job.needs_invoice ?? false}
+          defaultPhotoUrls={job.photo_urls ?? []}
+          defaultTechSignatureUrl={job.technician_signature_url}
+          defaultClientSignatureUrl={job.client_signature_url}
           customerName={customer?.name}
           customerCompany={customer?.company_name ?? null}
           customerEmail={customer?.email ?? null}

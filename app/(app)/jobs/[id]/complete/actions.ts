@@ -14,6 +14,7 @@ import {
 } from "@/lib/data/jobs";
 import { hasPendingEmailReportTask, createTask } from "@/lib/data/tasks";
 import { todayUk } from "@/lib/utils/today-uk";
+import { parseSheetFields } from "@/lib/data/sheet-fields";
 import { getSiteById } from "@/lib/data/sites";
 import { getCustomerById } from "@/lib/data/customers";
 import { siteHasUsableAddress } from "@/lib/documents/resolve-sheet-address";
@@ -156,9 +157,19 @@ export async function completeServiceSheetAction(
     return { success: false, errors, message: null };
   }
 
+  // The manifest travels as a plain form field rather than through Zod:
+  // it describes what the SUBMISSION speaks for, not what the sheet
+  // contains. Parsed strictly, so a malformed value can only ever narrow
+  // what may be overwritten, never widen it.
+  const isAmend = str("amend") === "true";
+  const sheetFields = parseSheetFields(str("sheet_fields"));
+
   let updated;
   try {
-    updated = await saveServiceSheet(jobId, result.data);
+    updated = await saveServiceSheet(jobId, result.data, {
+      amend: isAmend,
+      fields: sheetFields,
+    });
   } catch (err) {
     return {
       success: false,
