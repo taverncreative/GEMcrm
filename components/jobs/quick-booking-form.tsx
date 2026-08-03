@@ -50,6 +50,16 @@ export function QuickBookingForm({
   const [callType, setCallType] = useState(defaultCallType ?? "");
   const [otherCallDesc, setOtherCallDesc] = useState("");
   const [otherCallError, setOtherCallError] = useState<string | null>(null);
+  // Date, value and notes are CONTROLLED, like BookingModal (see its header
+  // comment). React 19 resets uncontrolled inputs once a <form action={fn}>
+  // action settles — INCLUDING when the action early-returns without doing
+  // anything, which is exactly what the "Other" pest gate below does. So the
+  // operator ticked Other, forgot the description, pressed Add Booking, and
+  // the notes they had just typed vanished along with the error message
+  // appearing. Same on a server validation bounce. State survives both.
+  const [jobDate, setJobDate] = useState(todayUk);
+  const [value, setValue] = useState("");
+  const [reportNotes, setReportNotes] = useState("");
 
   function togglePest(pest: string) {
     setSelectedPests((prev) =>
@@ -132,7 +142,8 @@ export function QuickBookingForm({
             name="job_date"
             type="date"
             required
-            defaultValue={todayUk()}
+            value={jobDate}
+            onChange={(e) => setJobDate(e.target.value)}
             className={inputClass}
           />
           {state.errors.job_date && (
@@ -247,6 +258,8 @@ export function QuickBookingForm({
             name="value"
             min={0}
             step="0.01"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
             placeholder="0.00"
             className={`${inputClass} pl-8`}
           />
@@ -261,6 +274,8 @@ export function QuickBookingForm({
           id="report_notes"
           name="report_notes"
           rows={2}
+          value={reportNotes}
+          onChange={(e) => setReportNotes(e.target.value)}
           placeholder="e.g. customer requested morning visit, side entrance, etc."
           className={inputClass}
         />

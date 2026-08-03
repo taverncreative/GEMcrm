@@ -10,11 +10,30 @@
  * online-only action. Sharing only the markup keeps the verified create flow
  * untouched.
  *
- * Inputs are uncontrolled (read via FormData on submit). `defaults` pre-fills
- * them for edit; create omits it, so the inputs render empty exactly as
- * before. Sites have no name/label column — `SiteInput`/`SiteSchema` is the
+ * Inputs are CONTROLLED: the owning form holds the five values and passes
+ * them back down with an onChange. They were uncontrolled (read via FormData
+ * on submit), which was fine for the edit form — it submits via onSubmit, so
+ * React never resets it — but wrong for the create form, which is a
+ * `<form action={fn}>`: React 19 resets uncontrolled inputs once the action
+ * settles, so a server validation bounce wiped the whole address the
+ * operator had just typed.
+ *
+ * The inputs keep their `name` attributes, so both owners' existing
+ * FormData-based submit paths are unchanged — controlled inputs serialise
+ * into FormData exactly the same way. Only the ownership of the values
+ * moved. Sites have no name/label column — `SiteInput`/`SiteSchema` is the
  * five address fields only.
  */
+export interface SiteFieldValues {
+  address_line_1: string;
+  address_line_2: string;
+  town: string;
+  county: string;
+  postcode: string;
+}
+
+/** Loose shape of anything that can seed the fields (a `Site` row, or
+ *  nothing at all for a fresh create). */
 export interface SiteFieldDefaults {
   address_line_1?: string | null;
   address_line_2?: string | null;
@@ -23,17 +42,41 @@ export interface SiteFieldDefaults {
   postcode?: string | null;
 }
 
+/**
+ * Seed the five values from an existing row (edit) or from nothing
+ * (create). Owners pass this to `useState` so the initial values are read
+ * once, on mount.
+ */
+export function siteFieldValues(defaults?: SiteFieldDefaults): SiteFieldValues {
+  const dv = (v: string | null | undefined): string => v ?? "";
+  return {
+    address_line_1: dv(defaults?.address_line_1),
+    address_line_2: dv(defaults?.address_line_2),
+    town: dv(defaults?.town),
+    county: dv(defaults?.county),
+    postcode: dv(defaults?.postcode),
+  };
+}
+
 interface SiteFormFieldsProps {
   errors: Record<string, string>;
-  defaults?: SiteFieldDefaults;
+  values: SiteFieldValues;
+  onChange: (field: keyof SiteFieldValues, value: string) => void;
 }
 
 const inputClass =
   "mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500";
 const labelClass = "block text-sm font-medium text-gray-700";
 
-export function SiteFormFields({ errors, defaults }: SiteFormFieldsProps) {
-  const dv = (v: string | null | undefined): string => v ?? "";
+export function SiteFormFields({
+  errors,
+  values,
+  onChange,
+}: SiteFormFieldsProps) {
+  const set =
+    (field: keyof SiteFieldValues) =>
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      onChange(field, e.target.value);
 
   return (
     <>
@@ -47,7 +90,8 @@ export function SiteFormFields({ errors, defaults }: SiteFormFieldsProps) {
           type="text"
           required
           autoFocus
-          defaultValue={dv(defaults?.address_line_1)}
+          value={values.address_line_1}
+          onChange={set("address_line_1")}
           className={inputClass}
           placeholder="Street address"
         />
@@ -64,7 +108,8 @@ export function SiteFormFields({ errors, defaults }: SiteFormFieldsProps) {
           id="address_line_2"
           name="address_line_2"
           type="text"
-          defaultValue={dv(defaults?.address_line_2)}
+          value={values.address_line_2}
+          onChange={set("address_line_2")}
           className={inputClass}
           placeholder="Flat, unit, etc."
         />
@@ -80,7 +125,8 @@ export function SiteFormFields({ errors, defaults }: SiteFormFieldsProps) {
             name="town"
             type="text"
             required
-            defaultValue={dv(defaults?.town)}
+            value={values.town}
+            onChange={set("town")}
             className={inputClass}
             placeholder="Town"
           />
@@ -98,7 +144,8 @@ export function SiteFormFields({ errors, defaults }: SiteFormFieldsProps) {
             name="county"
             type="text"
             required
-            defaultValue={dv(defaults?.county)}
+            value={values.county}
+            onChange={set("county")}
             className={inputClass}
             placeholder="County"
           />
@@ -116,7 +163,8 @@ export function SiteFormFields({ errors, defaults }: SiteFormFieldsProps) {
           id="postcode"
           name="postcode"
           type="text"
-          defaultValue={dv(defaults?.postcode)}
+          value={values.postcode}
+          onChange={set("postcode")}
           className={`${inputClass} uppercase`}
           placeholder="Postcode"
         />

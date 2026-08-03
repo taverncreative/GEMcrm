@@ -4,7 +4,11 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { updateSiteAction } from "@/app/(app)/sites/[id]/actions";
-import { SiteFormFields } from "@/components/sites/site-form-fields";
+import {
+  SiteFormFields,
+  siteFieldValues,
+  type SiteFieldValues,
+} from "@/components/sites/site-form-fields";
 import { db } from "@/lib/db";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { ROUTES } from "@/lib/constants/routes";
@@ -42,6 +46,17 @@ export function EditSiteForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // The shared field-set is controlled now (it had to be, for the create
+  // form's sake). This form submits via onSubmit and reads FormData, which
+  // controlled inputs populate identically, so the submit path is unchanged;
+  // it just owns the values now instead of seeding them with defaultValue.
+  const [values, setValues] = useState<SiteFieldValues>(() =>
+    siteFieldValues(site)
+  );
+
+  function handleChange(field: keyof SiteFieldValues, value: string) {
+    setValues((prev) => ({ ...prev, [field]: value }));
+  }
 
   const back = ROUTES.siteDetail(site.id);
   // Honour a whitelisted returnTo, else the default site-detail destination.
@@ -69,7 +84,11 @@ export function EditSiteForm({
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
-      <SiteFormFields errors={errors} defaults={site} />
+      <SiteFormFields
+        errors={errors}
+        values={values}
+        onChange={handleChange}
+      />
 
       {serverError && (
         <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
