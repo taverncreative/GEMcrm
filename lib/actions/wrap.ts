@@ -49,7 +49,7 @@
  * compute authoritatively.
  */
 
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { enqueueAction, type EntityType } from "@/lib/db/outbox";
 import { getSyncStatus } from "@/lib/sync/status";
 
@@ -111,6 +111,60 @@ export interface LocalFirstOptions<TState, TInput> {
    *  create. Online, the server action's result drives state as before,
    *  so this is ignored. */
   localSuccessState?: (input: TInput) => TState;
+  /** The state to set when the LOCAL half fails — `applyLocal` threw
+   *  ("local") or `enqueueAction` threw ("queue"). Both used to abort
+   *  silently: console.error + return, no state change, so a form whose
+   *  only feedback is `state.message` showed the operator NOTHING and
+   *  the button read as dead forever. Supply this to say something
+   *  surface-specific (e.g. the service sheet naming its saved draft);
+   *  omit it and the generic fallback below is used, which is still far
+   *  better than silence. */
+  localFailureState?: (phase: LocalFailurePhase, err: unknown) => TState;
+}
+
+/** Which half of the local-first write failed. "local" = the Dexie write
+ *  never landed, so nothing happened at all. "queue" = the Dexie row IS
+ *  written but no outbox entry exists, so it will never reach the server.
+ *  The two need different words: only one of them has half-landed. */
+export type LocalFailurePhase = "local" | "queue";
+
+const DEFAULT_FAILURE_MESSAGE: Record<LocalFailurePhase, string> = {
+  local:
+    "Couldn't save this on your device, so nothing was sent. Everything " +
+    "you've entered is still on screen. Check the device has free storage " +
+    "and try again.",
+  queue:
+    "Saved on your device, but it couldn't be queued to send to the " +
+    "office. Everything you've entered is still on screen. Try again.",
+};
+
+/**
+ * Build a failure state from the caller's `initialState`.
+ *
+ * The hook is generic over TState, so it can't construct one blind. Every
+ * caller in the app uses an ActionState-shaped state
+ * (`{ success, errors, message }`), so when the initial state carries
+ * those keys we can clone it and set the message. Returns null for any
+ * other shape — the caller then gets today's log-only behaviour rather
+ * than a state object of the wrong type.
+ */
+function defaultFailureState<TState>(
+  initialState: TState,
+  phase: LocalFailurePhase
+): TState | null {
+  if (
+    typeof initialState !== "object" ||
+    initialState === null ||
+    !("success" in initialState) ||
+    !("message" in initialState)
+  ) {
+    return null;
+  }
+  return {
+    ...(initialState as Record<string, unknown>),
+    success: false,
+    message: DEFAULT_FAILURE_MESSAGE[phase],
+  } as TState;
 }
 
 // ─── FormData ↔ JSON ────────────────────────────────────────────────
@@ -223,116 +277,190 @@ export function useLocalFirstAction<TState, TInput>(
   // action and setState the result. Pending tracked via useTransition
   // wrapping the dispatch. State updates are detached from React's
   // form-action lifecycle and always land.
+  //
+  // NOTE on `isPending` (fixed here): the transition used to wrap ONLY
+  // the legacy server call, so every caller that supplied
+  // `localSuccessState` — the service sheet, the booking modal,
+  // add-customer, reschedule — got an `isPending` that was hard-wired
+  // false. Their "Completing…" / "Saving…" labels and disabled states
+  // could never fire, which is precisely the "I press the button and
+  // nothing happens" the operator kept reporting. The transition now
+  // wraps the WHOLE dispatch, both paths.
   const [state, setState] = useState<Awaited<TState>>(initialState);
   const [isPending, startTransition] = useTransition();
+  // Hard re-entry guard. `isPending` disables the submit button, but a
+  // double-tap inside the same frame lands before React has re-rendered
+  // with the disabled attribute — and on the create wrappers (booking,
+  // reschedule) each dispatch mints FRESH client ids, so a slipped second
+  // tap enqueues a SECOND entry and writes a SECOND row. A ref is checked
+  // and set synchronously, so it closes that window; the disabled button
+  // is the visible half of the same guard.
+  const inFlightRef = useRef(false);
 
   const wrappedDispatch = useCallback(
-    async (formData: FormData) => {
-      const input = meta.parseInput?.(formData) ?? null;
+    (formData: FormData): Promise<void> => {
+      if (inFlightRef.current) return Promise.resolve();
+      inFlightRef.current = true;
 
-      // Replay args: when a wrapper supplies `replayArgs` (multi-entity
-      // creates), it injects the client-generated ids so the SAME ids
-      // are used by the local write, the outbox replay, AND the online
-      // server call below. Absent → raw form data (existing behaviour).
-      const replay =
-        input !== null && meta.replayArgs
-          ? meta.replayArgs(input, formData)
-          : null;
-
-      if (input !== null) {
-        // 1. Local-first Dexie write. If this throws (constraint
-        //    violation, table missing, etc) we surface the error and
-        //    abort — the user's intent is conceptually rejected.
-        try {
-          await meta.applyLocal(input);
-        } catch (err) {
-          console.error(
-            `[useLocalFirstAction] applyLocal failed for ${meta.actionName}:`,
-            err
-          );
-          // Don't proceed — the local write is the source of truth for
-          // "did this happen". If it didn't, neither should the server
-          // write nor the outbox entry.
-          return;
-        }
-
-        // 2. Always enqueue, even online. Recovery for mid-flight crashes.
-        try {
-          await enqueueAction({
-            action_name: meta.actionName,
-            args: replay ?? formDataToObject(formData),
-            entity_type: meta.entityType,
-            entity_id: meta.entityId(input),
-            ...(meta.op ? { op: meta.op } : {}),
-            ...(meta.entityIds ? { entity_ids: meta.entityIds(input) } : {}),
-          });
-        } catch (err) {
-          console.error(
-            `[useLocalFirstAction] enqueue failed for ${meta.actionName}:`,
-            err
-          );
-          // Outbox failure means we lose the ability to replay. Abort
-          // so the user sees their action didn't fully land.
-          return;
-        }
-      }
-
-      // 3. Two paths, chosen by whether the caller supplied a
-      //    `localSuccessState`:
+      // The whole operation runs INSIDE a transition so `isPending` covers
+      // it — see the note above about why we don't use useActionState. The
+      // transition is opened HERE, synchronously, when the dispatch is
+      // called. That's what makes a caller-side `await` before the dispatch
+      // safe: the service sheet's "Complete & Email" must await its
+      // document-readiness gate first (to order the email-save ahead of the
+      // completion in the outbox), and with useActionState that await put
+      // the dispatch outside React's form-action transition, so isPending
+      // never flipped and the button sat there looking dead. Owning the
+      // transition here means it doesn't matter when we're called.
       //
-      //    OPTIMISTIC (localSuccessState present — e.g. the booking modal):
-      //      The operation is "done" the instant the local write + outbox
-      //      entry land. Flip to the success state immediately (close the
-      //      modal) REGARDLESS of connectivity, and NEVER call the server
-      //      action here. All server sync is owned by the engine's
-      //      drainOutbox (background). This removes navigator.onLine from the
-      //      UX entirely, and — because no server action runs at submit —
-      //      removes the offline server-action revalidation/remount/loop that
-      //      navigator.onLine-lying-true caused under the service worker. A
-      //      `gemcrm:request-sync` event kicks the engine so an ONLINE write
-      //      reaches the server right away (drainOutbox replays the enqueued,
-      //      id-enriched args); offline it no-ops / backs off. Dispatched as
-      //      an event (sync-boot listens) to avoid a wrap→engine import cycle.
-      //
-      //    LEGACY (no localSuccessState — service sheet complete, agreement /
-      //      task / job-status toggles): unchanged. Call the server when the
-      //      empirical online signal is positive and reflect its result into
-      //      state (these flows depend on the server result, e.g. the
-      //      service-sheet approval modal opens on it). The outbox entry is
-      //      already enqueued, so a network failure just syncs later. When
-      //      `replay` is present the server call uses the id-enriched FormData
-      //      so the online insert matches the rows applyLocal wrote.
-      if (input !== null && opts?.localSuccessState) {
-        setState(opts.localSuccessState(input));
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("gemcrm:request-sync"));
-        }
-      } else {
-        const attemptServer =
-          isOnline() && getSyncStatus().serverReachable !== false;
-        if (attemptServer) {
-          const serverFormData = replay ? objectToFormData(replay) : formData;
-          startTransition(async () => {
+      // The returned promise resolves once the LOCAL half is done (Dexie
+      // write + outbox entry), NOT after the legacy server round-trip —
+      // callers that await it (block-out modal, new-task modal) depend on
+      // that timing. The transition stays pending through the server call.
+      let settleLocal!: () => void;
+      const localDone = new Promise<void>((resolve) => {
+        settleLocal = resolve;
+      });
+
+      /** Surface a local-half failure as state so the form can render it.
+       *  Both call sites used to just log and return. */
+      const reportLocalFailure = (phase: LocalFailurePhase, err: unknown) => {
+        const failure =
+          opts?.localFailureState?.(phase, err) ??
+          defaultFailureState(initialState, phase);
+        // null only when the caller's state isn't ActionState-shaped and it
+        // supplied no localFailureState — then we're back to log-only,
+        // which is what every caller got before.
+        if (failure !== null) setState(failure);
+      };
+
+      startTransition(async () => {
+        try {
+          const input = meta.parseInput?.(formData) ?? null;
+
+          // Replay args: when a wrapper supplies `replayArgs` (multi-entity
+          // creates), it injects the client-generated ids so the SAME ids
+          // are used by the local write, the outbox replay, AND the online
+          // server call below. Absent → raw form data (existing behaviour).
+          const replay =
+            input !== null && meta.replayArgs
+              ? meta.replayArgs(input, formData)
+              : null;
+
+          if (input !== null) {
+            // 1. Local-first Dexie write. If this throws (constraint
+            //    violation, table missing, IDB quota) we surface the error
+            //    and abort — the user's intent is conceptually rejected.
             try {
-              const result = await serverAction(state, serverFormData);
-              setState(result);
+              await meta.applyLocal(input);
             } catch (err) {
               console.error(
-                `[useLocalFirstAction] server call failed for ${meta.actionName}:`,
+                `[useLocalFirstAction] applyLocal failed for ${meta.actionName}:`,
                 err
               );
-              // Network/server failure — the outbox entry survives and the
-              // engine retries with backoff. State is left unchanged (these
-              // legacy callers have no localSuccessState to flip).
+              reportLocalFailure("local", err);
+              // Don't proceed — the local write is the source of truth for
+              // "did this happen". If it didn't, neither should the server
+              // write nor the outbox entry.
+              return;
             }
-          });
+
+            // 2. Always enqueue, even online. Recovery for mid-flight crashes.
+            try {
+              await enqueueAction({
+                action_name: meta.actionName,
+                args: replay ?? formDataToObject(formData),
+                entity_type: meta.entityType,
+                entity_id: meta.entityId(input),
+                ...(meta.op ? { op: meta.op } : {}),
+                ...(meta.entityIds
+                  ? { entity_ids: meta.entityIds(input) }
+                  : {}),
+              });
+            } catch (err) {
+              console.error(
+                `[useLocalFirstAction] enqueue failed for ${meta.actionName}:`,
+                err
+              );
+              reportLocalFailure("queue", err);
+              // Outbox failure means we lose the ability to replay. Abort
+              // so the user sees their action didn't fully land.
+              return;
+            }
+          }
+
+          // 3. Two paths, chosen by whether the caller supplied a
+          //    `localSuccessState`:
+          //
+          //    OPTIMISTIC (localSuccessState present — e.g. the booking modal):
+          //      The operation is "done" the instant the local write + outbox
+          //      entry land. Flip to the success state immediately (close the
+          //      modal) REGARDLESS of connectivity, and NEVER call the server
+          //      action here. All server sync is owned by the engine's
+          //      drainOutbox (background). This removes navigator.onLine from the
+          //      UX entirely, and — because no server action runs at submit —
+          //      removes the offline server-action revalidation/remount/loop that
+          //      navigator.onLine-lying-true caused under the service worker. A
+          //      `gemcrm:request-sync` event kicks the engine so an ONLINE write
+          //      reaches the server right away (drainOutbox replays the enqueued,
+          //      id-enriched args); offline it no-ops / backs off. Dispatched as
+          //      an event (sync-boot listens) to avoid a wrap→engine import cycle.
+          //
+          //    LEGACY (no localSuccessState — service sheet complete, agreement /
+          //      task / job-status toggles): unchanged. Call the server when the
+          //      empirical online signal is positive and reflect its result into
+          //      state (these flows depend on the server result, e.g. the
+          //      service-sheet approval modal opens on it). The outbox entry is
+          //      already enqueued, so a network failure just syncs later. When
+          //      `replay` is present the server call uses the id-enriched FormData
+          //      so the online insert matches the rows applyLocal wrote.
+          if (input !== null && opts?.localSuccessState) {
+            setState(opts.localSuccessState(input));
+            // The local half is complete — release any caller awaiting us.
+            settleLocal();
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new Event("gemcrm:request-sync"));
+            }
+          } else {
+            // Same release point on the legacy path: callers await the LOCAL
+            // write, never the server round-trip. `isPending` does cover the
+            // round-trip — we're still inside the transition here.
+            settleLocal();
+            const attemptServer =
+              isOnline() && getSyncStatus().serverReachable !== false;
+            if (attemptServer) {
+              const serverFormData = replay
+                ? objectToFormData(replay)
+                : formData;
+              try {
+                const result = await serverAction(state, serverFormData);
+                setState(result);
+              } catch (err) {
+                console.error(
+                  `[useLocalFirstAction] server call failed for ${meta.actionName}:`,
+                  err
+                );
+                // Network/server failure — the outbox entry survives and the
+                // engine retries with backoff. State is left unchanged (these
+                // legacy callers have no localSuccessState to flip).
+              }
+            }
+          }
+        } finally {
+          // Every exit path — success, either local failure, or an
+          // unexpected throw — must release the caller and reopen the
+          // button. Resolving an already-resolved promise is a no-op.
+          settleLocal();
+          inFlightRef.current = false;
         }
-      }
+      });
+
+      return localDone;
     },
     // `state` is in deps because we pass it as `prev` to the server
     // action. The callback re-creates on each state change; the form
     // sees the latest reference via the action prop on next render.
-    [serverAction, meta, state, startTransition, opts]
+    [serverAction, meta, state, startTransition, opts, initialState]
   );
 
   // Reset action state back to initial. The optimistic path never clears

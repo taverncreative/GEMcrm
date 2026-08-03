@@ -26,7 +26,11 @@ import type { ProductUsed } from "@/types/database";
 import { todayUk, dateUkOffset } from "@/lib/utils/today-uk";
 import { OTHER_PILL, encodeOther, splitOther } from "@/lib/utils/other-describe";
 import { environmentalCommentsForStorage } from "@/lib/utils/environmental-comments";
-import { useLocalFirstAction, type WrapMeta } from "@/lib/actions/wrap";
+import {
+  useLocalFirstAction,
+  type WrapMeta,
+  type LocalFailurePhase,
+} from "@/lib/actions/wrap";
 import { db } from "@/lib/db";
 import { isPhotoClientId, photoPublicUrl } from "@/lib/photos/path";
 import {
@@ -227,6 +231,28 @@ const completeServiceSheetOpts = {
     jobId: input.job_id,
     pdfUrl: null,
     finalized: input.finalize,
+  }),
+  // The local half failing used to abort in silence: the operator had a
+  // full sheet with signatures and photos, pressed Complete, and NOTHING
+  // happened — no label change, no error, no path forward. These messages
+  // say what went wrong AND that the sheet is still saved as a draft on
+  // the device, which is the fact that turns a dead end into "try again".
+  // Deliberately no button name in the wording: the same modal reads
+  // "Complete" when filling and "Save changes" on an amend, so naming one
+  // is wrong half the time.
+  localFailureState: (phase: LocalFailurePhase) => ({
+    success: false,
+    errors: {},
+    message:
+      phase === "local"
+        ? "Couldn't save this sheet on your device, so nothing was sent. " +
+          "The sheet is still saved here as a draft — check the device has " +
+          "free storage, then try again."
+        : "Saved on your device, but it couldn't be queued to send to the " +
+          "office. The sheet is safe here as a draft — try again.",
+    jobId: undefined,
+    pdfUrl: null,
+    finalized: false,
   }),
 };
 
@@ -636,6 +662,12 @@ function ServiceSheetFormBody({
     }
     fd.set("send_email", opts.sendEmail ? "true" : "");
     // schedule_follow_up / follow_up_date ride along as hidden inputs.
+    //
+    // `formAction` opens its own transition SYNCHRONOUSLY when called (see
+    // useLocalFirstAction), so this dispatch keeps its pending state even
+    // on the awaited path below. That is load-bearing: the previous
+    // useActionState shape lost isPending the moment a dispatch happened
+    // after an await, and the button read as dead for the whole request.
     const dispatch = () => void formAction(fd);
 
     // Gate ONLY the send intent: if the operator opts to email but the
@@ -1639,6 +1671,18 @@ function ServiceSheetFormBody({
                 </ReviewRow>
               )}
             </dl>
+            {/* Failure of the local write / outbox enqueue. It MUST render
+                here, not only on the form: the operator is standing in this
+                modal when they press Complete, and the form's own message
+                banner is behind the overlay where nobody sees it. */}
+            {state.message && !state.success && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              >
+                {state.message}
+              </div>
+            )}
             {bookingWarnings.length > 0 && (
               <div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                 {bookingWarnings.map((w) => (
