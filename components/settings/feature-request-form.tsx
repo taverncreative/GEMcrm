@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { submitFeatureRequestAction } from "@/app/(app)/settings/actions";
+import { useGracefulFormAction } from "@/lib/actions/use-graceful-form-action";
 import { useIsOnline } from "@/lib/hooks/use-is-online";
 import { ROUTES } from "@/lib/constants/routes";
 import type { FeedbackActionState } from "@/types/actions";
@@ -30,7 +31,12 @@ interface FeatureRequestFormProps {
 }
 
 export function FeatureRequestForm({ currentUserEmail }: FeatureRequestFormProps) {
-  const [state, action, isPending] = useActionState(
+  // useGracefulFormAction, not useActionState: a THROWN action (dropped
+  // connection mid-submit) would otherwise reach the route error
+  // boundary, which replaces the page and takes this form with it —
+  // controlled state cannot save text on a component that no longer
+  // exists. See the hook for the rest.
+  const [state, action, isPending] = useGracefulFormAction(
     submitFeatureRequestAction,
     initialState
   );
@@ -42,15 +48,14 @@ export function FeatureRequestForm({ currentUserEmail }: FeatureRequestFormProps
   // losing it silently would leave a sent message sitting in the box
   // inviting a duplicate send.
   //
-  // Not covered: a THROWN action. An unhandled rejection out of a form
-  // action reaches the route error boundary, which replaces the page and
-  // takes the form with it, controlled or not — so a connection dropping
-  // mid-submit still costs the message. The obvious shim for that
-  // (wrapFormActionGracefully) turns out to break the send entirely when
-  // applied here: on this branch the row never reached the table, verified
-  // against main on :3002. It has no live callers anywhere in the app,
-  // which now looks deliberate. Left alone rather than shipped broken;
-  // worth its own slice.
+  // A thrown action IS covered now, by the hook above. The earlier note
+  // here was wrong on both counts and is worth correcting: the shim
+  // (wrapFormActionGracefully) did not break because of anything in its
+  // own body, and its lack of callers was not deliberate — it was wired
+  // to the Booking and Invoice modals at birth and lost both to
+  // unrelated migrations. What actually breaks is handing ANY client
+  // closure to useActionState; a trivial pass-through fails identically.
+  // The full finding is recorded in lib/actions/graceful.ts.
   const [message, setMessage] = useState("");
   const pathname = usePathname();
   const router = useRouter();

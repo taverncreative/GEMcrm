@@ -196,13 +196,14 @@ describe("FeatureRequestForm — the typed message survives a failed submit", ()
     expect(box.value).toBe("The calendar should show the weekday");
   });
 
-  it("DOCUMENTS the remaining gap: a thrown action still loses the message", async () => {
-    // Not a wish, a fact: an unhandled rejection out of a form action
-    // propagates to the route error boundary, which replaces the page and
-    // takes the form with it — controlled state cannot help, because the
-    // component is gone. Pinned so nobody assumes the controlled fix
-    // covers this case too. Fixing it needs a graceful shim, and the one
-    // in the repo breaks the send (see the note in the component).
+  it("keeps the message when the action THROWS, and stays mounted", async () => {
+    // This used to be pinned as a permanent gap: an unhandled rejection
+    // out of a form action reached the route error boundary, which
+    // replaced the page and took the form with it, so controlled state
+    // could not help — the component was gone. useGracefulFormAction
+    // closes it by catching instead of rethrowing, which is the whole
+    // reason that hook exists.
+    vi.spyOn(console, "error").mockImplementation(() => {});
     submitFeedbackFn.mockRejectedValue(new TypeError("fetch failed"));
     const user = userEvent.setup();
     const onError = vi.fn();
@@ -212,18 +213,43 @@ describe("FeatureRequestForm — the typed message survives a failed submit", ()
       </ErrorBoundary>
     );
 
-    await user.type(
-      screen.getByLabelText(/what's on your mind/i),
-      "Please add a dark mode"
-    );
+    const box = screen.getByLabelText(
+      /what's on your mind/i
+    ) as HTMLTextAreaElement;
+    await user.type(box, "Please add a dark mode");
     await user.click(screen.getByRole("button", { name: /^send$/i }));
 
-    await waitFor(() => expect(onError).toHaveBeenCalled());
-    // The form is gone, so there is no textarea left to preserve.
-    expect(screen.getByTestId("boundary")).toBeInTheDocument();
-    expect(
-      screen.queryByLabelText(/what's on your mind/i)
-    ).not.toBeInTheDocument();
+    await waitFor(() => expect(submitFeedbackFn).toHaveBeenCalled());
+    // The boundary never fires, the form never unmounts...
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("boundary")).not.toBeInTheDocument();
+    // ...and what was typed is still there to retry with.
+    expect(box.value).toBe("Please add a dark mode");
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeEnabled();
+  });
+
+  it("a retry after a thrown action sends normally", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    submitFeedbackFn
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce({
+        success: true,
+        errors: {},
+        message: null,
+        submittedAt: "2026-08-04T09:00:00.000Z",
+      });
+    const user = userEvent.setup();
+    render(<FeatureRequestForm currentUserEmail="nate@example.com" />);
+
+    const box = screen.getByLabelText(
+      /what's on your mind/i
+    ) as HTMLTextAreaElement;
+    await user.type(box, "Please add a dark mode");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => expect(submitFeedbackFn).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(await screen.findByText(/thanks, request logged/i)).toBeInTheDocument();
   });
 
   it("CLEARS the box on a successful send (React's reset used to do this)", async () => {

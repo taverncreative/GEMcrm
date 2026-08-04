@@ -1,6 +1,11 @@
 /**
  * Graceful-failure wrapper unit tests.
  *
+ * Only the direct-call flavour lives here now. `wrapFormActionGracefully`
+ * was deleted: a client closure handed to `useActionState` never
+ * dispatches (see the note in lib/actions/graceful.ts). Its replacement,
+ * `useGracefulFormAction`, is covered in use-graceful-form-action.test.tsx.
+ *
  * Surface-3 follow-up. The three multi-entity write paths (Booking,
  * Invoice, Delete) stay online-only. The disable guard (now reliable
  * post-serverReachable commit) is the primary defense; these
@@ -21,78 +26,7 @@
  *      boundary continues to handle these.
  */
 import { describe, it, expect } from "vitest";
-import {
-  wrapFormActionGracefully,
-  wrapDirectCallGracefully,
-} from "@/lib/actions/graceful";
-
-// Match the wrapper's TState constraint (`message: string | null`).
-// Annotating the const avoids TS narrowing `message` to `null` and
-// then complaining when the action returns `message: string`.
-interface TestState {
-  success: boolean;
-  errors: Record<string, string>;
-  message: string | null;
-}
-const STATE_PREV: TestState = { success: false, errors: {}, message: null };
-
-describe("wrapFormActionGracefully", () => {
-  it("passes server-side {success:true} results through unchanged", async () => {
-    const action = async (): Promise<TestState> => ({
-      success: true,
-      errors: {},
-      message: "Booked",
-    });
-    const wrapped = wrapFormActionGracefully(action);
-    const res = await wrapped(STATE_PREV, new FormData());
-    expect(res.success).toBe(true);
-    expect(res.message).toBe("Booked");
-  });
-
-  it("passes server-side {success:false, message} results through unchanged", async () => {
-    const action = async (): Promise<TestState> => ({
-      success: false,
-      errors: { name: "Required" },
-      message: "Validation failed",
-    });
-    const wrapped = wrapFormActionGracefully(action);
-    const res = await wrapped(STATE_PREV, new FormData());
-    expect(res.success).toBe(false);
-    expect(res.message).toBe("Validation failed");
-    expect(res.errors).toEqual({ name: "Required" });
-  });
-
-  it("converts TypeError: fetch failed into the connection-lost shape", async () => {
-    const action = async (): Promise<TestState> => {
-      throw new TypeError("fetch failed");
-    };
-    const wrapped = wrapFormActionGracefully(action);
-    const res = await wrapped(STATE_PREV, new FormData());
-    expect(res.success).toBe(false);
-    expect(res.message).toMatch(/connection lost/i);
-    expect(res.message).toMatch(/try again/i);
-  });
-
-  it("converts 'Failed to fetch' (Chrome shape) the same way", async () => {
-    const action = async (): Promise<TestState> => {
-      throw new TypeError("Failed to fetch");
-    };
-    const wrapped = wrapFormActionGracefully(action);
-    const res = await wrapped(STATE_PREV, new FormData());
-    expect(res.success).toBe(false);
-    expect(res.message).toMatch(/connection lost/i);
-  });
-
-  it("re-throws non-network errors so real bugs aren't hidden", async () => {
-    const action = async (): Promise<TestState> => {
-      throw new Error("Database constraint violation");
-    };
-    const wrapped = wrapFormActionGracefully(action);
-    await expect(wrapped(STATE_PREV, new FormData())).rejects.toThrow(
-      /Database constraint/
-    );
-  });
-});
+import { wrapDirectCallGracefully } from "@/lib/actions/graceful";
 
 describe("wrapDirectCallGracefully", () => {
   it("passes server-side {success:true} results through unchanged", async () => {

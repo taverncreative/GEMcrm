@@ -13,29 +13,62 @@
  *   (b) connection drops MID-submit — fetch was in flight when the
  *       transport failed.
  *
- * Without these wrappers, both manifest as an unhandled rejection
+ * Without this wrapper, both manifest as an unhandled rejection
  * out of the server-action call: the modal hangs, no error message
  * appears, the operator thinks the click did nothing. With them, the
  * action gracefully returns a `{success: false, message: "Couldn't
  * save — connection lost…"}` shape the existing UI already knows how
  * to render.
  *
- * Two flavours, matching how the three modals dispatch:
+ * `wrapDirectCallGracefully` — for actions used via
+ * `await action(args)` from a button onClick. Eight live callers: the
+ * delete confirms (customer, job, site, agreement, report), the
+ * block-out modal, the calendar task chip, and the past-request
+ * actions.
  *
- *   - `wrapFormActionGracefully` — for actions used with
- *     `useActionState` (`(prev, formData) => Promise<state>`). Used
- *     by Booking + Invoice modals.
+ * It intercepts ONLY transport-layer failures (TypeError: fetch failed
+ * and friends). Server-side `{success:false, message:"..."}` results
+ * pass through untouched — they already carry the right message for
+ * the operator.
  *
- *   - `wrapDirectCallGracefully` — for actions used via
- *     `await action(args)` from a button onClick. Used by the
- *     Delete confirm.
+ * ── There used to be a second flavour. Do not bring it back. ──
  *
- * Both intercept ONLY transport-layer failures (TypeError: fetch
- * failed and friends). Server-side `{success:false, message:"..."}`
- * results pass through untouched — they already carry the right
- * message for the operator.
+ * `wrapFormActionGracefully` wrapped a `(prev, formData)` action for
+ * `useActionState`. It was deleted because it does not work, and the
+ * way it fails is silent, so it costs a day to diagnose:
  *
- * Out of scope: these wrappers do NOT enqueue the action for retry.
+ *   `<form action={clientFn}>`  WORKS. React calls your client
+ *   function with the FormData and you call the server action yourself
+ *   from inside it. This is what useGracefulFormAction and
+ *   useLocalFirstAction both do.
+ *
+ *   `useActionState(clientFnWrappingServerAction)`  DOES NOT. The
+ *   submit event fires, React marks the form as its own
+ *   (action="javascript:throw new Error('React form unexpectedly
+ *   submitted.')"), and then nothing happens at all: the wrapper body
+ *   is never entered, no POST for the action reaches the server, no
+ *   error appears anywhere. The form just quietly does not send.
+ *
+ * Proven by A/B/A against the real database on :3002, submitting the
+ * feedback form four times: action passed directly → row inserted;
+ * wrapped in this shim → no row; wrapped in a TRIVIAL pass-through
+ * closure with no try/catch and no logic at all → no row; passed
+ * directly again → row inserted. The pass-through leg is the one that
+ * matters — it proves the fault is the composition, not anything in
+ * the wrapper's body, so there is no version of this helper that
+ * works.
+ *
+ * lib/actions/wrap.ts (see the long note above `useLocalFirstAction`'s
+ * state) documents the same root cause, found independently in
+ * hands-on testing. Note that NEITHER case reproduces in jsdom —
+ * React's test-environment transition lifecycle is more permissive
+ * than the production build — so a green unit test proves nothing
+ * here. Only a live submit with the database as the oracle catches it.
+ *
+ * If you need graceful failure for a form action, use
+ * `useGracefulFormAction` (lib/actions/use-graceful-form-action.ts).
+ *
+ * Out of scope: this wrapper does NOT enqueue the action for retry.
  * The three controls remain online-only — the multi-entity
  * entity_ids[] guard is the prerequisite for queueing them. Today's
  * goal is just "don't hang silently."
@@ -50,43 +83,6 @@ export interface GracefulFailureResult {
   success: false;
   errors: Record<string, string>;
   message: string;
-}
-
-/**
- * Wrap a form-action `(prev, formData) => Promise<TState>` so any
- * thrown network failure resolves to a `{success:false}` shape
- * compatible with the caller's existing state type. Server-thrown
- * non-network errors pass through (the action's own try/catch is
- * trusted to produce a proper state).
- *
- * Caller must guarantee `TState` includes the standard
- * `{success, errors, message}` shape. The two production callers
- * (Booking + Invoice modals) both use `ActionState`, which does.
- */
-export function wrapFormActionGracefully<
-  TState extends { success: boolean; errors: Record<string, string>; message: string | null },
->(
-  action: (prev: TState, formData: FormData) => Promise<TState>
-): (prev: TState, formData: FormData) => Promise<TState> {
-  return async (prev, formData) => {
-    try {
-      return await action(prev, formData);
-    } catch (err) {
-      if (isNetworkError(err)) {
-        return {
-          ...prev,
-          success: false,
-          errors: {},
-          message: OFFLINE_MESSAGE,
-        };
-      }
-      // Re-throw non-network errors so the action's own state
-      // discipline or React's error boundary handle them as before.
-      // We don't want to silently re-shape a real bug into a
-      // connectivity message.
-      throw err;
-    }
-  };
 }
 
 /**
