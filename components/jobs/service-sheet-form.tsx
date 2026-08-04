@@ -215,31 +215,62 @@ export const completeServiceSheetMeta: WrapMeta<CompleteSheetInput> = {
       ...(owns("needs_invoice")
         ? { needs_invoice: input.invoice_required }
         : {}),
-      // Combined entry (finalize) completes the job locally — the
-      // optimistic mirror of the server's finalizeServiceSheet. The
-      // non-finalize shape keeps today's in_progress semantics. Amend
-      // (L2) edits an already-completed sheet: job_status is NEVER
-      // written — the local row must not lie about a downgrade the
-      // server will refuse.
-      ...(input.amend
+      // NOT job_status. A finalize's status flip claims the visit is
+      // done and on its way to the office, and that claim is only true
+      // once the outbox entry exists — so it moved to commitLocal
+      // below. Everything here is the sheet's own content, which is
+      // worth keeping locally whatever happens next.
+      //
+      // A non-finalize save still writes in_progress, because that
+      // asserts nothing about delivery. Amend (L2) edits an
+      // already-completed sheet: job_status is NEVER written, so the
+      // local row cannot lie about a downgrade the server will refuse.
+      ...(input.amend || input.finalize
         ? {}
-        : { job_status: input.finalize ? "completed" : "in_progress" }),
+        : { job_status: "in_progress" }),
       updated_at: now,
     });
-    // The draft is obsolete the moment the completion is committed
-    // locally — and clearing it HERE matters: flipping job_status above
-    // makes the /complete page swap to the view-only sheet via
-    // useLiveQuery, unmounting the form before its success effect (the
-    // other clearDraft site) gets to run. Caught live in the pass-B
-    // preview run: outbox drained, draft still haunting. Best-effort —
-    // a draft-clear hiccup must not abort the completion itself.
-    // Amend saves are final the same way — clear their draft too.
+  },
+
+  /**
+   * Runs only after the outbox entry is on disk.
+   *
+   * Both writes here used to sit at the end of applyLocal, BEFORE the
+   * enqueue, and both were wrong there for the same reason: each one
+   * tells the operator the sheet has been sent.
+   *
+   *   - `job_status: "completed"` swaps the /complete page to the
+   *     view-only sheet via useLiveQuery, unmounting the form. If the
+   *     enqueue then failed, the failure message was set on a form that
+   *     no longer existed: the operator saw a finished service sheet
+   *     with nothing queued for the office. Silent divergence on the
+   *     daily path.
+   *   - `clearDraft` deleted the operator's safety net a beat before
+   *     the step that could fail, which also made the failure message
+   *     ("The sheet is safe here as a draft") untrue at the moment it
+   *     was shown.
+   *
+   * Order matters within this hook: clear the draft BEFORE flipping the
+   * status, because the flip unmounts the form and the draft clear
+   * should not be racing that.
+   */
+  commitLocal: async (input) => {
     if (input.finalize || input.amend) {
+      // Best-effort: a draft-clear hiccup must not look like a failed
+      // completion. If it throws, the draft re-seeds on next mount and
+      // the operator sees old values haunting a completed sheet — worth
+      // logging, not worth blocking on.
       try {
         await clearDraft(input.job_id);
       } catch (err) {
-        console.warn("[serviceSheet] applyLocal clearDraft failed:", err);
+        console.warn("[serviceSheet] commitLocal clearDraft failed:", err);
       }
+    }
+    if (input.finalize && !input.amend) {
+      await db.jobs.update(input.job_id, {
+        job_status: "completed",
+        updated_at: new Date().toISOString(),
+      });
     }
   },
 };
@@ -272,8 +303,15 @@ const completeServiceSheetOpts = {
         ? "Couldn't save this sheet on your device, so nothing was sent. " +
           "The sheet is still saved here as a draft — check the device has " +
           "free storage, then try again."
-        : "Saved on your device, but it couldn't be queued to send to the " +
-          "office. The sheet is safe here as a draft — try again.",
+        : // The queue is what carries the sheet to the office, so a queue
+          // failure means it has NOT been sent, and the job has NOT been
+          // marked complete. Both halves are said outright: the operator
+          // used to be shown a finished-looking sheet in this exact case.
+          "This sheet has NOT been sent to the office and the job is not " +
+          "marked as complete. It couldn't be added to the send queue. " +
+          "Nothing you entered is lost — it's saved here as a draft on " +
+          "this device. Try again, and if it keeps failing tell the office " +
+          "before you leave site.",
     jobId: undefined,
     pdfUrl: null,
     finalized: false,

@@ -5,8 +5,9 @@
  * fake-indexeddb Dexie + the real outbox:
  *
  *   - parseServiceSheetFormData carries the finalize flag;
- *   - applyLocal completes the job locally when finalize is set and
- *     keeps the legacy in_progress shape when it isn't;
+ *   - applyLocal writes the sheet CONTENT but never the finalize
+ *     status, and commitLocal writes the status once the entry is
+ *     queued (see the ordering block below for why that split exists);
  *   - the enqueued entry shape: ONE update entry whose args hold the
  *     whole payload (finalize + email/follow-up choices + signatures
  *     inline as data URLs);
@@ -25,6 +26,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db";
 import { enqueueAction } from "@/lib/db/outbox";
+import { saveDraft, loadDraft } from "@/lib/db/drafts";
 import { formDataToObject } from "@/lib/actions/wrap";
 import { classifyActionResult } from "@/lib/sync/http-classify";
 import {
@@ -124,16 +126,45 @@ describe("parseServiceSheetFormData — finalize flag", () => {
   });
 });
 
-describe("applyLocal — finalize-aware status", () => {
-  it("finalize → job_status completed locally", async () => {
+/**
+ * The finalize ordering.
+ *
+ * `job_status: "completed"` swaps /complete to the view-only sheet via
+ * useLiveQuery, which unmounts the form. When that flip lived in
+ * applyLocal it happened BEFORE the enqueue, so a failed enqueue set a
+ * failure message on a form that no longer existed: the operator was
+ * looking at a finished service sheet with nothing queued for the
+ * office. Same for clearDraft, which deleted the safety net a beat
+ * before the step that could fail.
+ *
+ * Both now live in commitLocal, which the wrapper runs only after the
+ * outbox entry is on disk. These tests pin the split — the whole point
+ * is that applyLocal alone must never make the job look done.
+ */
+describe("applyLocal — content only, never the finalize claim", () => {
+  it("finalize → sheet content lands, job_status does NOT", async () => {
     await db.jobs.put(seedJob("in_progress"));
     const input = parseServiceSheetFormData(
       sheetFormData({ finalize: "true" })
     )!;
     await completeServiceSheetMeta.applyLocal(input);
     const row = await db.jobs.get(JOB_ID);
-    expect(row?.job_status).toBe("completed");
+    // The operator's work is saved...
     expect(row?.findings).toBe("Combined-entry findings");
+    // ...but nothing yet says the visit is done and sent.
+    expect(row?.job_status).toBe("in_progress");
+  });
+
+  it("finalize → the draft is still there, because the enqueue may fail", async () => {
+    await db.jobs.put(seedJob("in_progress"));
+    await saveDraft({ job_id: JOB_ID, values: { findings: "typed" } } as never);
+    const input = parseServiceSheetFormData(
+      sheetFormData({ finalize: "true" })
+    )!;
+    await completeServiceSheetMeta.applyLocal(input);
+    // The failure message promises the sheet is safe as a draft. That
+    // promise has to be true at the moment it is shown.
+    expect(await loadDraft(JOB_ID)).not.toBeUndefined();
   });
 
   it("without finalize → legacy in_progress shape", async () => {
@@ -155,6 +186,44 @@ describe("applyLocal — finalize-aware status", () => {
     const row = await db.jobs.get(JOB_ID);
     expect(row?.job_status).toBe("completed");
     expect(row?.findings).toBe("Combined-entry findings");
+  });
+});
+
+describe("commitLocal — runs only once the entry is queued", () => {
+  it("finalize → NOW the job completes and the draft goes", async () => {
+    await db.jobs.put(seedJob("in_progress"));
+    await saveDraft({ job_id: JOB_ID, values: { findings: "typed" } } as never);
+    const input = parseServiceSheetFormData(
+      sheetFormData({ finalize: "true" })
+    )!;
+
+    await completeServiceSheetMeta.applyLocal(input);
+    await completeServiceSheetMeta.commitLocal!(input);
+
+    expect((await db.jobs.get(JOB_ID))?.job_status).toBe("completed");
+    expect(await loadDraft(JOB_ID)).toBeUndefined();
+  });
+
+  it("amend → clears the draft but still never touches job_status", async () => {
+    await db.jobs.put(seedJob("completed"));
+    await saveDraft({ job_id: JOB_ID, values: { findings: "typed" } } as never);
+    const input = parseServiceSheetFormData(sheetFormData({ amend: "true" }))!;
+
+    await completeServiceSheetMeta.commitLocal!(input);
+
+    expect((await db.jobs.get(JOB_ID))?.job_status).toBe("completed");
+    expect(await loadDraft(JOB_ID)).toBeUndefined();
+  });
+
+  it("a plain save (no finalize, no amend) keeps its draft", async () => {
+    await db.jobs.put(seedJob("scheduled"));
+    await saveDraft({ job_id: JOB_ID, values: { findings: "typed" } } as never);
+    const input = parseServiceSheetFormData(sheetFormData())!;
+
+    await completeServiceSheetMeta.commitLocal!(input);
+
+    expect(await loadDraft(JOB_ID)).not.toBeUndefined();
+    expect((await db.jobs.get(JOB_ID))?.job_status).toBe("scheduled");
   });
 });
 

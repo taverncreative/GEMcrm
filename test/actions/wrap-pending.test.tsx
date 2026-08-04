@@ -325,3 +325,84 @@ describe("double-tap guard", () => {
     await waitFor(() => expect(enqueueMock).toHaveBeenCalledTimes(2));
   });
 });
+
+/**
+ * commitLocal — the write that may only happen once delivery is queued.
+ *
+ * The service sheet's finalize flips `job_status` to "completed", which
+ * swaps the /complete page to the view-only sheet and unmounts the form.
+ * Done before the enqueue, a failed enqueue then set a failure message on
+ * a form that no longer existed: the operator saw a finished sheet with
+ * nothing queued for the office.
+ */
+describe("commitLocal ordering", () => {
+  it("does NOT run when the enqueue fails, and the failure is reported", async () => {
+    const commitLocal = vi.fn(async () => {});
+    enqueueMock.mockRejectedValueOnce(new Error("outbox write failed"));
+    const user = userEvent.setup();
+
+    render(<Harness meta={baseMeta({ commitLocal })} opts={OPTIMISTIC} />);
+    await user.click(screen.getByRole("button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("msg").textContent).toMatch(/queued/i)
+    );
+    // The claim that the work is done was never written.
+    expect(commitLocal).not.toHaveBeenCalled();
+    expect(screen.getByTestId("success").textContent).toBe("false");
+  });
+
+  it("runs after a successful enqueue, and only then", async () => {
+    const order: string[] = [];
+    const meta = baseMeta({
+      applyLocal: async () => {
+        order.push("applyLocal");
+      },
+      commitLocal: async () => {
+        order.push("commitLocal");
+      },
+    });
+    enqueueMock.mockImplementationOnce(async () => {
+      order.push("enqueue");
+      return { id: 1, compacted_ids: [] };
+    });
+    const user = userEvent.setup();
+
+    render(<Harness meta={meta} opts={OPTIMISTIC} />);
+    await user.click(screen.getByRole("button"));
+
+    await waitFor(() => expect(order).toContain("commitLocal"));
+    expect(order).toEqual(["applyLocal", "enqueue", "commitLocal"]);
+  });
+
+  it("a throw in commitLocal is NOT reported as failure — the entry is already queued", async () => {
+    const meta = baseMeta({
+      commitLocal: async () => {
+        throw new Error("local mirror write failed");
+      },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const user = userEvent.setup();
+
+    render(<Harness meta={meta} opts={OPTIMISTIC} />);
+    await user.click(screen.getByRole("button"));
+
+    // Telling the operator "not sent" here would be a lie: it IS queued.
+    await waitFor(() =>
+      expect(screen.getByTestId("success").textContent).toBe("true")
+    );
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("callers without commitLocal are completely unaffected", async () => {
+    const user = userEvent.setup();
+    render(<Harness meta={baseMeta()} opts={OPTIMISTIC} />);
+    await user.click(screen.getByRole("button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("success").textContent).toBe("true")
+    );
+    expect(enqueueMock).toHaveBeenCalledTimes(1);
+  });
+});

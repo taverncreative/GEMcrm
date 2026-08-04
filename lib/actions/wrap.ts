@@ -71,6 +71,29 @@ export interface WrapMeta<TInput> {
   /** Write the local Dexie row. Throws on failure. */
   applyLocal: (input: TInput) => Promise<void>;
 
+  /**
+   * Optional second local write, run ONLY once the outbox entry is
+   * safely on disk.
+   *
+   * For anything in `applyLocal` that asserts "this work is done and on
+   * its way to the office". Such a write must not land while the
+   * enqueue can still fail, or the operator is shown a finished job
+   * that nothing will ever deliver.
+   *
+   * The service sheet is the case this exists for: flipping
+   * `job_status` to "completed" swaps the /complete page to the
+   * view-only sheet via useLiveQuery, unmounting the form and taking
+   * any failure message with it. Deferring the flip to here means a
+   * failed enqueue leaves the operator on the form, looking at the
+   * error.
+   *
+   * A throw here is logged and swallowed, NOT surfaced as a failure:
+   * the outbox entry already exists, so the work WILL reach the server
+   * and the next pull corrects the local row. Failing the operation at
+   * this point would tell the operator nothing was sent when it was.
+   */
+  commitLocal?: (input: TInput) => Promise<void>;
+
   // ─── Multi-entity create support (additive; all optional) ─────────
   // Added for offline New Booking (step 8). Every field below is
   // OPTIONAL — when omitted, the wrapper behaves byte-for-byte as it
@@ -384,8 +407,28 @@ export function useLocalFirstAction<TState, TInput>(
               );
               reportLocalFailure("queue", err);
               // Outbox failure means we lose the ability to replay. Abort
-              // so the user sees their action didn't fully land.
+              // so the user sees their action didn't fully land. Anything
+              // in `commitLocal` stays UNWRITTEN, which is the point: the
+              // operator must not be shown a completed job that nothing
+              // is going to deliver.
               return;
+            }
+
+            // 2b. The outbox entry is on disk, so delivery is now
+            //     guaranteed as far as this device can guarantee
+            //     anything. Only now write the part that claims the
+            //     work is done. A throw here cannot un-queue the entry,
+            //     so it must not be reported as a failure — log it and
+            //     let the next pull reconcile the local row.
+            if (meta.commitLocal) {
+              try {
+                await meta.commitLocal(input);
+              } catch (err) {
+                console.warn(
+                  `[useLocalFirstAction] commitLocal failed for ${meta.actionName} (entry already queued, pull will reconcile):`,
+                  err
+                );
+              }
             }
           }
 
