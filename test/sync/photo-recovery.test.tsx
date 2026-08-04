@@ -1,10 +1,11 @@
 /**
  * Recovering photos the upload loop abandoned.
  *
- * `drainPhotos` drops any row past STUCK_THRESHOLD, so once the 13 July
- * RLS failure burned five attempts those photos were skipped forever.
- * The bytes are still in IndexedDB; the only thing missing is a way to
- * ask again.
+ * `drainPhotos` USED to drop any row past STUCK_THRESHOLD, so once the
+ * 13 July RLS failure burned five attempts those photos were skipped
+ * forever. That cliff is gone: the threshold now decides how OFTEN a
+ * photo retries and how loudly it is surfaced, never whether it retries
+ * at all. These tests pin both halves.
  *
  * ── A note on how these are wired ──
  *
@@ -26,7 +27,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { db, type PendingPhoto } from "@/lib/db";
-import { retryPhotoUpload, drainPhotos } from "@/lib/sync/photos";
+import {
+  retryPhotoUpload,
+  drainPhotos,
+  isPhotoStuck,
+  STUCK_THRESHOLD,
+} from "@/lib/sync/photos";
 import { photoStoragePath } from "@/lib/photos/path";
 import { photoBlobSize } from "@/lib/photos/blob-size";
 import type { Job } from "@/types/database";
@@ -85,10 +91,11 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", fetchMock);
 });
 
-describe("the loop will not pick these up on its own", () => {
-  it("drainPhotos skips a row past the attempt ceiling", async () => {
-    // Seeded without a blob, which is all Dexie can hold here — the
-    // ceiling filter runs before anything reads the bytes.
+describe("the loop no longer abandons anything", () => {
+  it("drainPhotos ATTEMPTS a row past the old attempt ceiling", async () => {
+    // Five attempts is where the old code stopped looking forever. The
+    // blob is empty because that is all Dexie can hold here, so the
+    // upload itself fails — what matters is that it was tried at all.
     await db.photos_pending.add({
       ...stuckRow(P1),
       blob: new Blob(),
@@ -96,8 +103,86 @@ describe("the loop will not pick these up on its own", () => {
     } as never);
 
     const res = await drainPhotos();
+    expect(res.attempted).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still respects the backoff clock, so it is not a busy loop", async () => {
+    await db.photos_pending.add({
+      ...stuckRow(P1),
+      blob: new Blob(),
+      // Far-future: eligible by attempts, not yet due by the clock.
+      next_attempt_at: "2099-01-01T00:00:00.000Z",
+    } as never);
+
+    const res = await drainPhotos();
     expect(res.attempted).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("tries the freshest photos before a backlog of stuck ones", async () => {
+    const P_OLD = "99999999-9999-4999-8999-999999999999";
+    await db.photos_pending.bulkAdd([
+      { ...stuckRow(P_OLD), blob: new Blob(), upload_attempts: 12, next_attempt_at: null },
+      { ...stuckRow(P1), blob: new Blob(), upload_attempts: 0, next_attempt_at: null },
+    ] as never[]);
+
+    await drainPhotos();
+    // Concurrency is 2, so both go out; the ORDER is what is pinned —
+    // a photo taken today must not queue behind a month-old failure.
+    const firstId = (fetchMock.mock.calls[0][1].body as FormData).get("photoId");
+    expect(firstId).toBe(P1);
+  });
+});
+
+describe("stuck classification", () => {
+  it("is what the inbox and the alert both key off", () => {
+    expect(isPhotoStuck({ uploaded: false, upload_attempts: STUCK_THRESHOLD })).toBe(true);
+    expect(isPhotoStuck({ uploaded: false, upload_attempts: STUCK_THRESHOLD - 1 })).toBe(false);
+    // An uploaded photo is never stuck, whatever it took to get there.
+    expect(isPhotoStuck({ uploaded: true, upload_attempts: 99 })).toBe(false);
+  });
+
+  it("backs a stuck photo off to a long interval, not the fast one", async () => {
+    await db.photos_pending.add({
+      ...stuckRow(P1),
+      blob: new Blob(),
+      upload_attempts: STUCK_THRESHOLD,
+      next_attempt_at: null,
+    } as never);
+    fetchMock.mockResolvedValue({ ok: false, status: 502, text: async () => "boom" });
+
+    await drainPhotos();
+
+    const row = await db.photos_pending.get(P1);
+    const waitMs = Date.parse(row!.next_attempt_at!) - Date.now();
+    // The fast backoff caps at 60s; stuck rows wait far longer than that
+    // so a permanent failure costs about one request an hour.
+    expect(waitMs).toBeGreaterThan(10 * 60 * 1000);
+    // ...and it is still scheduled, i.e. it WILL come round again.
+    expect(row!.uploaded).toBe(false);
+  });
+
+  it("a transient failure self-heals with no operator action", async () => {
+    await db.photos_pending.add({
+      ...stuckRow(P1),
+      blob: new Blob(),
+      upload_attempts: 1,
+      next_attempt_at: null,
+    } as never);
+    // First drain fails...
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 502, text: async () => "boom" });
+    await drainPhotos();
+    expect((await db.photos_pending.get(P1))!.uploaded).toBe(false);
+
+    // ...the cause clears, and the next due drain succeeds by itself.
+    await db.photos_pending.update(P1, { next_attempt_at: null });
+    await drainPhotos();
+
+    const row = await db.photos_pending.get(P1);
+    expect(row!.uploaded).toBe(true);
+    expect(row!.upload_attempts).toBe(0);
+    expect(row!.last_upload_error).toBeNull();
   });
 });
 

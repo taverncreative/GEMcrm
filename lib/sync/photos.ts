@@ -21,6 +21,33 @@
  * (the remaining queue stays for after re-login). Other failures
  * scope to the single photo with backoff.
  *
+ * Never abandoned. This loop used to DROP any row past
+ * STUCK_THRESHOLD attempts, on the reasoning that it "needs manual
+ * attention". Nothing ever gave it that attention, so the drop was
+ * permanent: on 13 July an RLS failure burned all five attempts in a
+ * couple of minutes (1s/2s/4s/8s/16s across 30-second ticks) and twelve
+ * photos from four completed jobs were never tried again. They were
+ * taken at customer premises and cannot be recreated.
+ *
+ * So the threshold no longer decides whether to retry, only how often
+ * and how loudly:
+ *   - under it, the normal fast backoff (~1s → ~16s);
+ *   - at or over it, the photo is STUCK: retries continue for ever at
+ *     STUCK_RETRY_MS, and it is surfaced as stuck (see below).
+ * A transient cause therefore self-heals with no operator action, and a
+ * permanent one gets a human without costing a request every tick.
+ *
+ * Where stuck photos surface (this list was previously a false claim
+ * that "the conflict inbox surfaces them" — it did not read this table
+ * at all):
+ *   - /sync/conflicts, alongside stuck outbox entries, with a retry;
+ *   - the <StuckSyncAlert> banner and toast, the moment one sticks;
+ *   - the photo-recovery card in Settings, which lists everything
+ *     pending whether stuck or not.
+ *
+ * Ordering: least-attempted first, so a freshly captured photo is never
+ * queued behind a pile of long-stuck ones.
+ *
  * Blob cleanup: after a successful upload, if the photo's `captured_at`
  * is more than 7 days old, the local blob is replaced with a zero-byte
  * Blob to reclaim IndexedDB space. The `server_url` field keeps the
@@ -45,7 +72,28 @@ import { photoBlobSize } from "@/lib/photos/blob-size";
 
 const CONCURRENCY = 2;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-const STUCK_THRESHOLD = 5;
+
+/**
+ * Attempts after which a photo counts as stuck: it keeps retrying, but
+ * slowly, and it is surfaced to the operator as not-sent.
+ */
+export const STUCK_THRESHOLD = 5;
+
+/**
+ * Retry interval once stuck. Long enough that a permanently failing
+ * photo costs roughly one request an hour rather than one every tick,
+ * short enough that a fix deployed during the working day heals the
+ * queue before the operator gets home.
+ */
+const STUCK_RETRY_MS = 30 * 60 * 1000;
+
+/** Is this photo past the point where it needs a human to look at it? */
+export function isPhotoStuck(photo: {
+  uploaded: boolean;
+  upload_attempts: number;
+}): boolean {
+  return !photo.uploaded && photo.upload_attempts >= STUCK_THRESHOLD;
+}
 
 export interface PhotoResult {
   attempted: number;
@@ -61,15 +109,21 @@ export async function drainPhotos(): Promise<PhotoResult> {
   // separate indexes, so we read the small "not yet uploaded" set and
   // filter ready-by-next_attempt in JS. Pending counts in practice are
   // small (one engineer's daily photos).
-  const eligible = (
-    await db.photos_pending
-      .filter((p) => !p.uploaded && (p.next_attempt_at ?? "") <= now)
-      .toArray()
-  );
+  const eligible = await db.photos_pending
+    .filter((p) => !p.uploaded && (p.next_attempt_at ?? "") <= now)
+    .toArray();
 
-  // Drop ones that already crossed the stuck threshold — they need
-  // manual attention; the conflict inbox surfaces them.
-  const ready = eligible.filter((p) => p.upload_attempts < STUCK_THRESHOLD);
+  // Every eligible row is attempted, including long-stuck ones. Nothing
+  // is filtered out here: the ceiling that used to drop rows at five
+  // attempts is what lost twelve photos on 13 July. A stuck row is
+  // already rate-limited to STUCK_RETRY_MS by its own backoff, so
+  // keeping it in the queue costs about one request an hour.
+  //
+  // Least-attempted first, so today's captures go before a backlog of
+  // stuck ones rather than queueing behind them.
+  const ready = [...eligible].sort(
+    (a, b) => a.upload_attempts - b.upload_attempts
+  );
 
   const result: PhotoResult = {
     attempted: 0,
@@ -129,11 +183,15 @@ export interface UploadOutcome {
  * Upload ONE pending photo, ignoring both the attempt ceiling and the
  * backoff clock.
  *
- * `drainPhotos` deliberately drops rows past STUCK_THRESHOLD — they need
- * a human. This is that human's route back in. Twelve photos from four
- * completed jobs were abandoned that way on 13 July: an RLS failure
- * (fixed hours later) burned all five attempts in a couple of minutes,
- * and the loop has skipped them ever since.
+ * `drainPhotos` no longer drops anything, but a stuck photo only comes
+ * round every STUCK_RETRY_MS. This is the operator's way to say "try it
+ * now" — from the conflict inbox or the Settings recovery card — without
+ * waiting out the interval.
+ *
+ * It is also the route back in for the twelve photos abandoned on 13
+ * July, before the ceiling was removed: an RLS failure (fixed hours
+ * later) burned all five attempts in a couple of minutes, and the loop
+ * skipped them permanently.
  *
  * Nothing else has to happen for the recovery to land. The object key is
  * derived from the photo id, and the job's `photo_urls` already holds the
@@ -257,6 +315,21 @@ async function markUploaded(
   await db.photos_pending.update(photoId, patch);
 }
 
+/**
+ * When to try this photo again.
+ *
+ * Under the threshold, the shared fast backoff (~1s doubling to ~16s)
+ * so a blip costs nothing. At or over it, a long fixed interval with
+ * the same ±20% jitter: the photo is not given up on, it is simply no
+ * longer worth a request every tick while a human is being asked to
+ * look at it.
+ */
+function nextPhotoAttemptAt(attempts: number): string {
+  if (attempts < STUCK_THRESHOLD) return nextAttemptAt(attempts);
+  const jittered = STUCK_RETRY_MS * (0.8 + Math.random() * 0.4);
+  return new Date(Date.now() + jittered).toISOString();
+}
+
 async function markFailed(
   photoId: string,
   attempts: number,
@@ -265,7 +338,7 @@ async function markFailed(
   await db.photos_pending.update(photoId, {
     upload_attempts: attempts,
     last_upload_error: errorMessage,
-    next_attempt_at: nextAttemptAt(attempts),
+    next_attempt_at: nextPhotoAttemptAt(attempts),
   });
 }
 

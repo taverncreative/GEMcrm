@@ -28,30 +28,41 @@ import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { describeStuckEntry } from "@/lib/sync/describe-stuck";
+import { isPhotoStuck } from "@/lib/sync/photos";
 
 const CONFLICTS_ROUTE = "/sync/conflicts";
 const NOTIFIED_KEY = "gemcrm-stuck-notified";
 const TOAST_MS = 8000;
 
 interface StuckItem {
-  id: number;
+  /** Namespaced so outbox ids and photo uuids cannot collide:
+   *  "outbox:12", "photo:<uuid>". */
+  id: string;
   label: string;
 }
 
-function loadNotified(): number[] {
+function loadNotified(): string[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(NOTIFIED_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter((n): n is number => typeof n === "number")
-      : [];
+    if (!Array.isArray(parsed)) return [];
+    // Entries written before photos joined this alert are bare outbox
+    // numbers. Map them forward so an already-acknowledged entry does
+    // not nag again just because the key format changed.
+    return parsed.flatMap((n) =>
+      typeof n === "number"
+        ? [`outbox:${n}`]
+        : typeof n === "string"
+          ? [n]
+          : []
+    );
   } catch {
     return [];
   }
 }
 
-function saveNotified(ids: number[]): void {
+function saveNotified(ids: string[]): void {
   try {
     localStorage.setItem(NOTIFIED_KEY, JSON.stringify(ids));
   } catch {
@@ -62,16 +73,31 @@ function saveNotified(ids: number[]): void {
 export function StuckSyncAlert() {
   const stuck = useLiveQuery(async () => {
     const rows = await db.outbox.filter((e) => e.stuck).sortBy("created_at");
-    return rows.map<StuckItem>((e) => ({
-      id: e.id!,
+    const items = rows.map<StuckItem>((e) => ({
+      id: `outbox:${e.id!}`,
       label: describeStuckEntry(e),
     }));
+
+    // Photos that failed enough times to need a human. They are named
+    // separately from outbox entries because the consequence is
+    // different: a refused booking is still recoverable from memory, a
+    // photo that never left the phone is not.
+    const photos = await db.photos_pending
+      .filter((p) => isPhotoStuck(p))
+      .toArray();
+    for (const p of photos) {
+      items.push({
+        id: `photo:${p.id}`,
+        label: "A photo hasn't been sent and is only on this device",
+      });
+    }
+    return items;
   });
 
   // Ids already actively surfaced (persisted). Loaded once on mount — the
   // durable set the first stuck-diff compares against, which is what stops
   // an already-stuck entry re-firing on reload.
-  const notifiedRef = useRef<Set<number>>(new Set());
+  const notifiedRef = useRef<Set<string>>(new Set());
   const [notifiedLoaded, setNotifiedLoaded] = useState(false);
   useEffect(() => {
     notifiedRef.current = new Set(loadNotified());
@@ -83,7 +109,7 @@ export function StuckSyncAlert() {
 
   // In-session surface. React state → persists across client navigation
   // (the shell stays mounted) and resets on a full reload.
-  const [activeIds, setActiveIds] = useState<Set<number>>(new Set());
+  const [activeIds, setActiveIds] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<StuckItem[]>([]);
 
   useEffect(() => {
@@ -120,7 +146,7 @@ export function StuckSyncAlert() {
   const headline =
     activeItems.length === 1
       ? activeItems[0].label
-      : `${activeItems.length} changes didn't reach the server`;
+      : `${activeItems.length} things didn't reach the server`;
 
   return (
     <>
