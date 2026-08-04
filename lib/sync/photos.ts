@@ -41,6 +41,7 @@
 import { db } from "@/lib/db";
 import { nextAttemptAt } from "@/lib/sync/backoff";
 import { classifyError, classifyHttpStatus } from "@/lib/sync/http-classify";
+import { photoBlobSize } from "@/lib/photos/blob-size";
 
 const CONCURRENCY = 2;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -119,9 +120,48 @@ export async function drainPhotos(): Promise<PhotoResult> {
   return result;
 }
 
-interface UploadOutcome {
+export interface UploadOutcome {
   kind: "ok" | "client-error" | "auth-expired" | "server-error" | "network";
   message?: string;
+}
+
+/**
+ * Upload ONE pending photo, ignoring both the attempt ceiling and the
+ * backoff clock.
+ *
+ * `drainPhotos` deliberately drops rows past STUCK_THRESHOLD — they need
+ * a human. This is that human's route back in. Twelve photos from four
+ * completed jobs were abandoned that way on 13 July: an RLS failure
+ * (fixed hours later) burned all five attempts in a couple of minutes,
+ * and the loop has skipped them ever since.
+ *
+ * Nothing else has to happen for the recovery to land. The object key is
+ * derived from the photo id, and the job's `photo_urls` already holds the
+ * URL for exactly that key, so a successful upload makes the existing
+ * reference resolve with NO write to the jobs table at all.
+ *
+ * A zero-byte blob is refused rather than uploaded: the cleanup pass
+ * blanks blobs for photos it believes are already uploaded, so an empty
+ * one here means the bytes are genuinely gone and overwriting the key
+ * with nothing would destroy the last evidence of what is missing.
+ */
+export async function retryPhotoUpload(
+  photoId: string
+): Promise<UploadOutcome> {
+  const photo = await db.photos_pending.get(photoId);
+  if (!photo) {
+    return { kind: "client-error", message: "Photo not found on this device" };
+  }
+  if (photo.uploaded) {
+    return { kind: "ok" };
+  }
+  if (photoBlobSize(photo.blob) === 0) {
+    return {
+      kind: "client-error",
+      message: "The image data is no longer on this device",
+    };
+  }
+  return uploadOne(photo);
 }
 
 async function uploadOne(photo: {
@@ -237,7 +277,7 @@ async function markFailed(
 async function cleanupOldBlobs(): Promise<void> {
   const cutoff = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
   const stale = await db.photos_pending
-    .filter((p) => p.uploaded && p.captured_at < cutoff && p.blob.size > 0)
+    .filter((p) => p.uploaded && p.captured_at < cutoff && photoBlobSize(p.blob) > 0)
     .toArray();
   for (const photo of stale) {
     await db.photos_pending.update(photo.id, {

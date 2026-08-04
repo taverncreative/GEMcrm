@@ -10,6 +10,7 @@ import {
 } from "@/components/settings/past-request-actions";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
 import { InviteUserForm } from "@/components/settings/invite-user-form";
+import { PhotoRecoveryCard } from "@/components/settings/photo-recovery-card";
 import { getRecentFeatureRequests } from "@/lib/data/feature-requests";
 import { BUSINESS } from "@/lib/constants/branding";
 
@@ -75,6 +76,15 @@ export default async function SettingsPage() {
     <div>
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
+      </div>
+
+      {/* Photo recovery. Renders nothing unless photos are actually stuck,
+          so this is invisible in normal use. Placed above the grid and
+          full-width because when it DOES appear it is the most urgent
+          thing on the page — and it must be reachable on the operator's
+          phone, since that is the only place the image data exists. */}
+      <div className="mt-6">
+        <PhotoRecoveryCard />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
