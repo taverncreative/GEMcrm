@@ -176,6 +176,56 @@ function SignatureView({
   );
 }
 
+/**
+ * Photo grid that hides what it cannot load.
+ *
+ * A reference whose Storage object is missing renders as a broken tile:
+ * the proxy 404s and the browser draws its torn-image placeholder. Four
+ * completed jobs currently hold twelve such references (objects that were
+ * never uploaded after a 13 July RLS failure), so the whole grid shows as
+ * broken. Dropping the tile and falling back to the normal empty state
+ * says the same true thing without looking like the app is broken.
+ *
+ * The references themselves are deliberately left alone in the database —
+ * the photo ids are the recovery key if the blobs are still on the
+ * operator's device.
+ */
+function PhotoGrid({ urls }: { urls: string[] }) {
+  const [failed, setFailed] = useState<Set<string>>(new Set());
+  const visible = urls.filter((u) => !failed.has(u));
+
+  if (urls.length === 0 || visible.length === 0) {
+    return <p className="text-sm text-gray-400">No photos captured.</p>;
+  }
+
+  return (
+    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+      {visible.map((url, idx) => (
+        <li
+          key={`${url}-${idx}`}
+          className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+        >
+          <div className="relative aspect-square w-full">
+            <Image
+              src={proxyAssetUrl(url) ?? url}
+              alt={`Photo ${idx + 1}`}
+              fill
+              sizes="(max-width: 768px) 50vw, 25vw"
+              className="object-cover"
+              unoptimized
+              onError={() =>
+                setFailed((prev) =>
+                  prev.has(url) ? prev : new Set(prev).add(url)
+                )
+              }
+            />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ServiceSheetViewOnly({
   job,
   site,
@@ -309,29 +359,7 @@ export function ServiceSheetViewOnly({
 
       {/* ── Photos ── */}
       <Section title="Photos">
-        {job.photo_urls && job.photo_urls.length > 0 ? (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-            {job.photo_urls.map((url, idx) => (
-              <li
-                key={`${url}-${idx}`}
-                className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
-              >
-                <div className="relative aspect-square w-full">
-                  <Image
-                    src={proxyAssetUrl(url) ?? url}
-                    alt={`Photo ${idx + 1}`}
-                    fill
-                    sizes="(max-width: 768px) 50vw, 25vw"
-                    className="object-cover"
-                    unoptimized
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-gray-400">No photos captured.</p>
-        )}
+        <PhotoGrid urls={job.photo_urls ?? []} />
       </Section>
 
       {/* ── Sign-off ── */}

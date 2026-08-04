@@ -1,3 +1,4 @@
+import { dropIfNoImages } from "@/lib/pdf/inline-storage-images";
 import type { Job, Site, Customer } from "@/types/database";
 import { formatCallType, RISK_LEVEL_LABELS } from "@/lib/constants/job-labels";
 import { productsForCustomer } from "@/lib/products/render";
@@ -238,8 +239,15 @@ export function renderJobReportHtml({
     </div>
   </div>` : ""}
 
-  <!-- Additional Photos -->
-  ${job.photo_urls?.length > 0 ? `
+  <!-- Photo grid, wrapped in the drop-if-empty markers. The inliner
+       removes any picture element whose object is missing, then deletes
+       this whole block if none of them resolved. Four jobs carry photo
+       references whose objects were never uploaded, and a grid of grey
+       broken-image boxes on a customer report is worse than no section.
+       Keep this comment free of the literal tag name and of the section
+       heading: the prune step keys off the tag, and both would confuse
+       anyone grepping the output. -->
+  ${job.photo_urls?.length > 0 ? dropIfNoImages(`
   <div class="section avoid-break">
     <div class="section-title">Additional Photos</div>
     <div class="section-card">
@@ -247,7 +255,7 @@ export function renderJobReportHtml({
         ${job.photo_urls.map((url) => `<img src="${escape(url)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;" />`).join("")}
       </div>
     </div>
-  </div>` : ""}
+  </div>`) : ""}
 
   <!-- Signatures -->
   <div class="section avoid-break">
